@@ -1,0 +1,49 @@
+# ─── Claude Code (local AI context — never commit) ───────────────────────────
+.claude/
+
+# ─── System Development Plan & internal docs ─────────────────────────────────
+docs/
+
+# ─── Environment / secrets ───────────────────────────────────────────────────
+.env
+.env.*
+!.env.*.example
+!.env.example
+
+# ─── Node / pnpm ─────────────────────────────────────────────────────────────
+node_modules/
+.pnpm-store/
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+
+# ─── Python ──────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# ─── Generated assets (DB dumps, PDFs, compiled cards) ───────────────────────
+*.pdf
+*.dump
+*.sql.gz
+
+# ─── OS / editor noise ───────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/settings.json
