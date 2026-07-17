@@ -1,4 +1,8 @@
-// Medical history and visit timeline — clinical staff only (RoleGuard enforced)
-export default function PatientHistoryPage({ params }: { params: { patientId: string } }) {
-  return <div>Patient History: {params.patientId} — TODO Phase 2</div>;
+export default async function PatientHistoryPage({
+  params,
+}: {
+  params: Promise<{ patientId: string }>;
+}) {
+  const { patientId } = await params;
+  return <div>Patient History: {patientId} — TODO Phase 2</div>;
 }

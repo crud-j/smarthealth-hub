@@ -1,5 +1,11 @@
 "use client";
-// Edit patient demographics — BHW+ role required
-export default function PatientEditPage({ params }: { params: { patientId: string } }) {
-  return <div>Edit Patient: {params.patientId} — TODO Phase 2</div>;
+import { use } from "react";
+
+export default function PatientEditPage({
+  params,
+}: {
+  params: Promise<{ patientId: string }>;
+}) {
+  const { patientId } = use(params);
+  return <div>Edit Patient: {patientId} — TODO Phase 2</div>;
 }

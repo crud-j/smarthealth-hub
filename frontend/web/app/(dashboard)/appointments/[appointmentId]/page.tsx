@@ -1,4 +1,8 @@
-// Appointment detail page — reschedule, status update, cancel
-export default function AppointmentDetailPage({ params }: { params: { appointmentId: string } }) {
-  return <div>Appointment Detail: {params.appointmentId} — TODO Phase 4</div>;
+export default async function AppointmentDetailPage({
+  params,
+}: {
+  params: Promise<{ appointmentId: string }>;
+}) {
+  const { appointmentId } = await params;
+  return <div>Appointment Detail: {appointmentId} — TODO Phase 4</div>;
 }

@@ -1,4 +1,8 @@
-// Patient profile page — demographics, summary, links to history/immunizations/visits
-export default function PatientProfilePage({ params }: { params: { patientId: string } }) {
-  return <div>Patient Profile: {params.patientId} — TODO Phase 2</div>;
+export default async function PatientProfilePage({
+  params,
+}: {
+  params: Promise<{ patientId: string }>;
+}) {
+  const { patientId } = await params;
+  return <div>Patient Profile: {patientId} — TODO Phase 2</div>;
 }
