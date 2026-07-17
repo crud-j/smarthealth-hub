@@ -22,7 +22,7 @@ export function parseQrPayload(raw: string): {
 }
 
 /** Synchronous fallback decoder used when Worker is unsupported. */
-export function decodeFrameOnMainThread(_imageData: ImageData): string | null {
+export function decodeFrameOnMainThread(_: ImageData): string | null {
   // TODO: Phase 3 — import jsQR directly and call synchronously
   return null;
 }
