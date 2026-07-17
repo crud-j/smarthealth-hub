@@ -1,0 +1,12 @@
+{
+  "name": "backend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "uvicorn app.main:app --reload --host 0.0.0.0 --port 8000",
+    "build": "echo 'No build step for Python backend'",
+    "lint": "ruff check app && mypy app",
+    "test": "pytest tests --cov=app --cov-report=term-missing",
+    "db:migrate": "alembic upgrade head"
+  }
+}

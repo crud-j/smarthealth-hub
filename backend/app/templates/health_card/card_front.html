@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<!--
+  Health Card — Front Face Template (Jinja2)
+  Rendered server-side by WeasyPrint for PDF generation.
+
+  Context variables (all populated server-side — never from QR/NFC payload):
+    patient.first_name, patient.last_name, patient.middle_name
+    patient.birth_date, patient.sex, patient.blood_type
+    patient.patient_code
+    qr_code_data_uri  — base64 PNG of the QR code image
+    bhc_name          — Barangay Health Center name
+    card_version      — integer card version
+    issued_at         — formatted issue date
+
+  Full implementation: Phase 3 (Health Cards).
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>SmartHealth Hub — Health Card</title>
+  <link rel="stylesheet" href="card_styles.css" />
+</head>
+<body class="card-front">
+  <!-- TODO (Phase 3): Implement card front layout with patient info + QR code -->
+  <div class="card-placeholder">
+    <p>Health Card Front — Phase 3</p>
+    <p>Patient: {{ patient.last_name }}, {{ patient.first_name }}</p>
+    <p>Code: {{ patient.patient_code }}</p>
+    <img src="{{ qr_code_data_uri }}" alt="QR Code" class="qr-code" />
+  </div>
+</body>
+</html>

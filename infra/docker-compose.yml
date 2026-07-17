@@ -1,0 +1,91 @@
+version: "3.9"
+
+# SmartHealth Hub — local development Docker Compose
+# Usage:
+#   Start infrastructure only:  docker-compose up db redis -d
+#   Start full stack:           docker-compose up --build
+#   View logs:                  docker-compose logs -f api
+
+services:
+  # ── Next.js Frontend ─────────────────────────────────────────────────────────
+  web:
+    build:
+      context: ..
+      dockerfile: infra/docker/Dockerfile.web
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api/v1
+    depends_on:
+      - api
+
+  # ── FastAPI Backend ───────────────────────────────────────────────────────────
+  api:
+    build:
+      context: ../backend
+      dockerfile: ../infra/docker/Dockerfile.api
+    ports:
+      - "8000:8000"
+    env_file:
+      - ../backend/.env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://shh_admin:changeme@db:5432/smarthealthhub
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ../backend:/app  # hot-reload in dev (remove in prod)
+
+  # ── Celery Worker ─────────────────────────────────────────────────────────────
+  celery-worker:
+    build:
+      context: ../backend
+      dockerfile: ../infra/docker/Dockerfile.worker
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=2
+    env_file:
+      - ../backend/.env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://shh_admin:changeme@db:5432/smarthealthhub
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ../backend:/app
+
+  # ── PostgreSQL Database ───────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: smarthealthhub
+      POSTGRES_USER: shh_admin
+      POSTGRES_PASSWORD: changeme
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shh_admin -d smarthealthhub"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Redis (Celery broker + backend) ──────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
+    name: smarthealth_pgdata

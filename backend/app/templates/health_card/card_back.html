@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<!--
+  Health Card — Back Face Template (Jinja2)
+  Rendered server-side by WeasyPrint.
+
+  Context variables:
+    emergency_contact.name, emergency_contact.number
+    bhc_name, bhc_address, bhc_contact
+    instructions_text  — multilingual usage instructions
+    card_version, issued_at
+
+  Full implementation: Phase 3 (Health Cards).
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>SmartHealth Hub — Health Card Back</title>
+  <link rel="stylesheet" href="card_styles.css" />
+</head>
+<body class="card-back">
+  <!-- TODO (Phase 3): Implement card back layout with BHC contact + instructions -->
+  <div class="card-placeholder">
+    <p>Health Card Back — Phase 3</p>
+    <p>{{ bhc_name }}</p>
+    <p>In case of emergency, contact: {{ emergency_contact.number }}</p>
+  </div>
+</body>
+</html>

@@ -1,49 +1,68 @@
 # ─── Claude Code (local AI context — never commit) ───────────────────────────
 .claude/
 
-# ─── System Development Plan & internal docs ─────────────────────────────────
-docs/
-
 # ─── Environment / secrets ───────────────────────────────────────────────────
 .env
 .env.*
 !.env.*.example
 !.env.example
+!.env.local.example
 
 # ─── Node / pnpm ─────────────────────────────────────────────────────────────
 node_modules/
 .pnpm-store/
+.npm/
 .next/
 out/
 dist/
 build/
 *.tsbuildinfo
+.turbo/
+pnpm-debug.log*
 
 # ─── Python ──────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *.pyo
+*.pyd
+*.so
 .venv/
 venv/
 env/
+ENV/
 *.egg-info/
-dist/
+.eggs/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 htmlcov/
 .coverage
 coverage.xml
+pip-log.txt
+
+# ─── Docker ──────────────────────────────────────────────────────────────────
+.dockerignore
 
 # ─── Generated assets (DB dumps, PDFs, compiled cards) ───────────────────────
 *.pdf
 *.dump
 *.sql.gz
+*.log
+logs/
 
 # ─── OS / editor noise ───────────────────────────────────────────────────────
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
 Thumbs.db
+Desktop.ini
 *.swp
 *.swo
+*~
 .idea/
 .vscode/settings.json
+
+# ─── Alembic generated cache ─────────────────────────────────────────────────
+backend/alembic/versions/__pycache__/

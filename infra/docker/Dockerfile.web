@@ -1,0 +1,26 @@
+FROM node:20-alpine AS base
+
+# Install pnpm
+RUN npm install -g pnpm
+
+WORKDIR /app
+
+# Copy workspace manifests first (layer cache)
+COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml ./
+COPY frontend/web/package.json ./frontend/web/
+COPY packages/shared-types/package.json ./packages/shared-types/
+
+# Install all workspace dependencies
+RUN pnpm install --frozen-lockfile
+
+# Copy source files
+COPY frontend/web ./frontend/web
+COPY packages/shared-types ./packages/shared-types
+
+# Build the Next.js application
+WORKDIR /app/frontend/web
+RUN pnpm build
+
+EXPOSE 3000
+
+CMD ["pnpm", "start"]

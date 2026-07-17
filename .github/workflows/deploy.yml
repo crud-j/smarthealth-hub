@@ -1,0 +1,36 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        default: "staging"
+        type: choice
+        options:
+          - staging
+          - production
+
+jobs:
+  deploy:
+    name: Deploy to ${{ github.event.inputs.environment }}
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # TODO (Phase 6 — Hardening): Implement deployment steps:
+      #
+      # - Build and push Docker images to registry
+      # - SSH to server or use cloud deploy action
+      # - Run: docker-compose -f infra/docker-compose.yml -f infra/docker-compose.prod.yml pull
+      # - Run: docker-compose up -d --no-build
+      # - Run: docker-compose exec api alembic upgrade head
+      # - Health check: curl https://<domain>/health
+      # - Notify team on Slack/SMS on success or failure
+
+      - name: Placeholder
+        run: echo "Deploy pipeline — implementation pending Phase 6"

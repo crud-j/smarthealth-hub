@@ -1,0 +1,22 @@
+FROM python:3.12-slim
+
+# WeasyPrint system dependencies (worker may generate PDFs for bulk card runs)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpango-1.0-0 \
+    libpangoft2-1.0-0 \
+    libffi-dev \
+    libcairo2 \
+    libgdk-pixbuf2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python runtime dependencies (no dev extras for worker)
+COPY pyproject.toml ./
+RUN pip install --no-cache-dir -e "."
+
+# Copy application source
+COPY . .
+
+CMD ["celery", "-A", "app.workers.celery_app", "worker", "--loglevel=info"]

@@ -1,0 +1,44 @@
+/*
+ * Health Card Styles — used by WeasyPrint PDF renderer.
+ *
+ * Card dimensions: CR80 standard — 85.6mm x 54mm (standard ID card size).
+ * Resolution target: 300 DPI for print quality.
+ *
+ * Full implementation: Phase 3 (Health Cards).
+ */
+
+/* TODO (Phase 3): Implement full card layout with:
+   - @page rule for CR80 dimensions
+   - BHC color scheme (teal/blue-green primary)
+   - QR code positioning (bottom-right corner, 20mm x 20mm)
+   - Patient photo placeholder (top-left)
+   - Typography sized for small-format print
+   - High-contrast text for accessibility
+*/
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+@page {
+  size: 85.6mm 54mm;
+  margin: 0;
+}
+
+body {
+  font-family: "DejaVu Sans", Arial, sans-serif;
+  font-size: 8pt;
+  color: #0f172a;
+}
+
+.card-placeholder {
+  padding: 4mm;
+  border: 1px dashed #0d9488;
+}
+
+.qr-code {
+  width: 20mm;
+  height: 20mm;
+}
