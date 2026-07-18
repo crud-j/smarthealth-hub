@@ -1,43 +1,72 @@
 """
-Alembic migration environment.
+Alembic migration environment — synchronous psycopg2 connection.
 
-DATABASE_URL is loaded from app.core.config.settings so the same
-environment variable (.env file) controls both the running API and migrations.
+asyncpg (the async driver used by the FastAPI runtime) has a known
+incompatibility with Docker Desktop networking on Windows that causes
+WinError 64 / ConnectionResetError during SSL negotiation even when
+ssl=disable is requested.  Alembic does not need async I/O, so we use
+psycopg2 (synchronous) for migrations only.  The FastAPI app continues
+to use asyncpg at runtime — this file does not affect that.
 
-To generate a new migration after adding/changing models:
-  alembic revision --autogenerate -m "describe_the_change"
+DATABASE_URL is loaded from app.core.config.settings (.env) and the
+asyncpg driver prefix is replaced with psycopg2 before connecting.
 
-To apply migrations:
+Run migrations from the backend/ directory:
   alembic upgrade head
+  alembic revision --autogenerate -m "describe_the_change"
+  alembic downgrade -1
 """
 
-import asyncio
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import pool
+from sqlalchemy import create_engine, pool
 from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import async_engine_from_config
 
-# Load alembic.ini logging config
+# ---------------------------------------------------------------------------
+# Alembic config / logging
+# ---------------------------------------------------------------------------
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# ── Load DATABASE_URL from application settings ───────────────────────────────
+# ---------------------------------------------------------------------------
+# Load DATABASE_URL and convert asyncpg → psycopg2
+# ---------------------------------------------------------------------------
 from app.core.config import settings  # noqa: E402
 
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+# The .env uses postgresql+asyncpg://... for the FastAPI runtime.
+# Replace the driver with psycopg2 so Alembic uses a synchronous connection.
+_async_url: str = settings.DATABASE_URL
+_sync_url: str = _async_url.replace(
+    "postgresql+asyncpg://", "postgresql+psycopg2://"
+).replace(
+    "postgresql://", "postgresql+psycopg2://"
+)
+# Strip any asyncpg-specific query params that psycopg2 doesn't understand.
+if "?" in _sync_url:
+    _base, _qs = _sync_url.split("?", 1)
+    _kept = "&".join(
+        p for p in _qs.split("&")
+        if not p.startswith("ssl=")
+    )
+    _sync_url = f"{_base}?{_kept}" if _kept else _base
 
-# ── Target metadata ───────────────────────────────────────────────────────────
-# Wire in Base.metadata once models exist (Phase 1+):
-#   from app.db.base import Base
-#   from app.models import *  # noqa: F401, F403 — ensures all models are imported
-#   target_metadata = Base.metadata
-target_metadata = None  # Phase 0 scaffold — no models yet
+config.set_main_option("sqlalchemy.url", _sync_url)
+
+# ---------------------------------------------------------------------------
+# Register all ORM models with Base.metadata
+# ---------------------------------------------------------------------------
+from app.db.base import Base  # noqa: E402
+import app.models  # noqa: E402, F401
+
+target_metadata = Base.metadata
 
 
-# ── Offline migration (generates SQL script without DB connection) ─────────────
+# ---------------------------------------------------------------------------
+# Offline migration
+# ---------------------------------------------------------------------------
+
 def run_migrations_offline() -> None:
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
@@ -46,37 +75,40 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
+        compare_server_default=True,
     )
     with context.begin_transaction():
         context.run_migrations()
 
 
-# ── Online migration (connects to DB and applies changes) ─────────────────────
+# ---------------------------------------------------------------------------
+# Online migration (synchronous — no asyncio needed)
+# ---------------------------------------------------------------------------
+
 def do_run_migrations(connection: Connection) -> None:
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
         compare_type=True,
+        compare_server_default=True,
     )
     with context.begin_transaction():
         context.run_migrations()
 
 
-async def run_async_migrations() -> None:
-    connectable = async_engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
+def run_migrations_online() -> None:
+    connectable = create_engine(
+        config.get_main_option("sqlalchemy.url"),  # type: ignore[arg-type]
         poolclass=pool.NullPool,
     )
-    async with connectable.connect() as connection:
-        await connection.run_sync(do_run_migrations)
-    await connectable.dispose()
+    with connectable.connect() as connection:
+        do_run_migrations(connection)
+    connectable.dispose()
 
 
-def run_migrations_online() -> None:
-    asyncio.run(run_async_migrations())
-
-
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 if context.is_offline_mode():
     run_migrations_offline()
 else:

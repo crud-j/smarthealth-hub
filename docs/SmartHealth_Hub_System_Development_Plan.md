@@ -531,6 +531,7 @@ erDiagram
         uuid id PK
         string patient_code
         string first_name
+        string middle_name
         string last_name
         date birth_date
         string sex
@@ -538,10 +539,13 @@ erDiagram
         string mobile_number
         text address
         string guardian_name
+        string guardian_contact
         string philhealth_no
+        string philhealth_member_type
         boolean is_pwd
         boolean is_senior
         boolean is_pregnant
+        boolean is_active
         timestamptz created_at
         timestamptz updated_at
         uuid created_by FK
@@ -584,9 +588,19 @@ erDiagram
         uuid id PK
         uuid patient_id FK
         uuid recorded_by FK
+        string case_no
         timestamptz visit_date
         string visit_type
+        string blood_pressure
+        numeric temperature
+        int pulse_rate
+        int respiratory_rate
+        int oxygen_saturation
+        numeric weight_kg
+        numeric height_cm
         text chief_complaint
+        text past_medical_history
+        text present_medical_history
         text diagnosis
         text treatment_notes
     }
@@ -692,13 +706,15 @@ CREATE TABLE patients (
     birth_date DATE NOT NULL,
     sex VARCHAR(10) NOT NULL CHECK (sex IN ('male', 'female')),
     civil_status VARCHAR(20),
-    mobile_number VARCHAR(20),
-    address TEXT NOT NULL,
+    mobile_number VARCHAR(20),                  -- "CONTACT NO." on the RHU form (+63xxxxxxxxxx format)
+    address TEXT NOT NULL,                      -- "COMPLETE ADDRESS" on the RHU form
     guardian_name VARCHAR(150),
     guardian_contact VARCHAR(20),
     philhealth_no VARCHAR(20),
+    philhealth_member_type VARCHAR(20)          -- from RHU form "PHILHEALTH MEMBER / DEPENDENTS"
+        CHECK (philhealth_member_type IN ('member', 'dependent')),
     is_pwd BOOLEAN NOT NULL DEFAULT FALSE,
-    is_senior BOOLEAN NOT NULL DEFAULT FALSE,
+    is_senior BOOLEAN NOT NULL DEFAULT FALSE,   -- auto-set to TRUE when age >= 60 on registration
     is_pregnant BOOLEAN NOT NULL DEFAULT FALSE,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_by UUID REFERENCES users(id),
@@ -762,20 +778,37 @@ CREATE INDEX idx_appt_status ON appointments(status);
 
 -- ==========================
 -- VISITS (walk-in / check-in log)
+-- Aligns with RHU Patient Record visit log: one row per consultation.
+-- Vital signs columns capture the VITAL SIGNS column from the physical form.
+-- case_no mirrors the CASE NO. column (auto-generated: BHC-VISIT-YYYY-NNNNNN).
 -- ==========================
 CREATE TABLE visits (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     patient_id UUID NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
     recorded_by UUID REFERENCES users(id),
+    case_no VARCHAR(30) UNIQUE,                  -- RHU form CASE NO. (auto-gen: BHC-VISIT-2026-000001)
     visit_date TIMESTAMPTZ NOT NULL DEFAULT now(),
-    visit_type VARCHAR(50) NOT NULL,            -- 'consultation', 'immunization', 'prenatal'
+    visit_type VARCHAR(50) NOT NULL,             -- 'consultation', 'immunization', 'prenatal'
+    -- Vital signs (VITAL SIGNS column on RHU form)
+    blood_pressure VARCHAR(20),                  -- e.g. "120/80 mmHg"
+    temperature NUMERIC(4,1),                    -- degrees Celsius
+    pulse_rate INT,                              -- beats per minute
+    respiratory_rate INT,                        -- breaths per minute
+    oxygen_saturation INT,                       -- SpO2 %
+    weight_kg NUMERIC(5,2),                      -- kilograms
+    height_cm NUMERIC(5,1),                      -- centimeters
+    -- Complaint and history (CHIEF COMPLAINT / PAST/PRESENT MEDICAL HISTORY on RHU form)
     chief_complaint TEXT,
+    past_medical_history TEXT,                   -- patient's prior conditions relevant to this visit
+    present_medical_history TEXT,                -- current history of presenting illness
+    -- Diagnosis and treatment (DIAGNOSIS / TREATMENT column on RHU form) — AES-256-GCM encrypted
     diagnosis TEXT,
     treatment_notes TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_visits_patient ON visits(patient_id);
 CREATE INDEX idx_visits_date ON visits(visit_date);
+CREATE INDEX idx_visits_case_no ON visits(case_no);
 
 -- ==========================
 -- HEALTH CARDS (Hybrid NFC + QR)
@@ -887,14 +920,46 @@ Prioritized using MoSCoW, grouped by module, each item traceable to a thesis obj
 | Could | Biometric WebAuthn as an alternative MFA factor (future) |
 
 ### 5.2 Patient Record Management (Obj. 1, 6)
+
+**Real-world source:** This module digitizes the physical **"Rural Health Unit — Patubig, Municipal Health Office, Marilao, Bulacan — Sta Rosa 1 BHS — PATIENT RECORD"** form. Every field on that form maps to a database column; paper visit log rows become `visits` table rows.
+
+**All fields captured from the RHU form:**
+
+*Patient header section (registration-time demographics):*
+- DATE — `patients.created_at` (registration timestamp)
+- PATIENT'S FULL NAME: First Name → `first_name`, Middle Name → `middle_name`, Last Name → `last_name`
+- AGE — computed from `birth_date` at query time; stored as `is_senior` (≥60) flag
+- SEX — `sex` ('male' / 'female')
+- BIRTHDAY — `birth_date`
+- PHILHEALTH MEMBER / DEPENDENTS: YES/NO → existence of `philhealth_no`; MEMBER/DEPENDENT → `philhealth_member_type` ('member' / 'dependent')
+- CONTACT NO. — `mobile_number` (Philippine mobile format: +63xxxxxxxxxx)
+- COMPLETE ADDRESS — `address`
+
+*Additional registration fields (system-captured, not on the paper form but required for operations):*
+- `patient_code` — auto-generated unique identifier (BHC-YYYY-NNNNNN)
+- `civil_status` — marital status
+- `guardian_name`, `guardian_contact` — for minors, seniors, or PWD patients
+- `is_pwd` — Person with Disability flag
+- `is_pregnant` — current pregnancy flag (updated per visit for prenatal tracking)
+
+*Visit/consultation log row (repeating table on the physical form):*
+- CASE NO. → `visits.case_no` (auto-generated: BHC-VISIT-YYYY-NNNNNN)
+- DATE / TIME → `visits.visit_date`
+- VITAL SIGNS → `blood_pressure`, `temperature` (°C), `pulse_rate` (bpm), `respiratory_rate` (bpm), `oxygen_saturation` (SpO2 %), `weight_kg`, `height_cm`
+- CHIEF COMPLAINT → `visits.chief_complaint`
+- PAST MEDICAL HISTORY → `visits.past_medical_history`
+- PRESENT MEDICAL HISTORY → `visits.present_medical_history`
+- DIAGNOSIS → `visits.diagnosis` (AES-256-GCM encrypted)
+- TREATMENT → `visits.treatment_notes` (AES-256-GCM encrypted)
+
 | Priority | Feature |
 |---|---|
-| Must | Patient registration (demographics, contact, guardian info) |
+| Must | Patient registration (all RHU form fields including PhilHealth type, contact, address, guardian info) |
 | Must | Search/filter patients (name, patient code, mobile number) — instant client-side refinement offloaded to a Web Worker (§7.4) so typing never lags |
 | Must | View/edit full patient profile |
 | Must | Medical history log (conditions, severity, diagnosis date) |
 | Must | Immunization records with dose tracking |
-| Must | Visit/consultation logging |
+| Must | Visit/consultation logging (with full vital signs, case_no, past/present history, encrypted diagnosis/treatment) |
 | Should | Flag vulnerable groups (senior, PWD, pregnant) for prioritized queueing |
 | Should | Duplicate-patient detection on registration (fuzzy match on name + birthdate) |
 | Could | Patient self-service portal (view own record via OTP-verified access) |
@@ -984,21 +1049,30 @@ All endpoints are prefixed `/api/v1`. Auth column: 🔓 Public · 🔑 Authentic
 
 | Method | Endpoint | Description | Auth |
 |---|---|---|---|
-| GET | `/patients` | List/search/paginate patients | 🔑 |
-| POST | `/patients` | Register new patient (auto-triggers card generation) | 🛡️ BHW+ |
-| GET | `/patients/{id}` | Get full patient profile | 🔑 |
-| PUT | `/patients/{id}` | Update patient demographics | 🛡️ BHW+ |
-| DELETE | `/patients/{id}` | Soft-deactivate patient record | 🛡️ Admin |
-| GET | `/patients/{id}/verify` | Verify identity via card scan (NFC/QR), returns summary | 🔑 |
+| GET | `/patients` | List/search/paginate patients; query params: `q`, `page`, `page_size`, `is_senior`, `is_pwd`, `is_pregnant` | 🔑 |
+| POST | `/patients` | Register new patient; auto-generates `patient_code`; response: `PatientResponse` | 🛡️ BHW+ |
+| GET | `/patients/{id}` | Get full patient profile; audit log `VIEW_PHI` | 🔑 |
+| PUT | `/patients/{id}` | Update patient demographics; audit log `UPDATE` | 🛡️ BHW+ |
+| DELETE | `/patients/{id}` | Soft-deactivate (`is_active=false`); audit log `DELETE` | 🛡️ Admin |
+| GET | `/patients/{id}/verify` | Verify identity via card scan (NFC/QR), returns `PatientVerifySummary` | 🔑 |
+| GET | `/patients/{id}/visits` | List visit summaries (no PHI in list — `VisitSummary`) | 🔑 |
+| POST | `/patients/{id}/visits` | Log a new visit/consultation with vital signs; auto-generates `case_no` | 🛡️ Clinical/BHW |
 
 ### 6.3 Medical History & Visits
+
+Aligns with the RHU Patient Record form. Visit rows capture the full repeating visit log from the physical form including vital signs, case number, and separate past/present medical history fields.
 
 | Method | Endpoint | Description | Auth |
 |---|---|---|---|
 | GET | `/patients/{id}/medical-history` | List conditions | 🔑 |
-| POST | `/patients/{id}/medical-history` | Add condition entry | 🛡️ Clinical staff |
-| GET | `/patients/{id}/visits` | List visit history | 🔑 |
-| POST | `/patients/{id}/visits` | Log a new visit/consultation | 🛡️ Clinical/BHW |
+| POST | `/patients/{id}/medical-history` | Add condition entry; `notes` encrypted AES-256-GCM | 🛡️ Clinical staff |
+| GET | `/patients/{id}/visits` | List visit history (no PHI — `VisitSummary`: case_no, date, type, chief_complaint only) | 🔑 |
+| POST | `/patients/{id}/visits` | Log a new visit; body includes `VitalSigns`, `case_no` (auto-gen if omitted), `chief_complaint`, `past_medical_history`, `present_medical_history`, `diagnosis` (encrypted), `treatment_notes` (encrypted) | 🛡️ Clinical/BHW |
+| GET | `/visits/{visit_id}` | Get full visit record with decrypted PHI fields; audit log `VIEW_PHI` | 🛡️ Clinical |
+
+**VitalSigns sub-model fields:** `blood_pressure` (e.g. "120/80 mmHg"), `temperature` (°C, NUMERIC 4.1), `pulse_rate` (bpm, INT), `respiratory_rate` (bpm, INT), `oxygen_saturation` (SpO2 %, INT), `weight_kg` (NUMERIC 5.2), `height_cm` (NUMERIC 5.1) — all optional, matching the VITAL SIGNS column on the RHU form.
+
+**case_no auto-generation pattern:** `BHC-VISIT-{YEAR}-{6-digit-zero-padded-seq}` — e.g. `BHC-VISIT-2026-000001`. Generated server-side by querying `MAX(case_no)` on the `visits` table; callers may omit it to have it auto-assigned.
 
 ### 6.4 Immunizations
 

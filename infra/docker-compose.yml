@@ -1,5 +1,3 @@
-version: "3.9"
-
 # SmartHealth Hub — local development Docker Compose
 # Usage:
 #   Start infrastructure only:  docker-compose up db redis -d
@@ -29,7 +27,7 @@ services:
     env_file:
       - ../backend/.env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://shh_admin:changeme@db:5432/smarthealthhub
+      - DATABASE_URL=postgresql+asyncpg://shh_admin:SmartHealthHub@localhost:5433/smarthealthhub
       - REDIS_URL=redis://redis:6379/0
     depends_on:
       db:
@@ -48,7 +46,7 @@ services:
     env_file:
       - ../backend/.env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://shh_admin:changeme@db:5432/smarthealthhub
+      - DATABASE_URL=postgresql+asyncpg://shh_admin:SmartHealthHub@localhost:5433/smarthealthhub
       - REDIS_URL=redis://redis:6379/0
     depends_on:
       db:
@@ -64,9 +62,9 @@ services:
     environment:
       POSTGRES_DB: smarthealthhub
       POSTGRES_USER: shh_admin
-      POSTGRES_PASSWORD: changeme
+      POSTGRES_PASSWORD: SmartHealthHub
     ports:
-      - "5432:5432"
+      - "5445:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
