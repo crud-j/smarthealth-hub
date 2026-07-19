@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Cookie, Depends, Request, Response
+from fastapi import APIRouter, Cookie, Depends, Form, Request, Response
 
 from app.core.exceptions import UnauthorizedError
 from app.core.logging import get_logger
@@ -194,6 +194,98 @@ async def verify_otp(
         db=db,
         user_id=body.user_id,
         otp_code=body.otp_code,
+        ip_address=ip,
+    )
+    await db.commit()
+
+    _set_auth_cookies(response, access_token=access_token, refresh_token=refresh_token)
+
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        token_type="bearer",
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /auth/swagger-token — combined login + OTP for Swagger UI Authorize dialog
+# ---------------------------------------------------------------------------
+# This endpoint speaks the OAuth2 password-grant wire format so Swagger's
+# built-in "Authorize" button can call it directly and store the JWT without
+# any manual copy-paste.
+#
+# How to use in Swagger UI:
+#   1. Call POST /auth/login first to trigger the OTP (watch the server console
+#      for the printed OTP code in the development environment).
+#   2. Click the "Authorize 🔒" button at the top of Swagger UI.
+#   3. Scroll to the "OAuth2 (swaggerOAuth2)" section.
+#   4. Fill in:
+#        Username  → your email address
+#        Password  → your password
+#        client_secret → the 6-digit OTP from the console / SMS
+#   5. Click "Authorize" — Swagger calls this endpoint, receives the token,
+#      and automatically injects it into every subsequent request.
+#
+# Security note: This endpoint is intentionally NOT rate-limited separately —
+# the underlying auth_service.login() and verify_otp_and_issue_tokens() calls
+# carry their own rate limits.  It is also tagged with security=[] so it
+# appears without the lock icon (public endpoint, same as /auth/login).
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/swagger-token",
+    response_model=TokenResponse,
+    summary="Swagger UI: combined login + OTP → JWT (OAuth2 password grant)",
+    description=(
+        "**For Swagger UI use only.** Combines the two-step MFA login into a "
+        "single OAuth2-compatible request so the built-in Authorize dialog can "
+        "store the JWT automatically.\n\n"
+        "**Workflow:**\n"
+        "1. Call `POST /auth/login` to trigger the OTP dispatch.\n"
+        "2. Click the **Authorize 🔒** button → find **OAuth2 (swaggerOAuth2)**.\n"
+        "3. Enter `username` (email), `password`, and paste the OTP into "
+        "**client_secret**.\n"
+        "4. Click Authorize — the token is stored and used for all requests."
+    ),
+    openapi_extra={"security": []},  # public — no lock icon required
+)
+async def swagger_token(
+    request: Request,
+    response: Response,
+    db: DbDep,
+    username: Annotated[str, Form(description="Staff email address")],
+    password: Annotated[str, Form(description="Account password")],
+    client_secret: Annotated[
+        str,
+        Form(description="6-digit OTP received via SMS / printed in dev console"),
+    ] = "",
+    # OAuth2 form fields Swagger sends automatically — accepted but ignored.
+    grant_type: Annotated[str | None, Form()] = None,
+    client_id: Annotated[str | None, Form()] = None,
+    scope: Annotated[str, Form()] = "",
+) -> TokenResponse:
+    ip = request.client.host if request.client else "unknown"
+
+    # Step 1 — validate credentials and dispatch OTP.
+    user_id = await auth_service.login(
+        db=db,
+        email=username,
+        password=password,
+        ip_address=ip,
+    )
+    await db.commit()
+
+    if not client_secret:
+        raise UnauthorizedError(
+            "OTP is required. Enter the 6-digit code in the 'client_secret' field."
+        )
+
+    # Step 2 — verify OTP and issue tokens.
+    access_token, refresh_token = await auth_service.verify_otp_and_issue_tokens(
+        db=db,
+        user_id=user_id,
+        otp_code=client_secret,
         ip_address=ip,
     )
     await db.commit()

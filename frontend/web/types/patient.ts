@@ -34,6 +34,12 @@ export interface Patient {
   isActive: boolean;
   createdAt: string; // ISO datetime string
   updatedAt: string; // ISO datetime string
+  /**
+   * Root-relative URL path to the patient's profile photo JPEG,
+   * e.g. "/media/patient_photos/<uuid>.jpg".
+   * Null/undefined if no photo has been uploaded yet.
+   */
+  photoPath?: string | null;
 }
 
 // ---------------------------------------------------------------------------

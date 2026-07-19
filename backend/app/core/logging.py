@@ -133,6 +133,8 @@ def _configure_logging(log_level: str = "INFO") -> None:
     # Quiet down overly verbose third-party loggers.
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
     logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+    logging.getLogger("weasyprint").setLevel(logging.WARNING)
+    logging.getLogger("fontTools").setLevel(logging.WARNING)
 
 
 # Run once at import time with default level; callers can invoke again with

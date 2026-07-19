@@ -45,6 +45,7 @@ from app.core.security import (
     verify_password,
 )
 from app.services import audit_service, mfa_service
+from app.services.email_service import email_service
 
 if TYPE_CHECKING:
     from app.models.user import User
@@ -156,18 +157,18 @@ async def login(
         purpose="login",
     )
 
-    # --- Phase 1: SMS stub ---
-    # Real Semaphore dispatch is wired in Phase 4 (SMS & Appointments).
-    # During development, copy the OTP from the server console log below.
-    logger.info(
-        "OTP for development (Phase 1 stub — replace with Semaphore in Phase 4)",
-        extra={
-            "event": "OTP_STUB",
-            "user_email": user.email,
-            "user_id": str(user.id),
-            "otp_code": plain_otp,  # visible in dev console; removed in Phase 4
-        },
+    # Send OTP via Gmail SMTP.  Falls back to console log if email is not
+    # configured (EMAIL_HOST_USER empty) so dev still works without Gmail.
+    sent = await email_service.send_otp_email(
+        to_address=user.email,
+        otp_code=plain_otp,
+        purpose="login",
     )
+    if not sent:
+        logger.info(
+            "OTP (email not configured — console fallback)",
+            extra={"event": "OTP_CONSOLE", "user_email": user.email, "otp_code": plain_otp},
+        )
 
     await audit_service.write_audit_log(
         db=db,
@@ -175,7 +176,7 @@ async def login(
         action="OTP_SENT",
         entity_type="user",
         entity_id=user.id,
-        metadata={"method": "sms_stub", "purpose": "login"},
+        metadata={"method": "email", "purpose": "login"},
         ip_address=ip_address,
     )
 
@@ -356,16 +357,16 @@ async def resend_otp(
         purpose="login",
     )
 
-    # Phase 1 stub — log instead of sending SMS.
-    logger.info(
-        "OTP resent (Phase 1 stub)",
-        extra={
-            "event": "OTP_STUB",
-            "user_email": user.email,
-            "user_id": str(user.id),
-            "otp_code": plain_otp,
-        },
+    sent = await email_service.send_otp_email(
+        to_address=user.email,
+        otp_code=plain_otp,
+        purpose="login",
     )
+    if not sent:
+        logger.info(
+            "OTP resent (email not configured — console fallback)",
+            extra={"event": "OTP_CONSOLE", "user_email": user.email, "otp_code": plain_otp},
+        )
 
     await audit_service.write_audit_log(
         db=db,
@@ -373,7 +374,7 @@ async def resend_otp(
         action="OTP_SENT",
         entity_type="user",
         entity_id=user.id,
-        metadata={"method": "sms_stub", "purpose": "login", "trigger": "resend"},
+        metadata={"method": "email", "purpose": "login", "trigger": "resend"},
         ip_address=ip_address,
     )
 
@@ -412,16 +413,16 @@ async def initiate_password_reset(
         purpose="password_reset",
     )
 
-    # Phase 1 stub.
-    logger.info(
-        "Password-reset OTP (Phase 1 stub)",
-        extra={
-            "event": "OTP_STUB",
-            "user_email": user.email,
-            "user_id": str(user.id),
-            "otp_code": plain_otp,
-        },
+    sent = await email_service.send_otp_email(
+        to_address=user.email,
+        otp_code=plain_otp,
+        purpose="password_reset",
     )
+    if not sent:
+        logger.info(
+            "Password-reset OTP (email not configured — console fallback)",
+            extra={"event": "OTP_CONSOLE", "user_email": user.email, "otp_code": plain_otp},
+        )
 
     await audit_service.write_audit_log(
         db=db,
@@ -429,7 +430,7 @@ async def initiate_password_reset(
         action="PASSWORD_RESET_REQUESTED",
         entity_type="user",
         entity_id=user.id,
-        metadata={"method": "sms_stub"},
+        metadata={"method": "email"},
         ip_address=ip_address,
     )
 

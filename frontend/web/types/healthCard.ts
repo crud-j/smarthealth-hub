@@ -95,6 +95,33 @@ export interface PatientVerifySummary {
 }
 
 // ---------------------------------------------------------------------------
+// Extended verify response — returned when ?full=true (authenticated staff)
+// ---------------------------------------------------------------------------
+
+/**
+ * Extended patient summary returned by POST /health-cards/verify?full=true.
+ *
+ * Adds patient_id, birth_date, mobile_number, and photo_url to the base
+ * PatientVerifySummary.  A PHI_VIEW audit log entry is written server-side
+ * when this response is issued.
+ *
+ * photo_url is a relative path ("/media/patient_photos/<uuid>.jpg") that
+ * must be prefixed with the API base host to form an absolute URL.
+ */
+export interface PatientVerifySummaryFull extends PatientVerifySummary {
+  /** UUID string — used to build navigation links to the full patient record. */
+  patient_id: string;
+  /** ISO date "YYYY-MM-DD" */
+  birth_date: string;
+  mobile_number: string | null;
+  /**
+   * Relative path "/media/patient_photos/<uuid>.jpg" or null.
+   * Prefix with API host (e.g. http://192.168.100.6:8000) to form absolute URL.
+   */
+  photo_url: string | null;
+}
+
+// ---------------------------------------------------------------------------
 // NFC link request
 // ---------------------------------------------------------------------------
 

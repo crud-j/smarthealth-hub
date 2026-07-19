@@ -106,6 +106,10 @@ class CardGenerateResponse(BaseSchema):
     """
 
     card: HealthCardResponse
+    # The signed URL encoded inside the QR image — useful for testing in Swagger UI
+    signed_url: str = Field(
+        description="Full HMAC-signed URL encoded in the QR code, e.g. http://host/verify?pid=...&v=...&sig=..."
+    )
     # base64 PNG data URI — display immediately, no second round-trip needed
     qr_data_uri: str = Field(
         description="data:image/png;base64,... — QR code for the card front"
@@ -142,3 +146,51 @@ class PatientVerifySummary(BaseSchema):
         None, description="Timestamp of the most recent visit record, or None"
     )
     card_status: str = Field(description="'active', 'lost', 'reissued', or 'revoked'")
+
+
+class PatientVerifySummaryFull(PatientVerifySummary):
+    """
+    Extended verify response returned when ``full=true`` is passed to
+    POST /health-cards/verify by authenticated staff.
+
+    Includes additional PHI fields needed to render the Patient Quick View
+    screen (navigation links, photo, contact number, formatted birth date).
+    Access is gated behind JWT auth + audit log exactly like any PHI view.
+
+    Fields added beyond PatientVerifySummary:
+      - patient_id:    UUID string — used to build navigation links to the
+                       full patient record, new visit, and appointment booking.
+      - birth_date:    ISO date string "YYYY-MM-DD" — for formatted display.
+      - mobile_number: Contact number (may be null).
+      - photo_url:     Relative URL "/media/patient_photos/<uuid>.jpg" or None.
+                       Frontend constructs the absolute URL by prepending the
+                       API base host.  Never contains a full backend URL so
+                       the value remains environment-agnostic.
+
+    Security note: This schema is only returned on authenticated calls with
+    full=true.  The PHI-VIEW audit log entry is written before the response
+    is sent so the disclosure is always traceable.
+    """
+
+    patient_id: str = Field(description="Patient UUID string — for navigation links")
+    birth_date: str = Field(description="ISO date 'YYYY-MM-DD'")
+    mobile_number: str | None = Field(None, description="Patient contact number")
+    photo_url: str | None = Field(
+        None,
+        description="Relative URL path '/media/patient_photos/<uuid>.jpg' or None",
+    )
+
+
+class PublicVerifyResponse(BaseSchema):
+    """
+    Returned by GET /health-cards/verify/public — the unauthenticated endpoint
+    that mobile phones land on after scanning the health card QR code.
+
+    Intentionally minimal: only enough to confirm the card is genuine.
+    No age, sex, priority flags, or visit history exposed to anonymous callers.
+    """
+
+    valid: bool = Field(description="True if the HMAC signature is valid and the card is active.")
+    full_name: str | None = Field(None, description="Patient name — only set when valid=True.")
+    patient_code: str | None = Field(None, description="e.g. BHC-2026-000042 — only set when valid=True.")
+    card_status: str | None = Field(None, description="'active', 'reissued', etc. — only set when valid=True.")

@@ -1,31 +1,8 @@
 <!DOCTYPE html>
 <!--
   Health Card — Front Face Template (Jinja2 + WeasyPrint)
-
   Rendered server-side by pdf_renderer.render_health_card_pdf().
-  All context variables are populated from the DB by the service layer —
-  NEVER from the QR or NFC payload.
-
-  Context variables:
-    patient.first_name           (str)
-    patient.last_name            (str)
-    patient.middle_name          (str | None)
-    patient.patient_code         (str)  e.g. "BHC-2026-000042"
-    patient.sex                  (str)  "male" | "female"
-    patient.age                  (int)  computed from birth_date
-    patient.birth_date_display   (str)  e.g. "January 15, 1985"
-    patient.mobile_number        (str | None)
-    patient.philhealth_no        (str | None)
-    patient.philhealth_member_type (str | None)  "member" | "dependent"
-    card.card_number             (str)  e.g. "BHC-2026-000042"
-    card.card_version            (int)
-    card.issued_at               (str)  formatted date string
-    qr_code                      (str)  data URI — "data:image/png;base64,..."
-
-  Security invariant: qr_code data URI encodes ONLY the HMAC-signed URL
-  (patient_id + card_version + sig).  No PHI appears in the QR payload.
-  The template must NOT display any PHI adjacent to the QR image in a way
-  that could be mistaken for QR payload data.
+  Security invariant: qr_code data URI encodes ONLY the HMAC-signed URL.
 -->
 <html lang="en">
 <head>
@@ -38,67 +15,87 @@
 
   <!-- ── Header strip ──────────────────────────────────────────────────── -->
   <div class="front-header">
-    <span class="org-name">SmartHealth Hub</span>
-    <span class="bhc-title">Barangay Health Center</span>
-    <!-- NFC contactless icon (Unicode wave symbol) -->
-    <span class="nfc-icon" title="NFC-enabled">&#x1F4F6;</span>
+    <div class="header-brand">
+      <span class="org-name">SmartHealth Hub</span>
+      <span class="bhc-title">{{ patient.barangay_name if patient.barangay_name else "Barangay Health Center" }}</span>
+    </div>
+    <!-- Contactless/NFC Visual Indicator Wave -->
+    <div class="nfc-badge">
+      <svg class="nfc-svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M8.5 16.5a7 7 0 0 1 0-9"></path>
+        <path d="M12 19a10.5 10.5 0 0 1 0-14"></path>
+        <path d="M15.5 21.5a14 14 0 0 1 0-19"></path>
+      </svg>
+      <span class="nfc-text">NFC</span>
+    </div>
   </div>
 
   <!-- ── Middle row: photo placeholder + patient demographics ──────────── -->
   <div class="card-middle">
 
-    <!-- Left: photo placeholder box (actual photo printing is out of scope) -->
+    <!-- Left: patient profile photo (base64 JPEG) or placeholder SVG -->
     <div class="photo-col">
+      {%- if patient.photo_data_uri %}
+      <img
+        src="{{ patient.photo_data_uri }}"
+        alt="Patient Photo"
+        class="photo-img"
+      />
+      {%- else %}
       <div class="photo-placeholder">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+          <circle cx="12" cy="7" r="4"></circle>
+        </svg>
         <span class="photo-placeholder-text">PHOTO</span>
       </div>
+      {%- endif %}
     </div>
 
     <!-- Right: patient demographic fields -->
     <div class="patient-info">
-
       <div class="patient-full-name">
         {{ patient.last_name | upper }}, {{ patient.first_name }}
         {%- if patient.middle_name %} {{ patient.middle_name[0] }}.{%- endif %}
       </div>
 
-      <div class="patient-detail-row">
-        <span class="label">Age:</span> {{ patient.age }}&nbsp;&nbsp;
-        <span class="label">Sex:</span> {{ patient.sex | capitalize }}
+      <div class="info-grid">
+        <div class="patient-detail-row">
+          <span class="label">Age</span>
+          <span class="value">{{ patient.age }}</span>
+        </div>
+        <div class="patient-detail-row">
+          <span class="label">Sex</span>
+          <span class="value">{{ patient.sex | capitalize }}</span>
+        </div>
       </div>
 
       <div class="patient-detail-row">
-        <span class="label">Birthday:</span> {{ patient.birth_date_display }}
+        <span class="label">Birthday</span>
+        <span class="value">{{ patient.birth_date_display }}</span>
       </div>
 
       <div class="patient-detail-row">
-        <span class="label">Contact:</span>
-        {{ patient.mobile_number if patient.mobile_number else "—" }}
+        <span class="label">Contact</span>
+        <span class="value">{{ patient.mobile_number if patient.mobile_number else "—" }}</span>
       </div>
 
       <div class="philhealth-row">
-        <span class="label">PhilHealth:</span>
-        {{ patient.philhealth_no if patient.philhealth_no else "—" }}
+        <span class="label">PhilHealth</span>
+        <span class="value">{{ patient.philhealth_no if patient.philhealth_no else "—" }}</span>
         {%- if patient.philhealth_member_type %}
         <span class="philhealth-badge">{{ patient.philhealth_member_type }}</span>
         {%- endif %}
       </div>
-
     </div>
   </div>
 
   <!-- ── Bottom strip: patient code (left) + QR code (right) ───────────── -->
-  <!--
-    Security note: the QR image contains ONLY patient_id + card_version + HMAC sig.
-    The patient_code displayed here is a display-safe identifier only.
-    No PHI is embedded in or beside the QR code itself.
-  -->
   <div class="card-bottom">
-
     <div class="patient-code-section">
       <div class="patient-code-label">Patient Code</div>
       <div class="patient-code-value">{{ patient.patient_code }}</div>
-      <div class="card-version-text">Card No: {{ card.card_number }} &nbsp; v{{ card.card_version }}</div>
+      <div class="card-version-text">Card ID: {{ card.card_number }} &bull; v{{ card.card_version }}</div>
     </div>
 
     <div class="qr-section">
@@ -108,7 +105,6 @@
         class="qr-image"
       />
     </div>
-
   </div>
 
 </div>

@@ -11,8 +11,17 @@
  *   SSR to avoid hydration issues).
  */
 
+// Browser: use a relative URL so requests go through the Next.js rewrite
+// proxy (/api/v1/* → FastAPI).  The cookie is then Set on the same origin
+// (Next.js host:port) that the middleware reads — fixing the infinite
+// redirect-to-login loop caused by cookies being scoped to port 8000.
+//
+// SSR (Node.js): relative URLs don't resolve, so fall back to the internal
+// FastAPI address via SERVER_SIDE_API_URL.
 const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
+  typeof window !== "undefined"
+    ? "/api/v1"
+    : `${process.env.SERVER_SIDE_API_URL ?? "http://localhost:8000"}/api/v1`;
 
 // ---------------------------------------------------------------------------
 // Error class

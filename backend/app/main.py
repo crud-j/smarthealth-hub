@@ -28,13 +28,17 @@ from typing import AsyncGenerator
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import get_logger
+from app.services.patient_photo_service import ensure_photo_dir
 
 logger = get_logger(__name__)
 
@@ -55,9 +59,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     On shutdown: logs graceful teardown; SQLAlchemy engine disposes
     connections automatically when the process exits.
     """
+    # Ensure the patient photos directory exists before any requests are served.
+    # This is idempotent (mkdir parents=True, exist_ok=True) so it is safe to
+    # call on every startup even if the directory was already created previously.
+    photo_dir = ensure_photo_dir()
     logger.info(
         "SmartHealth Hub API starting up",
-        extra={"version": "0.1.0", "environment": "development"},
+        extra={
+            "version": "0.1.0",
+            "environment": "development",
+            "media_dir": str(settings.MEDIA_DIR),
+            "photo_dir": str(photo_dir),
+        },
     )
     yield
     logger.info("SmartHealth Hub API shutting down")
@@ -92,7 +105,8 @@ _OPENAPI_TAGS: list[dict[str, str]] = [
         "name": "patients",
         "description": (
             "Patient registration and demographic record management. "
-            "Supports search, create, read, update, and soft-delete. "
+            "Supports search, create, read, update, soft-delete, and profile photo "
+            "upload (JPEG/PNG/WebP, max 5 MiB). "
             "All write operations emit audit log entries."
         ),
     },
@@ -170,6 +184,9 @@ _OPENAPI_TAGS: list[dict[str, str]] = [
 app = FastAPI(
     title="SmartHealth Hub API",
     version="0.1.0",
+    # Disable the built-in /docs so we can serve a custom one with the
+    # responseInterceptor that auto-fills the Bearer token after verify-otp.
+    docs_url=None,
     description=(
         "**SmartHealth Hub** — Integrated Health Care Information Management System "
         "for Barangay Health Centers (BHCs) in the Philippines.\n\n"
@@ -182,9 +199,6 @@ app = FastAPI(
         "Click the **Authorize** button and paste your access token (without the "
         "`Bearer ` prefix) to authenticate all subsequent requests in Swagger UI."
     ),
-    # Standard locations — accessible without the /api prefix so the browser
-    # can reach them from the Swagger UI page at http://localhost:8000/docs.
-    docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/openapi.json",
     openapi_tags=_OPENAPI_TAGS,
@@ -194,9 +208,15 @@ app = FastAPI(
     swagger_ui_parameters={
         "persistAuthorization": True,
         "displayRequestDuration": True,
-        "docExpansion": "none",          # collapse all tags on load for readability
-        "filter": True,                  # enable the endpoint filter/search box
-        "tryItOutEnabled": False,        # require explicit "Try it out" click
+        "docExpansion": "none",
+        "filter": True,
+        "tryItOutEnabled": False,
+        # Pre-fill the OAuth2 client_id so the Authorize dialog only needs
+        # username, password, and client_secret (OTP).
+        "initOAuth": {
+            "clientId": "swagger-ui",
+            "usePkceWithAuthorizationCodeGrant": False,
+        },
     },
 )
 
@@ -227,8 +247,10 @@ def _custom_openapi() -> dict:  # type: ignore[return]
         tags=_OPENAPI_TAGS,
     )
 
-    # Inject the bearerAuth scheme into components.securitySchemes.
+    # Inject security schemes into components.securitySchemes.
     schema.setdefault("components", {}).setdefault("securitySchemes", {})
+
+    # 1. BearerAuth — manual token paste (fallback / non-Swagger clients).
     schema["components"]["securitySchemes"]["bearerAuth"] = {
         "type": "http",
         "scheme": "bearer",
@@ -240,16 +262,99 @@ def _custom_openapi() -> dict:  # type: ignore[return]
         ),
     }
 
-    # Apply as a global default — endpoints that are truly public (login, OTP
-    # verification, webhook) should already declare ``security=[]`` explicitly
-    # in their router definition so they show an open-lock icon.
-    schema.setdefault("security", [{"bearerAuth": []}])
+    # 2. swaggerOAuth2 — OAuth2 password grant pointing at the combined
+    #    /auth/swagger-token endpoint so Swagger's Authorize dialog can
+    #    fetch and store the token automatically.
+    #    client_secret field = OTP code (documented in the endpoint description).
+    schema["components"]["securitySchemes"]["swaggerOAuth2"] = {
+        "type": "oauth2",
+        "description": (
+            "Use the Authorize dialog to log in without copy-pasting tokens. "
+            "Enter your email as 'username', your password, and paste the "
+            "6-digit OTP into **client_secret**."
+        ),
+        "flows": {
+            "password": {
+                "tokenUrl": "/api/v1/auth/swagger-token",
+                "scopes": {},
+            }
+        },
+    }
+
+    # Apply bearerAuth as the global default — endpoints that are truly public
+    # declare ``security=[]`` explicitly so they show an open-lock icon.
+    schema.setdefault("security", [{"bearerAuth": []}, {"swaggerOAuth2": []}])
 
     app.openapi_schema = schema
     return app.openapi_schema  # type: ignore[return-value]
 
 
 app.openapi = _custom_openapi  # type: ignore[method-assign]
+
+
+# ---------------------------------------------------------------------------
+# Custom /docs — Swagger UI with auto-authorization responseInterceptor
+# ---------------------------------------------------------------------------
+# FastAPI's built-in Swagger UI has no hook to auto-fill the Bearer token
+# after a successful API call.  We serve our own /docs page that injects a
+# responseInterceptor: when the /auth/verify-otp response contains an
+# access_token, Swagger immediately calls preauthorizeApiKey() so the lock
+# icon closes and every subsequent request carries the header automatically.
+# ---------------------------------------------------------------------------
+
+_SWAGGER_AUTO_AUTH_JS = """
+<script>
+  // Wait for the Swagger UI instance to be ready, then attach the interceptor.
+  (function waitForUI() {
+    if (typeof window.ui === 'undefined') {
+      setTimeout(waitForUI, 100);
+      return;
+    }
+    const originalResponseInterceptor = window.ui.getConfigs().responseInterceptor;
+    window.ui.setConfigs({
+      responseInterceptor: function(response) {
+        if (
+          response.url &&
+          response.url.includes('/auth/verify-otp') &&
+          response.status === 200 &&
+          response.body &&
+          response.body.access_token
+        ) {
+          const token = response.body.access_token;
+          window.ui.preauthorizeApiKey('bearerAuth', token);
+          console.info('[SmartHealth Hub] Bearer token auto-set from verify-otp response.');
+        }
+        return originalResponseInterceptor
+          ? originalResponseInterceptor(response)
+          : response;
+      }
+    });
+  })();
+</script>
+"""
+
+
+@app.get("/docs", include_in_schema=False)
+async def custom_swagger_ui() -> HTMLResponse:
+    """Swagger UI with responseInterceptor that auto-fills the Bearer token."""
+    html = get_swagger_ui_html(
+        openapi_url="/openapi.json",
+        title="SmartHealth Hub API — Swagger UI",
+        swagger_js_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js",
+        swagger_css_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css",
+        swagger_favicon_url="https://fastapi.tiangolo.com/img/favicon.png",
+        init_oauth={"clientId": "swagger-ui"},
+        swagger_ui_parameters={
+            "persistAuthorization": True,
+            "displayRequestDuration": True,
+            "docExpansion": "none",
+            "filter": True,
+            "tryItOutEnabled": False,
+        },
+    )
+    # Inject the auto-auth script just before </body>.
+    patched = html.body.decode().replace("</body>", f"{_SWAGGER_AUTO_AUTH_JS}</body>")
+    return HTMLResponse(content=patched, status_code=200)
 
 
 # ---------------------------------------------------------------------------
@@ -284,6 +389,33 @@ register_exception_handlers(app)
 
 
 app.include_router(api_router, prefix="/api/v1")
+
+
+# ---------------------------------------------------------------------------
+# Static files — /media
+# ---------------------------------------------------------------------------
+# Serves uploaded patient photos at /media/patient_photos/<uuid>.jpg.
+#
+# IMPORTANT: The /media mount is intentionally placed AFTER the API router.
+# FastAPI checks routes in registration order; the API routes will match
+# /api/v1/... paths before StaticFiles ever sees them.
+#
+# Access control note: StaticFiles does NOT enforce JWT auth — files under
+# /media are publicly URL-addressable if the path is guessed.  This is
+# acceptable for an internal BHC LAN deployment where the /media directory
+# is not externally routable.  For production internet deployments, consider
+# serving media files through the authenticated GET /patients/{id}/photo
+# endpoint (which enforces JWT) and removing this static mount, or placing
+# Nginx in front with its own auth check.
+#
+# The MEDIA_DIR is created on startup by the lifespan handler above.
+# ``html=False`` disables directory listings for security.
+settings.MEDIA_DIR.mkdir(parents=True, exist_ok=True)  # guard against startup race
+app.mount(
+    "/media",
+    StaticFiles(directory=str(settings.MEDIA_DIR), html=False),
+    name="media",
+)
 
 
 # ---------------------------------------------------------------------------

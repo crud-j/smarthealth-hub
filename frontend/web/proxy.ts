@@ -2,13 +2,13 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 /**
- * Route protection middleware — Phase 1.
+ * Route protection proxy — Phase 1.
  *
  * Reads the `access_token` httpOnly cookie set by the FastAPI backend after
  * successful MFA login.  Requests to dashboard routes without this cookie
  * are redirected to /login.
  *
- * Note: The middleware cannot verify the JWT signature because the secret key
+ * Note: The proxy cannot verify the JWT signature because the secret key
  * is only available on the backend.  Presence of the cookie is used as a
  * lightweight gate — the backend validates the actual token on every API call.
  * True tamper-proof validation at the edge would require either:
@@ -17,9 +17,10 @@ import type { NextRequest } from "next/server";
  *   b) A short-lived session token pattern (Phase 6 hardening concern).
  *
  * Public paths (no redirect):
- *   /login, /verify-otp, /forgot-password, /api/*, /_next/*, /favicon.ico
+ *   /login, /verify-otp, /forgot-password, /verify (QR scan target),
+ *   /api/*, /_next/*, /favicon.ico
  */
-export function middleware(request: NextRequest): NextResponse {
+export function proxy(request: NextRequest): NextResponse {
   const { pathname } = request.nextUrl;
 
   // Public paths that do not require authentication.
@@ -27,6 +28,7 @@ export function middleware(request: NextRequest): NextResponse {
     pathname.startsWith("/login") ||
     pathname.startsWith("/verify-otp") ||
     pathname.startsWith("/forgot-password") ||
+    pathname.startsWith("/verify") ||   // QR code scan landing page (mobile)
     pathname.startsWith("/api/") ||
     pathname.startsWith("/_next/") ||
     pathname === "/favicon.ico" ||
@@ -51,7 +53,7 @@ export function middleware(request: NextRequest): NextResponse {
 
 export const config = {
   /**
-   * Run middleware on all routes except:
+   * Run proxy on all routes except:
    *  - Static files handled by Next.js (/_next/static, /_next/image, etc.)
    *  - Explicit public assets (favicon, robots.txt)
    *

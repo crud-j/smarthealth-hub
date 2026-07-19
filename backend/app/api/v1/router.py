@@ -26,6 +26,7 @@ from app.api.v1.endpoints import (
     immunizations,
     medical_history,
     mfa,
+    patient_photos,
     patients,
     sms,
     users,
@@ -47,6 +48,9 @@ api_router.include_router(patients.router)
 # Nested under /patients/{patient_id}/... — full paths live in the router.
 api_router.include_router(medical_history.router)
 api_router.include_router(immunizations.router)
+
+# Photo upload/retrieve — nested under /patients/{patient_id}/photo
+api_router.include_router(patient_photos.router)
 
 # ── Appointments ──────────────────────────────────────────────────────────────
 # appointments.router already carries prefix="/appointments"

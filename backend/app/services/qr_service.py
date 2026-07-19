@@ -2,7 +2,8 @@
 QR code generation and verification service.
 
 Payload schema (NEVER include PHI):
-  URL: https://smarthealthhub.local/verify?pid={patient_id}&v={card_version}&sig={hmac_hex}
+  URL: {QR_BASE_URL}/verify?pid={patient_id}&v={card_version}&sig={hmac_hex}
+  QR_BASE_URL is read from settings (set to LAN IP in dev, public domain in prod).
 
 Signature: HMAC-SHA256(f"{patient_id}:{card_version}", QR_HMAC_SECRET)
 
@@ -45,7 +46,11 @@ def build_qr_url(patient_id: str, card_version: int) -> str:
     Build the HMAC-signed verification URL that is encoded into the QR image.
 
     URL format:
-        https://smarthealthhub.local/verify?pid={patient_id}&v={card_version}&sig={hmac_hex}
+        {QR_BASE_URL}/verify?pid={patient_id}&v={card_version}&sig={hmac_hex}
+
+    QR_BASE_URL is read from settings so it can be set to the machine's LAN IP
+    during development (e.g. http://192.168.1.100:3000) or the public domain
+    in production — ensuring mobile phones on the same network can reach it.
 
     Args:
         patient_id:   UUID string of the patient (no PHI).
@@ -54,11 +59,11 @@ def build_qr_url(patient_id: str, card_version: int) -> str:
     Returns:
         The signed URL string (plain text, NOT the QR image).
     """
+    from app.core.config import settings as _settings  # noqa: PLC0415
+
     sig = _compute_hmac(patient_id, card_version)
-    return (
-        f"https://smarthealthhub.local/verify"
-        f"?pid={patient_id}&v={card_version}&sig={sig}"
-    )
+    base = _settings.QR_BASE_URL.rstrip("/")
+    return f"{base}/verify?pid={patient_id}&v={card_version}&sig={sig}"
 
 
 def encode_qr_payload(patient_id: str, card_version: int) -> tuple[str, str]:

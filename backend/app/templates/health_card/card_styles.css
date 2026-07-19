@@ -1,20 +1,7 @@
 /*
- * Health Card Styles — WeasyPrint PDF renderer
- *
- * Card size: CR80 standard (85.6mm × 54mm — standard credit-card / ID-card size).
- * Target resolution: 300 DPI for crisp print output.
- *
- * All measurements in mm or pt — WeasyPrint ignores px in @page / print context.
- * Font stack: Arial/Helvetica/sans-serif — system-safe on Windows, no external
- * font-face URLs required.  DejaVu Sans retained as optional fallback.
- *
- * Color scheme:
- *   --teal-primary:  #0d7c6e   (BHC primary — header strips, accents)
- *   --teal-dark:     #085c51   (darker header variant for back side)
- *   --teal-light:    #f0fdf8   (card body background)
- *   --text-dark:     #0f172a   (primary body text)
- *   --text-muted:    #64748b   (secondary / label text)
- *   --divider:       #d1fae5   (internal divider lines)
+ * Health Card Styles — WeasyPrint PDF renderer (Improvised UI/UX Edition)
+ * Card size: CR80 standard (85.6mm × 54mm)[cite: 6].
+ * Target resolution: 300 DPI[cite: 6].
  */
 
 /* ── Page rule ──────────────────────────────────────────────────────────── */
@@ -32,70 +19,90 @@
 
 /* ── Base typography ────────────────────────────────────────────────────── */
 body {
-  font-family: Arial, Helvetica, "DejaVu Sans", sans-serif;
+  font-family: "Helvetica Neue", Arial, Helvetica, "DejaVu Sans", sans-serif;
   font-size: 6pt;
   color: #0f172a;
   background: #ffffff;
   width: 85.6mm;
   height: 54mm;
   overflow: hidden;
+  -webkit-print-color-adjust: exact;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
    FRONT FACE
    ══════════════════════════════════════════════════════════════════════════ */
 
-/* ── Card front container ───────────────────────────────────────────────── */
 .card-front {
   width: 85.6mm;
   height: 54mm;
-  background: #f0fdf8;
+  background: #f8fafc; /* Crisp modern neutral light canvas */
   position: relative;
   overflow: hidden;
 }
 
-/* ── Header strip (front) ───────────────────────────────────────────────── */
+/* Header strip */
 .front-header {
-  background: #0d7c6e;
+  background: linear-gradient(135deg, #0d7c6e, #0f9685); /* Modern professional color gradient */
   color: #ffffff;
-  height: 9mm;
+  height: 9.5mm;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 2.5mm;
+  padding: 0 3mm;
+  border-bottom: 0.5pt solid #0a6358;
+}
+
+.front-header .header-brand {
+  display: flex;
+  flex-direction: column;
 }
 
 .front-header .org-name {
   font-size: 6.5pt;
-  font-weight: bold;
-  letter-spacing: 0.4pt;
+  font-weight: 800;
+  letter-spacing: 0.5pt;
   text-transform: uppercase;
 }
 
 .front-header .bhc-title {
-  font-size: 6pt;
-  font-weight: bold;
+  font-size: 4.8pt;
+  font-weight: 500;
   text-transform: uppercase;
+  letter-spacing: 0.3pt;
+  color: #ccfbf1;
+}
+
+.nfc-badge {
+  display: flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.15);
+  padding: 0.4mm 1.2mm;
+  border-radius: 2pt;
+  gap: 0.6mm;
+}
+
+.nfc-svg {
+  color: #ffffff;
+}
+
+.nfc-text {
+  font-size: 4.5pt;
+  font-weight: bold;
   letter-spacing: 0.2pt;
-  opacity: 0.95;
+  color: #ffffff;
 }
 
-.front-header .nfc-icon {
-  font-size: 8pt;
-  opacity: 0.85;
-  letter-spacing: -1pt;
-}
-
-/* ── Middle row: photo + patient info ───────────────────────────────────── */
+/* Middle core content arrangement */
 .card-middle {
   display: flex;
   flex-direction: row;
-  height: 33mm;
-  padding: 1.5mm 2mm 1mm 2mm;
-  gap: 2mm;
+  height: 32.5mm;
+  padding: 2mm 3mm;
+  gap: 3mm;
 }
 
-/* Photo placeholder column */
+/* Profile Photo Placeholder Graphic Frame */
 .photo-col {
   width: 14mm;
   flex-shrink: 0;
@@ -103,28 +110,38 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
-  padding-top: 0.5mm;
+}
+
+.photo-img {
+  width: 14mm;
+  height: 17.5mm;
+  object-fit: cover;
+  border-radius: 3pt;
+  border: 0.5pt solid #cbd5e1;
+  display: block;
 }
 
 .photo-placeholder {
   width: 14mm;
-  height: 18mm;
+  height: 17.5mm;
   background: #e2e8f0;
-  border: 0.4pt solid #94a3b8;
+  border: 0.5pt dashed #94a3b8;
+  border-radius: 3pt;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 0.8mm;
 }
 
 .photo-placeholder-text {
-  font-size: 4.5pt;
-  color: #94a3b8;
-  text-align: center;
-  letter-spacing: 0.3pt;
-  text-transform: uppercase;
+  font-size: 3.8pt;
+  font-weight: bold;
+  color: #64748b;
+  letter-spacing: 0.4pt;
 }
 
-/* Patient info column */
+/* Demographic layout adjustments */
 .patient-info {
   flex: 1;
   display: flex;
@@ -134,96 +151,134 @@ body {
 }
 
 .patient-full-name {
-  font-size: 8.5pt;
-  font-weight: bold;
+  font-size: 9.5pt;
+  font-weight: 800;
   color: #0f172a;
-  line-height: 1.15;
+  line-height: 1.1;
+  letter-spacing: -0.1pt;
+  margin-bottom: 0.4mm;
+  border-bottom: 0.3pt solid #cbd5e1;
+  padding-bottom: 0.4mm;
+}
+
+.info-grid {
+  display: flex;
+  flex-direction: row;
+  gap: 4mm;
 }
 
 .patient-detail-row {
+  display: flex;
+  flex-direction: column;
   font-size: 5.5pt;
-  color: #334155;
-  line-height: 1.3;
+  line-height: 1.2;
 }
 
 .patient-detail-row .label {
   color: #64748b;
-  font-weight: bold;
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 4pt;
+  letter-spacing: 0.2pt;
+}
+
+.patient-detail-row .value {
+  color: #1e293b;
+  font-weight: 600;
 }
 
 .philhealth-row {
-  font-size: 5pt;
-  color: #334155;
+  display: inline-flex; /* WeasyPrint: replaces unsupported 'width: fit-content' — inline-flex shrink-wraps to content width */
+  align-items: center;
+  font-size: 5.5pt;
+  margin-top: 0.4mm;
+  background: #f1f5f9;
+  padding: 0.4mm 1mm;
+  border-radius: 1.5pt;
 }
 
 .philhealth-row .label {
   color: #64748b;
-  font-weight: bold;
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 4pt;
+  letter-spacing: 0.2pt;
+  margin-right: 1mm;
+}
+
+.philhealth-row .value {
+  color: #1e293b;
+  font-weight: 700;
 }
 
 .philhealth-badge {
-  font-size: 4.5pt;
+  font-size: 3.8pt;
+  font-weight: bold;
   color: #ffffff;
   background: #0d7c6e;
-  padding: 0.3mm 1mm;
+  padding: 0.2mm 0.8mm;
   border-radius: 1pt;
-  margin-left: 1mm;
+  margin-left: 1.5mm;
   text-transform: uppercase;
-  letter-spacing: 0.2pt;
+  letter-spacing: 0.1pt;
 }
 
-/* ── Bottom row: patient code + QR code ─────────────────────────────────── */
+/* Bottom secure visual baseline strip */
 .card-bottom {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
   height: 12mm;
-  background: #0d7c6e;
+  background: #0f172a; /* Deep slate anchoring primary identification zone */
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
-  padding: 0 2mm 0 2.5mm;
+  padding: 0 3mm;
 }
 
 .patient-code-section {
   display: flex;
   flex-direction: column;
-  justify-content: center;
 }
 
 .patient-code-label {
-  font-size: 4pt;
-  color: rgba(255, 255, 255, 0.7);
+  font-size: 3.8pt;
+  color: #94a3b8;
   text-transform: uppercase;
-  letter-spacing: 0.4pt;
-  margin-bottom: 0.5mm;
+  letter-spacing: 0.5pt;
+  font-weight: 600;
 }
 
 .patient-code-value {
-  font-size: 7pt;
+  font-size: 7.5pt;
   font-weight: bold;
   color: #ffffff;
-  letter-spacing: 0.5pt;
+  letter-spacing: 0.6pt;
   font-family: Arial, "Courier New", monospace;
+  line-height: 1;
 }
 
 .card-version-text {
-  font-size: 4pt;
-  color: rgba(255, 255, 255, 0.6);
-  margin-top: 0.5mm;
+  font-size: 3.8pt;
+  color: #64748b;
+  margin-top: 0.2mm;
 }
 
 .qr-section {
+  background: #ffffff;
+  padding: 0.6mm;
+  border-radius: 2pt;
+  width: 15mm;
+  height: 10mm;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: #ffffff;
-  padding: 0.8mm;
-  width: 19mm;
-  height: 11mm;
 }
 
 .qr-image {
-  width: 17mm;
+  width: 14mm;
   height: 9mm;
   display: block;
 }
@@ -232,190 +287,251 @@ body {
    BACK FACE
    ══════════════════════════════════════════════════════════════════════════ */
 
-/* Page break before back side — WeasyPrint honors this */
 .card-back {
   page-break-before: always;
   width: 85.6mm;
   height: 54mm;
-  background: #f0fdf8;
+  background: #f8fafc;
   position: relative;
   overflow: hidden;
 }
 
-/* ── Header strip (back) ────────────────────────────────────────────────── */
 .back-header {
   background: #085c51;
   color: #ffffff;
-  height: 8mm;
+  height: 7.5mm;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 2.5mm;
+  padding: 0 3mm;
+  border-bottom: 0.5pt solid #04362f;
+  gap: 2mm;
+}
+
+.back-header-text-col {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
 }
 
 .back-header .org-name {
-  font-size: 6pt;
+  font-size: 5.5pt;
   font-weight: bold;
-  letter-spacing: 0.4pt;
+  letter-spacing: 0.3pt;
   text-transform: uppercase;
-  opacity: 0.9;
 }
 
 .back-header .back-title {
-  font-size: 5.5pt;
-  text-transform: uppercase;
-  letter-spacing: 0.3pt;
-  opacity: 0.85;
-}
-
-/* ── Address row ────────────────────────────────────────────────────────── */
-.address-row {
-  padding: 1mm 2.5mm 0.8mm 2.5mm;
-  border-bottom: 0.3pt solid #d1fae5;
-  font-size: 5.5pt;
-  color: #0f172a;
-  line-height: 1.3;
-}
-
-.address-row .section-label {
   font-size: 5pt;
-  color: #0d7c6e;
   font-weight: bold;
   text-transform: uppercase;
   letter-spacing: 0.3pt;
-  margin-bottom: 0.3mm;
+  color: #99f6e4;
 }
 
-/* ── Two-column row: blood type + allergies ─────────────────────────────── */
+/* Small patient photo thumbnail on the back face header */
+.back-photo-thumb {
+  width: 6mm;
+  height: 6mm;
+  object-fit: cover;
+  border-radius: 50%;
+  border: 0.5pt solid rgba(255, 255, 255, 0.4);
+  flex-shrink: 0;
+}
+
+/* Address zone structural adjustments */
+.address-row {
+  padding: 1.2mm 3mm;
+  border-bottom: 0.3pt solid #e2e8f0;
+}
+
+.address-row .section-label {
+  font-size: 4pt;
+  color: #0d7c6e;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.3pt;
+  margin-bottom: 0.2mm;
+}
+
+.address-text {
+  font-size: 5.2pt;
+  color: #1e293b;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+/* Critical dual column block configuration */
 .two-col-row {
   display: flex;
   flex-direction: row;
-  border-bottom: 0.3pt solid #d1fae5;
-  height: 8mm;
+  border-bottom: 0.3pt solid #e2e8f0;
+  height: 9mm;
 }
 
 .two-col-cell {
-  flex: 1;
-  padding: 1mm 2mm;
-  font-size: 5.5pt;
-  color: #0f172a;
+  padding: 1.2mm 3mm;
   display: flex;
   flex-direction: column;
   justify-content: center;
 }
 
-.two-col-cell:first-child {
-  border-right: 0.3pt solid #d1fae5;
-  flex: 0 0 28mm;
-}
-
 .two-col-cell .section-label {
-  font-size: 4.5pt;
+  font-size: 4pt;
   color: #0d7c6e;
-  font-weight: bold;
+  font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.3pt;
-  margin-bottom: 0.3mm;
+  margin-bottom: 0.2mm;
 }
 
-/* ── Vitals section ─────────────────────────────────────────────────────── */
-.vitals-section {
-  padding: 0.8mm 2.5mm 0.8mm 2.5mm;
-  border-bottom: 0.3pt solid #d1fae5;
-  font-size: 5pt;
+.blood-cell {
+  border-right: 0.3pt solid #e2e8f0;
+  flex: 0 0 24mm;
+}
+
+.blood-value {
+  font-size: 7.5pt;
+  font-weight: 900;
   color: #0f172a;
 }
 
+.allergy-cell {
+  flex: 1;
+  background: #ffffff;
+}
+
+.allergy-text {
+  font-size: 5.2pt;
+  font-weight: 600;
+  color: #334155;
+}
+
+/* High Visibility Alert State for Critical Emergencies */
+.has-allergies {
+  background-color: #fef2f2 !important;
+  border-left: 2pt solid #dc2626;
+}
+
+.has-allergies .section-label {
+  color: #b91c1c !important;
+}
+
+.has-allergies .allergy-text {
+  color: #991b1b !important;
+  font-weight: 800;
+}
+
+/* Clinical Vitals Grid */
+.vitals-section {
+  padding: 1.2mm 3mm;
+  border-bottom: 0.3pt solid #e2e8f0;
+  background: #ffffff;
+}
+
 .vitals-section .section-label {
-  font-size: 4.5pt;
+  font-size: 4pt;
   color: #0d7c6e;
-  font-weight: bold;
+  font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.3pt;
-  margin-bottom: 0.5mm;
+  margin-bottom: 0.4mm;
 }
 
 .vitals-grid {
   display: flex;
   flex-direction: row;
-  gap: 3mm;
-  flex-wrap: wrap;
+  justify-content: space-between;
 }
 
 .vital-item {
-  font-size: 5pt;
-  color: #334155;
+  display: flex;
+  flex-direction: column;
 }
 
-.vital-item .vital-label {
+.vital-label {
+  font-size: 3.8pt;
   font-weight: bold;
   color: #64748b;
+  text-transform: uppercase;
 }
 
-/* ── Important notes section ────────────────────────────────────────────── */
+.vital-value {
+  font-size: 5.5pt;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+/* Secondary Diagnostic Notes Container */
 .notes-section {
-  padding: 0.8mm 2.5mm 0.5mm 2.5mm;
-  font-size: 5pt;
-  color: #334155;
-  line-height: 1.35;
-  min-height: 6mm;
+  padding: 1.2mm 3mm;
+  min-height: 8mm;
 }
 
 .notes-section .section-label {
-  font-size: 4.5pt;
+  font-size: 4pt;
   color: #0d7c6e;
-  font-weight: bold;
+  font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.3pt;
-  margin-bottom: 0.3mm;
+  margin-bottom: 0.2mm;
 }
 
 .notes-text {
-  font-size: 5pt;
+  font-size: 4.8pt;
   color: #475569;
   font-style: italic;
-  line-height: 1.3;
+  line-height: 1.2;
 }
 
-/* ── Footer row: disclaimer + stamp ────────────────────────────────────────*/
+/* Card Back Baseline Security Footer */
 .back-footer {
   position: absolute;
   bottom: 0;
   left: 0;
   right: 0;
-  height: 7mm;
+  height: 8.5mm;
   background: #085c51;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 2mm 0 2.5mm;
+  padding: 0 3mm;
 }
 
 .back-footer-text {
-  font-size: 4.5pt;
-  color: rgba(255, 255, 255, 0.8);
-  line-height: 1.35;
-  max-width: 58mm;
+  font-size: 4pt;
+  color: #ccfbf1;
+  line-height: 1.2;
+  max-width: 62mm;
+  font-weight: 400;
 }
 
-/* Official stamp circle */
+/* Breakout Official Administration Stamp */
 .stamp-circle {
   width: 14mm;
   height: 14mm;
-  border: 1.2pt dashed rgba(255, 255, 255, 0.55);
+  border: 1pt dashed rgba(255, 255, 255, 0.45);
   border-radius: 50%;
+  background: rgba(8, 92, 81, 0.85);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
+  position: absolute;
+  right: 3mm;
+  bottom: 1.5mm;
+  transform: rotate(-12deg); /* Realistic, human angled print impression */
+  /* box-shadow removed: WeasyPrint does not support this property.
+     The existing dashed border above already provides a visible outline. */
+  z-index: 10;
 }
 
 .stamp-circle-text {
-  font-size: 3.8pt;
-  color: rgba(255, 255, 255, 0.65);
+  font-size: 3.2pt;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.75);
   text-align: center;
   text-transform: uppercase;
-  letter-spacing: 0.2pt;
-  line-height: 1.3;
+  letter-spacing: 0.3pt;
+  line-height: 1.1;
 }

@@ -20,7 +20,8 @@
 import Link from "next/link";
 import { usePatient, usePatientVisits } from "@/hooks/usePatients";
 import type { VisitSummary } from "@/types/patient";
-import React from "react";
+import React, { useState } from "react";
+import ProfilePhotoUploader from "@/app/(dashboard)/patients/_components/ProfilePhotoUploader";
 
 // ---------------------------------------------------------------------------
 // Helper: format date strings
@@ -168,6 +169,27 @@ export default function PatientProfilePage({
     error: visitsError,
   } = usePatientVisits(patientId);
 
+  // Track the current patient photo URL so the profile header updates after upload.
+  const apiBase =
+    process.env.NEXT_PUBLIC_API_BASE_URL?.replace("/api/v1", "") ??
+    "http://localhost:8000";
+
+  // Derive initial photo URL from the loaded patient record's photo_path.
+  // Once set by the patient data hook, we override it with a cache-busted
+  // URL whenever the uploader saves a new photo.
+  const initialPhotoUrl = patient?.photoPath
+    ? `${apiBase}${patient.photoPath}`
+    : null;
+
+  const [currentPhotoUrl, setCurrentPhotoUrl] = useState<string | null>(null);
+
+  // Build the photo URL once the patient data is available.
+  // We point directly at the authenticated photo endpoint rather than the
+  // static /media path so auth cookies are always sent.
+  const photoEndpointUrl = patientId
+    ? `${apiBase}/api/v1/patients/${patientId}/photo`
+    : null;
+
   if (loading) {
     return (
       <div
@@ -312,46 +334,96 @@ export default function PatientProfilePage({
         >
           Patient Demographics
         </div>
+
+        {/* Patient header: photo + name row */}
         <div
           style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(3, 1fr)",
-            gap: "0 2rem",
+            display: "flex",
+            alignItems: "flex-start",
+            gap: "1.25rem",
+            marginBottom: "1.25rem",
           }}
         >
-          <DemoField label="Registration Date" value={formatDate(patient.createdAt)} />
-          <DemoField
-            label="Birthday"
-            value={`${formatDate(patient.birthDate)} (Age ${patient.age})`}
-          />
-          <DemoField
-            label="Sex"
-            value={patient.sex.charAt(0).toUpperCase() + patient.sex.slice(1)}
-          />
-          <DemoField label="Civil Status" value={patient.civilStatus} />
-          <DemoField label="Contact No." value={patient.mobileNumber} />
-          <DemoField
-            label="PhilHealth"
-            value={
-              patient.philhealthNo
-                ? `${patient.philhealthNo}${patient.philhealthMemberType ? ` (${patient.philhealthMemberType})` : ""}`
-                : undefined
-            }
-          />
-          <DemoField
-            label="Complete Address"
-            value={patient.address}
-          />
-          {(patient.guardianName || patient.guardianContact) && (
-            <DemoField
-              label="Guardian"
-              value={
-                `${patient.guardianName ?? ""}${patient.guardianContact ? ` — ${patient.guardianContact}` : ""}`.trim()
-              }
+          {/* Profile photo thumbnail */}
+          <div style={{ flexShrink: 0 }}>
+            <img
+              src={currentPhotoUrl ?? initialPhotoUrl ?? photoEndpointUrl ?? undefined}
+              alt="Patient profile photo"
+              width={80}
+              height={80}
+              onError={(e) => {
+                // If the photo endpoint returns 404 (no photo), hide the img
+                (e.currentTarget as HTMLImageElement).style.display = "none";
+              }}
+              style={{
+                width: 80,
+                height: 80,
+                objectFit: "cover",
+                borderRadius: "0.5rem",
+                border: "1px solid #e2e8f0",
+                background: "#f1f5f9",
+                display: "block",
+              }}
             />
-          )}
+          </div>
+
+          <div style={{ flex: 1 }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(3, 1fr)",
+                gap: "0 2rem",
+              }}
+            >
+              <DemoField label="Registration Date" value={formatDate(patient.createdAt)} />
+              <DemoField
+                label="Birthday"
+                value={`${formatDate(patient.birthDate)} (Age ${patient.age})`}
+              />
+              <DemoField
+                label="Sex"
+                value={patient.sex.charAt(0).toUpperCase() + patient.sex.slice(1)}
+              />
+              <DemoField label="Civil Status" value={patient.civilStatus} />
+              <DemoField label="Contact No." value={patient.mobileNumber} />
+              <DemoField
+                label="PhilHealth"
+                value={
+                  patient.philhealthNo
+                    ? `${patient.philhealthNo}${patient.philhealthMemberType ? ` (${patient.philhealthMemberType})` : ""}`
+                    : undefined
+                }
+              />
+              <DemoField
+                label="Complete Address"
+                value={patient.address}
+              />
+              {(patient.guardianName || patient.guardianContact) && (
+                <DemoField
+                  label="Guardian"
+                  value={
+                    `${patient.guardianName ?? ""}${patient.guardianContact ? ` — ${patient.guardianContact}` : ""}`.trim()
+                  }
+                />
+              )}
+            </div>
+          </div>
         </div>
       </div>
+
+      {/* Profile photo uploader */}
+      <ProfilePhotoUploader
+        patientId={patientId}
+        currentPhotoUrl={null}
+        onPhotoSaved={(url) => {
+          // Force a cache-bust by appending a timestamp so the browser
+          // re-fetches the newly saved photo from the API endpoint.
+          const base =
+            (process.env.NEXT_PUBLIC_API_BASE_URL?.replace("/api/v1", "") ??
+              "http://localhost:8000") + url;
+          setCurrentPhotoUrl(`${base}?t=${Date.now()}`);
+        }}
+      />
 
       {/* Visit history */}
       <div

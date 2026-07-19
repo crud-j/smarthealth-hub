@@ -29,7 +29,7 @@ import asyncio
 import uuid
 from urllib.parse import parse_qs, urlparse
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 
@@ -47,6 +47,7 @@ from app.schemas.health_card import (
     HealthCardResponse,
     NfcLinkRequest,
     PatientVerifySummary,
+    PatientVerifySummaryFull,
 )
 from app.services import card_generation_service, nfc_payload_service, qr_service
 from app.services.audit_service import write_audit_log
@@ -110,6 +111,7 @@ async def generate_health_card(
     card_dict = result["card"]
     return CardGenerateResponse(
         card=HealthCardResponse(**card_dict, qr_data_uri=result["qr_data_uri"]),
+        signed_url=result["signed_url"],
         qr_data_uri=result["qr_data_uri"],
         nfc_payload=result["nfc_payload"],
     )
@@ -250,12 +252,24 @@ async def download_health_card_pdf(
         "issued_at": card.issued_at.strftime("%B %d, %Y") if card.issued_at else "",
     }
 
+    # Resolve the patient's profile photo as a base64 data URI.
+    # This is done here (in async context) so the synchronous pdf_renderer
+    # does not need to do any I/O — it receives a ready-to-embed data URI.
+    # get_photo_data_uri does blocking file I/O, so offload to a thread.
+    from app.services.patient_photo_service import get_photo_data_uri  # noqa: PLC0415
+
+    photo_data_uri: str = await asyncio.to_thread(get_photo_data_uri, patient)
+
     # Render PDF in a thread pool so WeasyPrint's blocking I/O does not
     # stall the async event loop.
     from app.services.pdf_renderer import render_health_card_pdf  # noqa: PLC0415
 
     pdf_bytes: bytes = await asyncio.to_thread(
-        render_health_card_pdf, patient_dict, card_dict, qr_data_uri
+        render_health_card_pdf,
+        patient_dict,
+        card_dict,
+        qr_data_uri,
+        photo_data_uri,
     )
 
     filename = f"health_card_{patient.patient_code}.pdf"
@@ -323,6 +337,93 @@ async def link_nfc_tag(
 
 
 # ---------------------------------------------------------------------------
+# GET /health-cards/verify/public
+# Public QR verification — no JWT required.
+# Security: HMAC signature in the URL is the sole authentication mechanism.
+# Returns only PHI-safe fields (name + patient_code + card_status).
+# Called by the public /verify Next.js page that mobile phones land on.
+# ---------------------------------------------------------------------------
+
+from app.schemas.health_card import PublicVerifyResponse  # noqa: PLC0415
+
+
+@router.get(
+    "/health-cards/verify/public",
+    response_model=PublicVerifyResponse,
+    summary="Public QR verification (no login required)",
+    description=(
+        "Verifies the HMAC signature on a scanned QR code.  "
+        "No JWT required — the HMAC is the sole security mechanism.  "
+        "Returns only PHI-safe fields: patient name, code, and card status."
+    ),
+)
+async def public_verify_health_card(
+    pid: str,
+    v: int,
+    sig: str,
+    request: Request,
+    db: DbDep,
+) -> PublicVerifyResponse:
+    """Public endpoint consumed by the /verify Next.js page on mobile phones."""
+    _INVALID = PublicVerifyResponse(valid=False)
+
+    try:
+        if not qr_service.verify_qr_payload(pid, v, sig):
+            return _INVALID
+
+        try:
+            patient_uuid = uuid.UUID(pid)
+        except ValueError:
+            return _INVALID
+
+        card_result = await db.execute(
+            select(HealthCard)
+            .where(HealthCard.patient_id == patient_uuid)
+            .where(HealthCard.card_version == v)
+        )
+        card: HealthCard | None = card_result.scalar_one_or_none()
+        if card is None or card.status == "revoked":
+            return _INVALID
+
+        patient_result = await db.execute(
+            select(Patient).where(Patient.id == patient_uuid)
+        )
+        patient: Patient | None = patient_result.scalar_one_or_none()
+        if patient is None or not patient.is_active:
+            return _INVALID
+
+        parts = [patient.first_name]
+        if patient.middle_name:
+            parts.append(patient.middle_name)
+        parts.append(patient.last_name)
+        full_name = " ".join(parts)
+
+        # Log verification (no user_id for anonymous access).
+        verification = CardVerification(
+            health_card_id=card.id,
+            verification_method="qr",
+            verified_by=None,
+            success=True,
+        )
+        db.add(verification)
+        await db.commit()
+
+        return PublicVerifyResponse(
+            valid=True,
+            full_name=full_name,
+            patient_code=patient.patient_code,
+            card_status=card.status,
+        )
+
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "Unexpected error during public card verification",
+            extra={"error": str(exc)},
+            exc_info=True,
+        )
+        return _INVALID
+
+
 # POST /health-cards/verify
 # NOTE: This route MUST be declared before /health-cards/{patient_id}/...
 #       routes so FastAPI does not treat "verify" as a patient_id path param.
@@ -331,13 +432,18 @@ async def link_nfc_tag(
 
 @router.post(
     "/health-cards/verify",
-    response_model=PatientVerifySummary,
+    # Union return type — response_model is resolved dynamically below.
+    # We declare the wider type so OpenAPI schema includes all possible fields.
+    response_model=PatientVerifySummaryFull,
     summary="Verify a scanned QR payload or tapped NFC UID",
     description=(
         "Accepts either a QR payload URL string or an NFC chip UID.  "
-        "Returns a minimal patient summary on success.  Returns an identical "
-        "generic 403 for ALL failure modes — no information about the reason "
-        "for failure is disclosed to the caller."
+        "Returns a minimal patient summary on success.  "
+        "Pass ``?full=true`` (authenticated staff only) to receive the extended "
+        "``PatientVerifySummaryFull`` response including patient_id, birth_date, "
+        "mobile_number, and photo_url — a PHI_VIEW audit log entry is written.  "
+        "Returns an identical generic 403 for ALL failure modes — no information "
+        "about the reason for failure is disclosed to the caller."
     ),
 )
 async def verify_health_card(
@@ -345,7 +451,15 @@ async def verify_health_card(
     request: Request,
     db: DbDep,
     current_user: CurrentUser,
-) -> PatientVerifySummary:
+    full: bool = Query(
+        False,
+        description=(
+            "When true, return PatientVerifySummaryFull (adds patient_id, "
+            "birth_date, mobile_number, photo_url).  A PHI_VIEW audit log "
+            "entry is written.  Only available to authenticated staff."
+        ),
+    ),
+) -> PatientVerifySummary | PatientVerifySummaryFull:
     """
     Verify a health card by QR scan or NFC tap.
 
@@ -488,7 +602,7 @@ async def verify_health_card(
         )
         db.add(verification)
 
-        # Audit VIEW_PHI.
+        # Audit CARD_VERIFY for all successful verifications.
         await write_audit_log(
             db=db,
             user_id=current_user.id,  # type: ignore[attr-defined]
@@ -499,14 +613,37 @@ async def verify_health_card(
                 "method": verify_method,
                 "patient_id": str(patient_id),
                 "success": True,
+                "full_response": full,
             },
             ip_address=_get_client_ip(request),
         )
 
+        # When full=True, write a separate PHI_VIEW audit entry because the
+        # extended response discloses additional PHI (birth_date, mobile, photo).
+        if full:
+            await write_audit_log(
+                db=db,
+                user_id=current_user.id,  # type: ignore[attr-defined]
+                action="PHI_VIEW",
+                entity_type="patient",
+                entity_id=patient_id,
+                metadata={
+                    "trigger": "health_card_verify_full",
+                    "fields_disclosed": [
+                        "patient_id",
+                        "birth_date",
+                        "mobile_number",
+                        "photo_url",
+                    ],
+                    "verify_method": verify_method,
+                },
+                ip_address=_get_client_ip(request),
+            )
+
         await db.commit()
 
-        # Return strictly limited summary — no PHI beyond what's specified.
-        return PatientVerifySummary(
+        # Build the minimal summary shared by both response shapes.
+        base_summary = dict(
             patient_code=patient.patient_code,
             full_name=full_name,
             age=age,
@@ -516,6 +653,24 @@ async def verify_health_card(
             is_pregnant=patient.is_pregnant,
             last_visit_date=last_visit_date,
             card_status=found_card.status,
+        )
+
+        if not full:
+            # Default minimal response — no additional PHI.
+            return PatientVerifySummary(**base_summary)
+
+        # Extended response: include patient_id, birth_date, mobile, photo.
+        # photo_url is the relative path the frontend can prefix with the API host.
+        photo_url: str | None = (
+            f"/media/{patient.photo_path}" if patient.photo_path else None
+        )
+
+        return PatientVerifySummaryFull(
+            **base_summary,
+            patient_id=str(patient_id),
+            birth_date=bd.isoformat(),
+            mobile_number=patient.mobile_number,
+            photo_url=photo_url,
         )
 
     except ForbiddenError:
@@ -581,6 +736,7 @@ async def reissue_health_card(
     card_dict = result["card"]
     return CardGenerateResponse(
         card=HealthCardResponse(**card_dict, qr_data_uri=result["qr_data_uri"]),
+        signed_url=result["signed_url"],
         qr_data_uri=result["qr_data_uri"],
         nfc_payload=result["nfc_payload"],
     )

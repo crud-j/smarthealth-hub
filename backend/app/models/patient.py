@@ -89,6 +89,11 @@ class Patient(Base):
     is_active: Mapped[bool] = mapped_column(
         sa.Boolean, nullable=False, server_default=sa.text("TRUE")
     )
+    # Profile photo — stores a relative path inside backend/media/ (e.g.
+    # "patient_photos/<uuid>.jpg").  NULL means no photo has been uploaded.
+    # Access to the photo file is gated behind JWT auth just like other PHI.
+    photo_path: Mapped[str | None] = mapped_column(sa.String(512), nullable=True)
+
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         sa.ForeignKey("users.id", name="fk_patients_created_by_users"),

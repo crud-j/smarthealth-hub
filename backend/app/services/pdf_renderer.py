@@ -82,6 +82,7 @@ def render_health_card_pdf(
     patient: dict[str, object],
     card: dict[str, object],
     qr_data_uri: str,
+    photo_data_uri: str | None = None,
 ) -> bytes:
     """
     Render the health card front + back into a single 2-page PDF.
@@ -90,29 +91,43 @@ def render_health_card_pdf(
     Call it from an async endpoint like this::
 
         pdf_bytes = await asyncio.to_thread(
-            render_health_card_pdf, patient_dict, card_dict, qr_data_uri
+            render_health_card_pdf, patient_dict, card_dict, qr_data_uri,
+            photo_data_uri=photo_uri,
         )
 
     Args:
-        patient:     Dict of patient display fields.
-                     Front-face required keys:
-                       first_name, last_name, middle_name, patient_code,
-                       sex, age, birth_date_display, mobile_number,
-                       philhealth_no, philhealth_member_type.
-                     Back-face required keys:
-                       address, blood_type, allergies,
-                       last_bp, last_weight, last_height, last_temp,
-                       medical_notes, barangay_name.
-        card:        Dict of card metadata fields.
-                     Required keys: card_number, card_version, issued_at.
-        qr_data_uri: base64 PNG data URI from qr_service.encode_qr_payload().
-                     Included in the front face only.
+        patient:        Dict of patient display fields.
+                        Front-face required keys:
+                          first_name, last_name, middle_name, patient_code,
+                          sex, age, birth_date_display, mobile_number,
+                          philhealth_no, philhealth_member_type.
+                        Back-face required keys:
+                          address, blood_type, allergies,
+                          last_bp, last_weight, last_height, last_temp,
+                          medical_notes, barangay_name.
+                        Photo key (injected automatically if not already set):
+                          photo_data_uri — base64 JPEG data URI, or a
+                          placeholder SVG data URI if no photo exists.
+        card:           Dict of card metadata fields.
+                        Required keys: card_number, card_version, issued_at.
+        qr_data_uri:    base64 PNG data URI from qr_service.encode_qr_payload().
+                        Included in the front face only.
+        photo_data_uri: Optional base64 JPEG (or SVG placeholder) data URI for
+                        the patient's profile photo.  If None, the renderer
+                        calls ``patient_photo_service.get_photo_data_uri()``
+                        using the ``patient_orm`` key in the patient dict (if
+                        available) — otherwise the placeholder SVG is used.
+                        Passing the data URI directly is preferred so the
+                        caller controls when disk I/O happens.
 
     Returns:
         Raw PDF bytes ready for streaming to the client.
 
     Security invariant: qr_data_uri encodes ONLY the HMAC-signed URL
     (patient_id + card_version + sig).  No PHI travels through the QR image.
+    The photo is embedded as a base64 data URI in the PDF, which is acceptable
+    because the PDF is never stored server-side — it is streamed directly to
+    an authenticated client and printed.
     """
     # Deferred import: WeasyPrint has a heavyweight import cost and triggers
     # Cairo/Pango library loading.  Importing here keeps startup time low and
@@ -120,8 +135,29 @@ def render_health_card_pdf(
     # environments using the mock renderer).
     from weasyprint import HTML  # noqa: PLC0415
 
+    # Resolve the patient photo data URI.
+    # Priority: caller-supplied photo_data_uri > patient dict's photo_data_uri
+    # key > placeholder SVG (from patient_photo_service).
+    resolved_photo: str
+    if photo_data_uri is not None:
+        resolved_photo = photo_data_uri
+    elif isinstance(patient.get("photo_data_uri"), str) and patient["photo_data_uri"]:
+        resolved_photo = str(patient["photo_data_uri"])
+    else:
+        # Attempt to resolve from ORM object if the caller provided one.
+        patient_orm = patient.get("_patient_orm")
+        if patient_orm is not None:
+            from app.services.patient_photo_service import get_photo_data_uri  # noqa: PLC0415
+            resolved_photo = get_photo_data_uri(patient_orm)
+        else:
+            from app.services.patient_photo_service import _PLACEHOLDER_DATA_URI  # noqa: PLC0415
+            resolved_photo = _PLACEHOLDER_DATA_URI
+
+    # Inject photo into the patient context dict (copy to avoid mutating caller's dict).
+    patient_with_photo = {**patient, "photo_data_uri": resolved_photo}
+
     template_ctx = {
-        "patient": patient,
+        "patient": patient_with_photo,
         "card": card,
         "qr_code": qr_data_uri,
     }

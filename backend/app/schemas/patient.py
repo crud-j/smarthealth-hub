@@ -102,8 +102,8 @@ class PatientCreate(BaseSchema):
     @field_validator("birth_date")
     @classmethod
     def birth_date_must_be_past(cls, v: date) -> date:
-        if v >= date.today():
-            raise ValueError("Birth date must be in the past.")
+        if v > date.today():
+            raise ValueError("Birth date cannot be in the future.")
         return v
 
     @field_validator("mobile_number", mode="before")
@@ -154,8 +154,8 @@ class PatientUpdate(BaseSchema):
     @field_validator("birth_date")
     @classmethod
     def birth_date_must_be_past(cls, v: date | None) -> date | None:
-        if v is not None and v >= date.today():
-            raise ValueError("Birth date must be in the past.")
+        if v is not None and v > date.today():
+            raise ValueError("Birth date cannot be in the future.")
         return v
 
     @field_validator("mobile_number", mode="before")
@@ -207,6 +207,18 @@ class PatientResponse(BaseSchema):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+
+    # Profile photo — root-relative URL path to the stored photo JPEG,
+    # e.g. "/media/patient_photos/<uuid>.jpg".  None means no photo uploaded.
+    # The frontend should resolve this against the API host base URL.
+    photo_path: str | None = Field(
+        None,
+        description=(
+            "Root-relative URL path to the patient's profile photo JPEG, "
+            "e.g. '/media/patient_photos/<uuid>.jpg'. "
+            "None if no photo has been uploaded yet."
+        ),
+    )
 
     # Computed fields
     age: int = Field(default=0, description="Age in years, computed from birth_date")

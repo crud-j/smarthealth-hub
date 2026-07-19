@@ -12,24 +12,42 @@
  *   NFC Tab — NfcScanButton component triggers NDEFReader tap.
  *
  * Both paths:
- *   1. Call POST /api/v1/health-cards/verify with the decoded payload.
- *   2. On 200: show PatientVerifySummary card + "Check In" button.
+ *   1. Call POST /api/v1/health-cards/verify?full=true with the decoded payload.
+ *   2. On 200: show Patient Quick View with navigation actions.
  *   3. On 403: show generic "Card could not be verified" message.
  *   4. On other errors: show generic error without leaking details.
- *
- * The "Check In" button creates a visit via POST /api/v1/patients/{id}/visits
- * (stubbed — visit creation is Phase 2 and already implemented).
  *
  * TypeScript strict: no `any`.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { apiFetch, ApiError } from "@/lib/api-client";
 import { parseQrPayload, decodeFrameOnMainThread } from "@/lib/qr";
 import { useWebWorker } from "@/hooks/useWebWorker";
 import NfcScanButton from "@/components/cards/NfcScanButton";
-import type { PatientVerifySummary, NfcPayload, CardVerifyRequest } from "@/types/healthCard";
+import type {
+  PatientVerifySummaryFull,
+  NfcPayload,
+  CardVerifyRequest,
+} from "@/types/healthCard";
 import type { QrScannerApi } from "@/workers/qrScanner.worker";
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/**
+ * Host portion for building absolute photo URLs.
+ * Falls back to the API base URL, stripping the "/api/v1" path suffix so we
+ * get the root host (e.g. "http://192.168.100.6:8000").
+ */
+const API_HOST = (() => {
+  const base =
+    process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
+  // Remove trailing /api/v1 (or /api/v1/) to get the bare host.
+  return base.replace(/\/api\/v1\/?$/, "");
+})();
 
 // ---------------------------------------------------------------------------
 // Types
@@ -40,14 +58,487 @@ type VerifyState =
   | { phase: "idle" }
   | { phase: "scanning" }
   | { phase: "loading" }
-  | { phase: "success"; summary: PatientVerifySummary }
+  | { phase: "success"; summary: PatientVerifySummaryFull }
   | { phase: "error"; message: string };
 
 // ---------------------------------------------------------------------------
-// Component
+// Placeholder SVG avatar (displayed when patient has no photo)
 // ---------------------------------------------------------------------------
 
-export default function HealthCardVerifyPage() {
+function AvatarPlaceholder({ size }: { size: number }): React.ReactElement {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 100 100"
+      aria-hidden="true"
+      style={{ display: "block" }}
+    >
+      <rect width="100" height="100" fill="#e2e8f0" />
+      <circle cx="50" cy="35" r="18" fill="#94a3b8" />
+      <ellipse cx="50" cy="80" rx="28" ry="22" fill="#94a3b8" />
+    </svg>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Priority flag badge
+// ---------------------------------------------------------------------------
+
+interface FlagBadgeProps {
+  label: string;
+  icon: string;
+}
+
+function FlagBadge({ label, icon }: FlagBadgeProps): React.ReactElement {
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "4px",
+        padding: "3px 10px",
+        borderRadius: "999px",
+        backgroundColor: "#fef9c3",
+        border: "1px solid #fde047",
+        color: "#713f12",
+        fontSize: "12px",
+        fontWeight: "bold",
+      }}
+    >
+      <span aria-hidden="true">{icon}</span>
+      {label}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Patient Quick View component
+// ---------------------------------------------------------------------------
+
+interface PatientQuickViewProps {
+  summary: PatientVerifySummaryFull;
+  onScanAnother: () => void;
+}
+
+function PatientQuickView({
+  summary,
+  onScanAnother,
+}: PatientQuickViewProps): React.ReactElement {
+  const router = useRouter();
+  const [pdfLoading, setPdfLoading] = useState(false);
+
+  // Format birth date "YYYY-MM-DD" → "Mar 15, 1990"
+  const formattedBirthDate = (() => {
+    if (!summary.birth_date) return "";
+    const [year, month, day] = summary.birth_date.split("-").map(Number);
+    const d = new Date(year, month - 1, day);
+    return d.toLocaleDateString("en-PH", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  })();
+
+  // Format last visit date
+  const formattedLastVisit = summary.last_visit_date
+    ? new Date(summary.last_visit_date).toLocaleDateString("en-PH", {
+        month: "long",
+        day: "numeric",
+        year: "numeric",
+      })
+    : null;
+
+  // Capitalise sex display
+  const sexDisplay =
+    summary.sex === "male"
+      ? "Male"
+      : summary.sex === "female"
+        ? "Female"
+        : summary.sex;
+
+  // Absolute photo URL or null
+  const photoAbsoluteUrl = summary.photo_url
+    ? `${API_HOST}${summary.photo_url}`
+    : null;
+
+  // Card status indicator — green if active, yellow warning otherwise
+  const isActive = summary.card_status === "active";
+
+  // ---------------------------------------------------------------------------
+  // Action handlers
+  // ---------------------------------------------------------------------------
+
+  const handleStartConsultation = () => {
+    void router.push(
+      `/patients/${summary.patient_id}?action=new-visit`
+    );
+  };
+
+  const handleViewFullRecord = () => {
+    void router.push(`/patients/${summary.patient_id}`);
+  };
+
+  const handleBookAppointment = () => {
+    void router.push(`/appointments?patient_id=${summary.patient_id}`);
+  };
+
+  const handlePrintCard = async () => {
+    setPdfLoading(true);
+    try {
+      // Fetch the PDF blob from the authenticated endpoint.
+      const response = await fetch(
+        `${API_HOST}/api/v1/health-cards/${summary.patient_id}/pdf`,
+        { credentials: "include" }
+      );
+      if (!response.ok) {
+        throw new Error(`PDF request failed: HTTP ${response.status}`);
+      }
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      // Open in a new tab — browser handles the print dialog.
+      window.open(blobUrl, "_blank");
+      // Revoke after a short delay to allow the tab to load.
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 10_000);
+    } catch {
+      // Non-blocking — show a minimal inline alert rather than crashing the UI.
+      alert(
+        "Could not generate the health card PDF. Please try again or check the connection."
+      );
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
+
+  return (
+    <div
+      style={{
+        maxWidth: "520px",
+        margin: "32px auto",
+        padding: "0 16px",
+        fontFamily: "system-ui, -apple-system, sans-serif",
+      }}
+    >
+      <div
+        style={{
+          borderRadius: "16px",
+          border: `2px solid ${isActive ? "#16a34a" : "#f59e0b"}`,
+          backgroundColor: "#ffffff",
+          boxShadow: "0 4px 24px rgba(0,0,0,0.08)",
+          overflow: "hidden",
+        }}
+      >
+        {/* ── Header band ──────────────────────────────────────────────── */}
+        <div
+          style={{
+            backgroundColor: isActive ? "#f0fdf4" : "#fffbeb",
+            borderBottom: `1px solid ${isActive ? "#bbf7d0" : "#fde68a"}`,
+            padding: "16px 20px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "12px",
+          }}
+        >
+          <span
+            style={{
+              fontSize: "13px",
+              fontWeight: "700",
+              color: isActive ? "#15803d" : "#92400e",
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+            }}
+          >
+            {isActive ? (
+              <>
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={3}
+                  aria-hidden="true"
+                >
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                Card Verified Successfully
+              </>
+            ) : (
+              <>
+                <span aria-hidden="true">⚠</span>
+                Card status: {summary.card_status}
+              </>
+            )}
+          </span>
+
+          <button
+            type="button"
+            onClick={onScanAnother}
+            style={{
+              padding: "6px 14px",
+              borderRadius: "8px",
+              backgroundColor: "transparent",
+              color: "#64748b",
+              border: "1px solid #cbd5e1",
+              fontSize: "12px",
+              fontWeight: "600",
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            Scan Another
+          </button>
+        </div>
+
+        {/* ── Patient identity section ──────────────────────────────────── */}
+        <div
+          style={{
+            padding: "20px",
+            display: "flex",
+            gap: "16px",
+            alignItems: "flex-start",
+          }}
+        >
+          {/* Avatar */}
+          <div
+            style={{
+              flexShrink: 0,
+              width: "72px",
+              height: "72px",
+              borderRadius: "50%",
+              overflow: "hidden",
+              border: "2px solid #e2e8f0",
+              backgroundColor: "#f8fafc",
+            }}
+            aria-label="Patient photo"
+          >
+            {photoAbsoluteUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={photoAbsoluteUrl}
+                alt={`Photo of ${summary.full_name}`}
+                width={72}
+                height={72}
+                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                onError={(e) => {
+                  // If the photo fails to load, hide the broken image and
+                  // fall back to the placeholder via a sibling element.
+                  (e.currentTarget as HTMLImageElement).style.display = "none";
+                  const sibling = e.currentTarget
+                    .nextElementSibling as HTMLElement | null;
+                  if (sibling) sibling.style.display = "block";
+                }}
+              />
+            ) : null}
+            {/* Placeholder is shown when no photo_url or on image load error */}
+            <div
+              style={{
+                display: photoAbsoluteUrl ? "none" : "block",
+              }}
+            >
+              <AvatarPlaceholder size={72} />
+            </div>
+          </div>
+
+          {/* Name / demographics */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <h2
+              style={{
+                margin: "0 0 2px",
+                fontSize: "18px",
+                fontWeight: "700",
+                color: "#0f172a",
+                lineHeight: 1.25,
+                wordBreak: "break-word",
+              }}
+            >
+              {summary.full_name}
+            </h2>
+            <p
+              style={{
+                margin: "0 0 6px",
+                fontSize: "13px",
+                color: "#0d9488",
+                fontWeight: "700",
+                letterSpacing: "0.03em",
+              }}
+            >
+              {summary.patient_code}
+            </p>
+            <p
+              style={{
+                margin: "0 0 4px",
+                fontSize: "13px",
+                color: "#374151",
+              }}
+            >
+              {summary.age} yrs &bull; {sexDisplay}
+              {formattedBirthDate ? ` • ${formattedBirthDate}` : ""}
+            </p>
+            {summary.mobile_number && (
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: "13px",
+                  color: "#374151",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "4px",
+                }}
+              >
+                <span aria-hidden="true">📞</span>
+                {summary.mobile_number}
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* ── Last visit + priority flags ───────────────────────────────── */}
+        <div
+          style={{
+            padding: "0 20px 16px",
+            borderBottom: "1px solid #f1f5f9",
+          }}
+        >
+          {formattedLastVisit && (
+            <p
+              style={{
+                margin: "0 0 10px",
+                fontSize: "13px",
+                color: "#64748b",
+              }}
+            >
+              Last Visit:{" "}
+              <strong style={{ color: "#374151" }}>{formattedLastVisit}</strong>
+            </p>
+          )}
+
+          {(summary.is_pregnant || summary.is_senior || summary.is_pwd) && (
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                gap: "6px",
+              }}
+              aria-label="Priority flags"
+            >
+              {summary.is_pregnant && (
+                <FlagBadge label="Pregnant" icon="🤰" />
+              )}
+              {summary.is_senior && (
+                <FlagBadge label="Senior Citizen" icon="👴" />
+              )}
+              {summary.is_pwd && <FlagBadge label="PWD" icon="♿" />}
+            </div>
+          )}
+        </div>
+
+        {/* ── Quick action buttons ──────────────────────────────────────── */}
+        <div
+          style={{
+            padding: "16px 20px 20px",
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: "10px",
+          }}
+        >
+          {/* Start Consultation / Log Visit */}
+          <button
+            type="button"
+            onClick={handleStartConsultation}
+            style={{
+              padding: "12px 8px",
+              borderRadius: "10px",
+              backgroundColor: "#0d9488",
+              color: "#ffffff",
+              border: "none",
+              fontSize: "13px",
+              fontWeight: "700",
+              cursor: "pointer",
+              lineHeight: 1.3,
+              textAlign: "center",
+            }}
+          >
+            Start Consultation
+          </button>
+
+          {/* View Full Record */}
+          <button
+            type="button"
+            onClick={handleViewFullRecord}
+            style={{
+              padding: "12px 8px",
+              borderRadius: "10px",
+              backgroundColor: "#f8fafc",
+              color: "#0f172a",
+              border: "1px solid #cbd5e1",
+              fontSize: "13px",
+              fontWeight: "700",
+              cursor: "pointer",
+              lineHeight: 1.3,
+              textAlign: "center",
+            }}
+          >
+            View Full Record
+          </button>
+
+          {/* Book Appointment */}
+          <button
+            type="button"
+            onClick={handleBookAppointment}
+            style={{
+              padding: "12px 8px",
+              borderRadius: "10px",
+              backgroundColor: "#f8fafc",
+              color: "#0f172a",
+              border: "1px solid #cbd5e1",
+              fontSize: "13px",
+              fontWeight: "700",
+              cursor: "pointer",
+              lineHeight: 1.3,
+              textAlign: "center",
+            }}
+          >
+            Book Appointment
+          </button>
+
+          {/* Print New Card */}
+          <button
+            type="button"
+            onClick={() => void handlePrintCard()}
+            disabled={pdfLoading}
+            style={{
+              padding: "12px 8px",
+              borderRadius: "10px",
+              backgroundColor: pdfLoading ? "#e2e8f0" : "#f8fafc",
+              color: pdfLoading ? "#94a3b8" : "#0f172a",
+              border: "1px solid #cbd5e1",
+              fontSize: "13px",
+              fontWeight: "700",
+              cursor: pdfLoading ? "not-allowed" : "pointer",
+              lineHeight: 1.3,
+              textAlign: "center",
+            }}
+          >
+            {pdfLoading ? "Generating..." : "Print New Card"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main page component
+// ---------------------------------------------------------------------------
+
+export default function HealthCardVerifyPage(): React.ReactElement {
   const [tab, setTab] = useState<Tab>("qr");
   const [state, setState] = useState<VerifyState>({ phase: "idle" });
 
@@ -63,15 +554,17 @@ export default function HealthCardVerifyPage() {
   );
 
   // ---------------------------------------------------------------------------
-  // API call — verify endpoint
+  // API call — verify endpoint with ?full=true for staff quick view
   // ---------------------------------------------------------------------------
 
   const callVerifyApi = useCallback(
     async (body: CardVerifyRequest): Promise<void> => {
       setState({ phase: "loading" });
       try {
-        const summary = await apiFetch<PatientVerifySummary>(
-          "/health-cards/verify",
+        // Pass ?full=true to receive PatientVerifySummaryFull (patient_id,
+        // birth_date, mobile_number, photo_url) needed for the Quick View UI.
+        const summary = await apiFetch<PatientVerifySummaryFull>(
+          "/health-cards/verify?full=true",
           {
             method: "POST",
             body: JSON.stringify(body),
@@ -239,172 +732,30 @@ export default function HealthCardVerifyPage() {
   );
 
   // ---------------------------------------------------------------------------
-  // Check In handler (creates a visit for the verified patient)
+  // Reset scan
   // ---------------------------------------------------------------------------
 
-  const handleCheckIn = useCallback(async (patientCode: string) => {
-    // The verify summary includes patient_code but not the UUID.
-    // For the check-in button to create a visit it would need the patient UUID.
-    // This is a UI stub — in practice the full page would have fetched the
-    // patient record by patient_code via GET /patients?q={patient_code} first.
-    // Leaving as a non-destructive informational action for Phase 3 scope.
-    alert(
-      `Check-in initiated for ${patientCode}. ` +
-        "Full visit creation is handled via the patient profile page."
-    );
-  }, []);
-
-  // ---------------------------------------------------------------------------
-  // Render helpers
-  // ---------------------------------------------------------------------------
-
-  const resetScan = () => {
+  const resetScan = useCallback(() => {
     setState({ phase: "idle" });
     if (tab === "qr") void startCamera();
-  };
+  }, [tab, startCamera]);
 
-  // ── Success overlay ────────────────────────────────────────────────────
+  // ---------------------------------------------------------------------------
+  // Render: Patient Quick View (success)
+  // ---------------------------------------------------------------------------
 
   if (state.phase === "success") {
-    const { summary } = state;
-    const flags: string[] = [];
-    if (summary.is_senior) flags.push("Senior Citizen");
-    if (summary.is_pwd) flags.push("PWD");
-    if (summary.is_pregnant) flags.push("Pregnant");
-
     return (
-      <div style={{ maxWidth: "480px", margin: "40px auto", padding: "0 16px" }}>
-        <div
-          style={{
-            borderRadius: "12px",
-            border: "2px solid #16a34a",
-            backgroundColor: "#f0fdf4",
-            padding: "24px",
-          }}
-        >
-          {/* Success header */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "12px",
-              marginBottom: "16px",
-            }}
-          >
-            <div
-              style={{
-                width: "40px",
-                height: "40px",
-                borderRadius: "50%",
-                backgroundColor: "#16a34a",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                flexShrink: 0,
-              }}
-              aria-hidden="true"
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={3}>
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-            </div>
-            <div>
-              <h2 style={{ margin: 0, fontSize: "18px", color: "#15803d" }}>
-                Card Verified
-              </h2>
-              <p style={{ margin: 0, fontSize: "13px", color: "#64748b" }}>
-                Card status: <strong>{summary.card_status}</strong>
-              </p>
-            </div>
-          </div>
-
-          {/* Patient summary */}
-          <div
-            style={{
-              backgroundColor: "#ffffff",
-              borderRadius: "8px",
-              padding: "16px",
-              marginBottom: "16px",
-            }}
-          >
-            <p style={{ margin: "0 0 4px", fontSize: "18px", fontWeight: "bold" }}>
-              {summary.full_name}
-            </p>
-            <p style={{ margin: "0 0 8px", fontSize: "13px", color: "#0d9488", fontWeight: "bold" }}>
-              {summary.patient_code}
-            </p>
-            <p style={{ margin: "0 0 4px", fontSize: "13px", color: "#374151" }}>
-              {summary.sex === "male" ? "Male" : "Female"}, {summary.age} years old
-            </p>
-            {summary.last_visit_date && (
-              <p style={{ margin: "0 0 4px", fontSize: "12px", color: "#64748b" }}>
-                Last visit:{" "}
-                {new Date(summary.last_visit_date).toLocaleDateString("en-PH")}
-              </p>
-            )}
-            {flags.length > 0 && (
-              <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginTop: "8px" }}>
-                {flags.map((flag) => (
-                  <span
-                    key={flag}
-                    style={{
-                      padding: "2px 8px",
-                      borderRadius: "999px",
-                      backgroundColor: "#fef9c3",
-                      border: "1px solid #fde047",
-                      color: "#713f12",
-                      fontSize: "11px",
-                      fontWeight: "bold",
-                    }}
-                  >
-                    {flag}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Actions */}
-          <div style={{ display: "flex", gap: "10px" }}>
-            <button
-              type="button"
-              onClick={() => void handleCheckIn(summary.patient_code)}
-              style={{
-                flex: 1,
-                padding: "12px",
-                borderRadius: "8px",
-                backgroundColor: "#0d9488",
-                color: "#ffffff",
-                border: "none",
-                fontSize: "14px",
-                fontWeight: "bold",
-                cursor: "pointer",
-              }}
-            >
-              Check In
-            </button>
-            <button
-              type="button"
-              onClick={resetScan}
-              style={{
-                padding: "12px 16px",
-                borderRadius: "8px",
-                backgroundColor: "transparent",
-                color: "#64748b",
-                border: "1px solid #cbd5e1",
-                fontSize: "14px",
-                cursor: "pointer",
-              }}
-            >
-              Scan Another
-            </button>
-          </div>
-        </div>
-      </div>
+      <PatientQuickView
+        summary={state.summary}
+        onScanAnother={resetScan}
+      />
     );
   }
 
-  // ── Error overlay ──────────────────────────────────────────────────────
+  // ---------------------------------------------------------------------------
+  // Render: Error overlay
+  // ---------------------------------------------------------------------------
 
   if (state.phase === "error") {
     return (
@@ -419,11 +770,18 @@ export default function HealthCardVerifyPage() {
             textAlign: "center",
           }}
         >
-          <div style={{ fontSize: "40px", marginBottom: "12px" }} aria-hidden="true">
+          <div
+            style={{ fontSize: "40px", marginBottom: "12px" }}
+            aria-hidden="true"
+          >
             ⚠
           </div>
-          <h2 style={{ margin: "0 0 8px", color: "#dc2626" }}>Verification Failed</h2>
-          <p style={{ margin: "0 0 20px", color: "#374151" }}>{state.message}</p>
+          <h2 style={{ margin: "0 0 8px", color: "#dc2626" }}>
+            Verification Failed
+          </h2>
+          <p style={{ margin: "0 0 20px", color: "#374151" }}>
+            {state.message}
+          </p>
           <button
             type="button"
             onClick={resetScan}
@@ -445,7 +803,13 @@ export default function HealthCardVerifyPage() {
     );
   }
 
-  // ── Main verify screen ─────────────────────────────────────────────────
+  // ---------------------------------------------------------------------------
+  // Render: Main verify screen (idle / scanning / loading)
+  // ---------------------------------------------------------------------------
+
+  // Capture isLoading as a boolean before narrowed-type JSX branches so the
+  // NfcScanButton disabled prop does not trigger a TS no-overlap error.
+  const isLoading = state.phase === "loading";
 
   return (
     <div style={{ maxWidth: "540px", margin: "0 auto", padding: "24px 16px" }}>
@@ -453,7 +817,8 @@ export default function HealthCardVerifyPage() {
         Verify Health Card
       </h1>
       <p style={{ margin: "0 0 20px", fontSize: "14px", color: "#64748b" }}>
-        Scan the patient&apos;s QR code or tap their NFC card to verify identity.
+        Scan the patient&apos;s QR code or tap their NFC card to verify
+        identity.
       </p>
 
       {/* Tab switcher */}
@@ -479,7 +844,8 @@ export default function HealthCardVerifyPage() {
               color: tab === t ? "#0d9488" : "#64748b",
               background: "transparent",
               border: "none",
-              borderBottom: tab === t ? "2px solid #0d9488" : "2px solid transparent",
+              borderBottom:
+                tab === t ? "2px solid #0d9488" : "2px solid transparent",
               cursor: "pointer",
               marginBottom: "-1px",
             }}
@@ -498,7 +864,9 @@ export default function HealthCardVerifyPage() {
         >
           {/* Loading state */}
           {state.phase === "loading" && (
-            <div style={{ textAlign: "center", padding: "20px", color: "#0d9488" }}>
+            <div
+              style={{ textAlign: "center", padding: "20px", color: "#0d9488" }}
+            >
               Verifying...
             </div>
           )}
@@ -567,7 +935,15 @@ export default function HealthCardVerifyPage() {
                   gap: "12px",
                 }}
               >
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+                <svg
+                  width="48"
+                  height="48"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={1.5}
+                  aria-hidden="true"
+                >
                   <rect width="6" height="6" x="3" y="3" rx="1" />
                   <rect width="6" height="6" x="15" y="3" rx="1" />
                   <rect width="6" height="6" x="3" y="15" rx="1" />
@@ -575,7 +951,9 @@ export default function HealthCardVerifyPage() {
                   <path d="M15 21v-3h3" />
                   <path d="M21 21h-3v-3" />
                 </svg>
-                <p style={{ margin: 0, fontSize: "13px" }}>Starting camera...</p>
+                <p style={{ margin: 0, fontSize: "13px" }}>
+                  Starting camera...
+                </p>
               </div>
             )}
           </div>
@@ -583,7 +961,14 @@ export default function HealthCardVerifyPage() {
           {/* Hidden canvas for frame capture */}
           <canvas ref={canvasRef} style={{ display: "none" }} />
 
-          <p style={{ textAlign: "center", fontSize: "13px", color: "#64748b", margin: 0 }}>
+          <p
+            style={{
+              textAlign: "center",
+              fontSize: "13px",
+              color: "#64748b",
+              margin: 0,
+            }}
+          >
             Hold the QR code in front of the camera
           </p>
         </div>
@@ -596,17 +981,24 @@ export default function HealthCardVerifyPage() {
           style={{ display: "flex", flexDirection: "column", gap: "16px" }}
         >
           {state.phase === "loading" ? (
-            <div style={{ textAlign: "center", padding: "20px", color: "#0d9488" }}>
+            <div
+              style={{
+                textAlign: "center",
+                padding: "20px",
+                color: "#0d9488",
+              }}
+            >
               Verifying...
             </div>
           ) : (
             <>
               <p style={{ margin: 0, fontSize: "14px", color: "#374151" }}>
-                Ask the patient to hold their NFC health card against the back of this device.
+                Ask the patient to hold their NFC health card against the back
+                of this device.
               </p>
               <NfcScanButton
                 onResult={handleNfcResult}
-                disabled={state.phase === "loading"}
+                disabled={isLoading}
               />
             </>
           )}

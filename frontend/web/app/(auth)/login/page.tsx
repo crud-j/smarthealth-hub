@@ -62,7 +62,10 @@ export default function LoginPage() {
       const { sessionHint } = await runStep1(email.trim(), password);
       // Store the user UUID between the two login steps.
       sessionStorage.setItem("mfa_user_id", sessionHint);
-      window.location.href = "/verify-otp";
+      // Carry the ?next= param through to verify-otp so post-OTP redirect works.
+      const params = new URLSearchParams(window.location.search);
+      const next = params.get("next");
+      window.location.href = next ? `/verify-otp?next=${encodeURIComponent(next)}` : "/verify-otp";
     } catch (err) {
       // ApiError message is surfaced via the `apiError` state from useLogin.
       // Non-ApiError failures (network outage, etc.) get a generic message.

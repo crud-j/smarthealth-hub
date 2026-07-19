@@ -160,6 +160,7 @@ async def generate_card(
         )
         return {
             "card": _card_to_response_dict(existing_card),
+            "signed_url": _signed_url,
             "qr_data_uri": qr_data_uri,
             "nfc_payload": nfc_payload_service.build_nfc_payload(
                 str(patient_id), existing_card.card_version
@@ -215,6 +216,7 @@ async def generate_card(
 
     return {
         "card": _card_to_response_dict(new_card),
+        "signed_url": signed_url,
         "qr_data_uri": qr_data_uri,
         "nfc_payload": nfc_payload_service.build_nfc_payload(
             str(patient_id), card_version
@@ -349,6 +351,7 @@ async def reissue_card(
 
     return {
         "card": _card_to_response_dict(new_card),
+        "signed_url": signed_url,
         "qr_data_uri": qr_data_uri,
         "nfc_payload": nfc_payload_service.build_nfc_payload(
             str(patient_id), new_card_version

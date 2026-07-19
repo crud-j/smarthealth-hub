@@ -57,7 +57,11 @@ export default function VerifyOtpPage() {
       // Clear the session hint — it is no longer needed.
       sessionStorage.removeItem("mfa_user_id");
       hasRedirected.current = true;
-      window.location.href = "/dashboard";
+      // Redirect to ?next= if present and is a safe relative path, else dashboard.
+      const params = new URLSearchParams(window.location.search);
+      const next = params.get("next");
+      const safePath = next && next.startsWith("/") && !next.startsWith("//") ? next : "/dashboard";
+      window.location.href = safePath;
     } catch (err) {
       const message =
         err instanceof ApiError

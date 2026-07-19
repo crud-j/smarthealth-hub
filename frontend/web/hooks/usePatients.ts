@@ -59,6 +59,8 @@ interface PatientApiResponse {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  /** Root-relative URL to the patient's profile photo, or null. */
+  photo_path?: string | null;
 }
 
 interface PatientSummaryApiResponse {
@@ -139,6 +141,7 @@ function mapPatient(r: PatientApiResponse): Patient {
     isActive: r.is_active,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
+    photoPath: r.photo_path ?? null,
   };
 }
 

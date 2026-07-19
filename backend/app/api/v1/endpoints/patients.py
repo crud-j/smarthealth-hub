@@ -19,12 +19,12 @@ SDP Reference: Section 6.2
 from __future__ import annotations
 
 import uuid
-from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Request, Response, status
+from fastapi import APIRouter, Query, Request, Response, status
 
 from app.core.security import CurrentUser, require_role
 from app.db.session import DbDep
+from app.models.patient import Patient
 from app.schemas.patient import (
     PaginatedPatients,
     PatientCreate,
@@ -42,6 +42,59 @@ router = APIRouter(prefix="/patients", tags=["patients"])
 _BHW_PLUS = require_role("bhw", "physician", "admin_staff", "admin")
 # Admin-only for destructive operations
 _ADMIN_ONLY = require_role("admin")
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _get_client_ip(request: Request) -> str | None:
+    """Extract the real client IP, respecting the X-Forwarded-For header."""
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    if request.client:
+        return request.client.host
+    return None
+
+
+def _build_patient_response(patient: Patient) -> PatientResponse:
+    """
+    Map a Patient ORM instance to a PatientResponse schema.
+
+    Centralised here so that all endpoints that return a PatientResponse
+    (create, get, update) emit consistent fields — including ``photo_path``
+    which was added in Phase 3 (migration 0004).
+    """
+    # Build the root-relative photo URL from the stored relative path.
+    # e.g. "patient_photos/<uuid>.jpg" → "/media/patient_photos/<uuid>.jpg"
+    photo_path_url: str | None = (
+        f"/media/{patient.photo_path}" if patient.photo_path else None
+    )
+    return PatientResponse(
+        id=str(patient.id),
+        patient_code=patient.patient_code,
+        first_name=patient.first_name,
+        middle_name=patient.middle_name,
+        last_name=patient.last_name,
+        birth_date=patient.birth_date,
+        sex=patient.sex,
+        civil_status=patient.civil_status,
+        mobile_number=patient.mobile_number,
+        address=patient.address,
+        guardian_name=patient.guardian_name,
+        guardian_contact=patient.guardian_contact,
+        philhealth_no=patient.philhealth_no,
+        philhealth_member_type=patient.philhealth_member_type,
+        is_pwd=patient.is_pwd,
+        is_senior=patient.is_senior,
+        is_pregnant=patient.is_pregnant,
+        is_active=patient.is_active,
+        created_at=patient.created_at,
+        updated_at=patient.updated_at,
+        photo_path=photo_path_url,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -134,29 +187,7 @@ async def create_patient(
     patient = await patient_service.create_patient(
         db, data=payload, created_by_id=current_user.id, ip_address=ip
     )
-
-    return PatientResponse(
-        id=str(patient.id),
-        patient_code=patient.patient_code,
-        first_name=patient.first_name,
-        middle_name=patient.middle_name,
-        last_name=patient.last_name,
-        birth_date=patient.birth_date,
-        sex=patient.sex,
-        civil_status=patient.civil_status,
-        mobile_number=patient.mobile_number,
-        address=patient.address,
-        guardian_name=patient.guardian_name,
-        guardian_contact=patient.guardian_contact,
-        philhealth_no=patient.philhealth_no,
-        philhealth_member_type=patient.philhealth_member_type,
-        is_pwd=patient.is_pwd,
-        is_senior=patient.is_senior,
-        is_pregnant=patient.is_pregnant,
-        is_active=patient.is_active,
-        created_at=patient.created_at,
-        updated_at=patient.updated_at,
-    )
+    return _build_patient_response(patient)
 
 
 # ---------------------------------------------------------------------------
@@ -198,28 +229,7 @@ async def get_patient(
     )
     await db.commit()
 
-    return PatientResponse(
-        id=str(patient.id),
-        patient_code=patient.patient_code,
-        first_name=patient.first_name,
-        middle_name=patient.middle_name,
-        last_name=patient.last_name,
-        birth_date=patient.birth_date,
-        sex=patient.sex,
-        civil_status=patient.civil_status,
-        mobile_number=patient.mobile_number,
-        address=patient.address,
-        guardian_name=patient.guardian_name,
-        guardian_contact=patient.guardian_contact,
-        philhealth_no=patient.philhealth_no,
-        philhealth_member_type=patient.philhealth_member_type,
-        is_pwd=patient.is_pwd,
-        is_senior=patient.is_senior,
-        is_pregnant=patient.is_pregnant,
-        is_active=patient.is_active,
-        created_at=patient.created_at,
-        updated_at=patient.updated_at,
-    )
+    return _build_patient_response(patient)
 
 
 # ---------------------------------------------------------------------------
@@ -252,29 +262,7 @@ async def update_patient(
     patient = await patient_service.update_patient(
         db, patient_id=patient_id, data=payload, updated_by_id=current_user.id, ip_address=ip
     )
-
-    return PatientResponse(
-        id=str(patient.id),
-        patient_code=patient.patient_code,
-        first_name=patient.first_name,
-        middle_name=patient.middle_name,
-        last_name=patient.last_name,
-        birth_date=patient.birth_date,
-        sex=patient.sex,
-        civil_status=patient.civil_status,
-        mobile_number=patient.mobile_number,
-        address=patient.address,
-        guardian_name=patient.guardian_name,
-        guardian_contact=patient.guardian_contact,
-        philhealth_no=patient.philhealth_no,
-        philhealth_member_type=patient.philhealth_member_type,
-        is_pwd=patient.is_pwd,
-        is_senior=patient.is_senior,
-        is_pregnant=patient.is_pregnant,
-        is_active=patient.is_active,
-        created_at=patient.created_at,
-        updated_at=patient.updated_at,
-    )
+    return _build_patient_response(patient)
 
 
 # ---------------------------------------------------------------------------
@@ -341,18 +329,3 @@ async def verify_patient(
     return await patient_service.verify_patient(
         db, patient_id=patient_id, verified_by_id=current_user.id, ip_address=ip
     )
-
-
-# ---------------------------------------------------------------------------
-# Internal helper
-# ---------------------------------------------------------------------------
-
-
-def _get_client_ip(request: Request) -> str | None:
-    """Extract the real client IP, respecting the X-Forwarded-For header."""
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    if request.client:
-        return request.client.host
-    return None
