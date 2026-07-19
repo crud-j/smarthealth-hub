@@ -1,60 +1,45 @@
-import type { Metadata } from "next";
+/**
+ * Dashboard layout — authenticated shell.
+ *
+ * This is a Client Component because it needs useState for the mobile
+ * sidebar open/close toggle and useCurrentUser for role-aware sidebar links.
+ *
+ * Server-side auth guard: Next.js middleware (middleware.ts) checks the JWT
+ * cookie and redirects unauthenticated users to /login before this renders.
+ */
+"use client";
 
-export const metadata: Metadata = {
-  title: "Dashboard",
-};
+import { useState } from "react";
+import Sidebar from "@/components/layout/Sidebar";
+import Topbar from "@/components/layout/Topbar";
+import { useCurrentUser } from "@/hooks/useAuth";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
 }
 
-/**
- * Dashboard layout — wraps all authenticated pages.
- * Will include: sidebar navigation, top header, and main content area.
- * Sidebar and header components will be added in Phase 1.
- */
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const { user } = useCurrentUser();
+
   return (
-    <div style={{ display: "flex", minHeight: "100vh" }}>
-      {/* Sidebar placeholder — will be replaced by <AppSidebar /> in Phase 1 */}
-      <aside
-        style={{
-          width: 260,
-          background: "#0f172a",
-          color: "white",
-          padding: "1.5rem 1rem",
-          flexShrink: 0,
-        }}
-      >
-        <div style={{ fontWeight: 700, fontSize: "1rem", marginBottom: "2rem", color: "#14b8a6" }}>
-          SmartHealth Hub
-        </div>
-        <nav aria-label="Main navigation">
-          {/* TODO: Replace with NavLink components in Phase 1 */}
-          <p style={{ fontSize: "0.75rem", color: "#64748b" }}>Navigation — Phase 1</p>
-        </nav>
-      </aside>
+    <div className="flex min-h-screen bg-slate-50">
+      {/* Sidebar — fixed on desktop, slide-in on mobile */}
+      <Sidebar
+        user={user}
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+      />
 
-      {/* Main content area */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-        {/* Header placeholder */}
-        <header
-          style={{
-            height: 64,
-            background: "white",
-            borderBottom: "1px solid #e2e8f0",
-            display: "flex",
-            alignItems: "center",
-            padding: "0 1.5rem",
-            flexShrink: 0,
-          }}
-        >
-          {/* TODO: Replace with <AppHeader /> in Phase 1 */}
-          <span style={{ fontSize: "0.875rem", color: "#64748b" }}>Header — Phase 1</span>
-        </header>
+      {/* Main content column */}
+      <div className="flex min-w-0 flex-1 flex-col lg:ml-0">
+        <Topbar
+          user={user}
+          onMenuToggle={() => setSidebarOpen((v) => !v)}
+        />
 
-        {/* Page content */}
-        <main style={{ flex: 1, padding: "1.5rem", background: "#f8fafc" }}>{children}</main>
+        {/* Page content — receives each dashboard page as children */}
+        <main className="flex-1 overflow-y-auto p-4 lg:p-6">{children}</main>
       </div>
     </div>
   );
