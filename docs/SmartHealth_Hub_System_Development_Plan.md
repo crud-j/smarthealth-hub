@@ -1283,7 +1283,7 @@ The physical/digital card is a **pointer, not a database**. The NFC chip and QR 
 
 ### 8.2 Card Data Payload
 
-**NFC tag (NDEF record) contents:**
+**NFC tag (NDEF record) contents — pointer only, no PHI:**
 ```json
 {
   "patient_id": "8f14e45f-...-uuid",
@@ -1296,6 +1296,64 @@ The physical/digital card is a **pointer, not a database**. The NFC chip and QR 
 https://smarthealthhub.local/verify?pid=8f14e45f-...&v=1&sig=<hmac_signature>
 ```
 The `sig` is an HMAC-SHA256 of `patient_id + card_version` using a server-held secret — this lets the backend instantly reject tampered/forged QR codes without a database round-trip, before doing the authoritative lookup.
+
+**Security invariant:** Neither the NFC chip nor the QR code payload ever contains PHI (name, birth date, address, PhilHealth number, diagnosis, etc.). They are pure pointers — a lost or cloned card cannot leak sensitive data.
+
+#### 8.2.1 Physical Card Layout (CR80 — 85.6mm × 54mm)
+
+**Front face:**
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  SMARTHEALTH HUB          BARANGAY HEALTH CENTER       [NFC ⊡] │
+├──────────────────┬──────────────────────────────────────────────┤
+│                  │  LASTNAME, Firstname M.  (bold, large)       │
+│  [PHOTO          │  Age: XX    Sex: Male/Female                  │
+│   PLACEHOLDER    │  Birthday: Month DD, YYYY                    │
+│   14mm × 18mm]   │  Contact: +63 XXX XXX XXXX                   │
+│                  │  PhilHealth: XXXX-XXXX  [member/dependent]   │
+├──────────────────┴──────────────────────────────────────────────┤
+│  [TEAL STRIP]  Patient Code: BHC-2026-000001   [QR 17×9mm box] │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Back face:**
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  SMARTHEALTH HUB                        PATIENT HEALTH CARD     │
+├─────────────────────────────────────────────────────────────────┤
+│  ADDRESS: [complete address]                                     │
+├───────────────────────┬─────────────────────────────────────────┤
+│  Blood Type: [--]     │  Allergies: [None on record / list]     │
+├───────────────────────┴─────────────────────────────────────────┤
+│  LAST RECORDED VITAL SIGNS                                       │
+│  BP: ---  Wt: --- kg  Ht: --- cm  Temp: ---°C                  │
+├─────────────────────────────────────────────────────────────────┤
+│  IMPORTANT NOTES: [medical notes summary or "No notes"]         │
+├─────────────────────────────────────────────────────────────────┤
+│  [DARK TEAL FOOTER]  "This card is property of <BHC name>."    │
+│  "If found, please return to the nearest health center."        │
+│                                            [OFFICIAL SEAL ○]    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Template variables passed to the renderer** (`patient_dict` in `download_health_card_pdf`):
+
+| Variable | Source | Default |
+|---|---|---|
+| `first_name`, `last_name`, `middle_name` | `Patient` model | — |
+| `patient_code` | `Patient` model | — |
+| `sex` | `Patient` model | — |
+| `age` | Computed: `(today - birth_date).years` | `0` |
+| `birth_date_display` | Formatted: `"Month DD, YYYY"` | `"—"` |
+| `mobile_number` | `Patient.mobile_number` | `"—"` |
+| `philhealth_no` | `Patient.philhealth_no` | `"—"` |
+| `philhealth_member_type` | `Patient.philhealth_member_type` | `""` |
+| `address` | `Patient.address` | `"—"` |
+| `blood_type` | Visit/MedHistory (future enrichment) | `"—"` |
+| `allergies` | Visit/MedHistory (future enrichment) | `"None on record"` |
+| `last_bp`, `last_weight`, `last_height`, `last_temp` | Last visit (future) | `"—"` |
+| `medical_notes` | Medical history (future) | `""` |
+| `barangay_name` | Config constant | `"Sta. Rosa 1 BHS, Marilao, Bulacan"` |
 
 ### 8.3 Generation Flow
 
@@ -1317,27 +1375,50 @@ flowchart LR
 
 ### 8.4 WeasyPrint Rendering
 
-The card template is authored as plain HTML/CSS (`app/templates/health_card/card_front.html`), which keeps the **visual design editable without touching Python code** — a BHW-facing admin could even hand a design update to a front-end dev independently.
+The card templates are authored as plain HTML/CSS under `backend/app/templates/health_card/`, keeping the **visual design editable without touching Python code**.
+
+**Template files:**
+
+| File | Purpose |
+|---|---|
+| `card_front.html` | Front face — demographics, photo placeholder, QR strip |
+| `card_back.html` | Back face — address, vitals snapshot, notes, stamp |
+| `card_styles.css` | Shared stylesheet — CR80 dimensions, teal color scheme |
+
+**Rendering strategy — single combined document:**
+
+Both face templates are rendered to HTML strings by Jinja2, then their `<body>` contents are extracted and combined into one `<html>…</html>` document before being passed to WeasyPrint in a single `write_pdf()` call.  The `.card-back` CSS class carries `page-break-before: always`, which instructs WeasyPrint to emit the back face on page 2 within this single render pass.  This avoids the complexity and edge-cases of merging two separately rendered WeasyPrint documents.
 
 ```python
-# app/services/pdf_renderer.py
+# app/services/pdf_renderer.py (simplified)
 from weasyprint import HTML
 from jinja2 import Environment, FileSystemLoader
+import pathlib
 
-env = Environment(loader=FileSystemLoader("app/templates/health_card"))
+_TEMPLATE_DIR = pathlib.Path(__file__).parent.parent / "templates" / "health_card"
+_env = Environment(loader=FileSystemLoader(str(_TEMPLATE_DIR)))
 
 def render_health_card_pdf(patient: dict, card: dict, qr_data_uri: str) -> bytes:
-    template = env.get_template("card_front.html")
-    html_content = template.render(
-        patient=patient,
-        card=card,
-        qr_code=qr_data_uri,
-        css_path="card_styles.css",
-    )
-    return HTML(string=html_content, base_url="app/templates/health_card").write_pdf()
+    ctx = {"patient": patient, "card": card, "qr_code": qr_data_uri}
+    front_html = _env.get_template("card_front.html").render(**ctx)
+    back_html  = _env.get_template("card_back.html").render(**ctx)
+    combined   = _combine_into_single_document(front_html, back_html)
+    # base_url must be an absolute URI so card_styles.css resolves correctly
+    # on Windows (common WeasyPrint pitfall with relative paths).
+    base_url = _TEMPLATE_DIR.as_uri() + "/"
+    return HTML(string=combined, base_url=base_url).write_pdf()
 ```
 
-Card dimensions follow standard **CR80 ID card size (85.6mm × 54mm)**, defined in `card_styles.css` via `@page` rules, with bleed margins for professional printing.
+**CSS constraints for WeasyPrint compatibility:**
+
+- All measurements use `mm` or `pt` — `px` units are ignored in the `@page` print context.
+- Font stack: `Arial, Helvetica, "DejaVu Sans", sans-serif` — no external `@font-face` URLs (WeasyPrint on Windows cannot reach Google Fonts in offline/server environments).
+- No JavaScript — WeasyPrint does not execute JS.
+- `base_url` is always set to the absolute `file://` URI of the templates directory so the relative `href="card_styles.css"` link resolves correctly.
+
+**Color scheme:** Primary `#0d7c6e` (teal), dark header `#085c51`, light card background `#f0fdf8`.
+
+Card dimensions follow standard **CR80 ID card size (85.6mm × 54mm)**, defined in `card_styles.css` via `@page { size: 85.6mm 54mm; margin: 0; }`.
 
 ### 8.5 Verification Flow (Front Desk Check-In)
 

@@ -27,7 +27,7 @@ services:
     env_file:
       - ../backend/.env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://shh_admin:SmartHealthHub@localhost:5433/smarthealthhub
+      - DATABASE_URL=postgresql+asyncpg://shh_admin:SmartHealthHub@db:5432/smarthealthhub
       - REDIS_URL=redis://redis:6379/0
     depends_on:
       db:
@@ -46,7 +46,7 @@ services:
     env_file:
       - ../backend/.env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://shh_admin:SmartHealthHub@localhost:5433/smarthealthhub
+      - DATABASE_URL=postgresql+asyncpg://shh_admin:SmartHealthHub@db:5432/smarthealthhub
       - REDIS_URL=redis://redis:6379/0
     depends_on:
       db:

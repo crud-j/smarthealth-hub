@@ -1,15 +1,29 @@
 <!DOCTYPE html>
 <!--
-  Health Card — Back Face Template (Jinja2)
-  Rendered server-side by WeasyPrint.
+  Health Card — Back Face Template (Jinja2 + WeasyPrint)
+
+  This template is rendered as page 2 of the health card PDF.
+  It shows demographic summary and non-sensitive clinical snapshot data
+  (last recorded vitals, blood type, allergies).  All clinical fields use
+  safe placeholder defaults when data is not available.
 
   Context variables:
-    emergency_contact.name, emergency_contact.number
-    bhc_name, bhc_address, bhc_contact
-    instructions_text  — multilingual usage instructions
-    card_version, issued_at
+    patient.address          (str)
+    patient.blood_type       (str)   default "—"
+    patient.allergies        (str)   default "None on record"
+    patient.last_bp          (str)   default "—"
+    patient.last_weight      (str)   default "—"
+    patient.last_height      (str)   default "—"
+    patient.last_temp        (str)   default "—"
+    patient.medical_notes    (str)   default "" — shown only if non-empty
+    patient.barangay_name    (str)   BHC facility name
+    card.card_number         (str)
+    card.card_version        (int)
+    card.issued_at           (str)
 
-  Full implementation: Phase 3 (Health Cards).
+  Security note: No PHI beyond the fields listed above appears on this face.
+  No QR data URI is rendered here — the back side is a human-readable
+  summary only.
 -->
 <html lang="en">
 <head>
@@ -17,12 +31,75 @@
   <title>SmartHealth Hub — Health Card Back</title>
   <link rel="stylesheet" href="card_styles.css" />
 </head>
-<body class="card-back">
-  <!-- TODO (Phase 3): Implement card back layout with BHC contact + instructions -->
-  <div class="card-placeholder">
-    <p>Health Card Back — Phase 3</p>
-    <p>{{ bhc_name }}</p>
-    <p>In case of emergency, contact: {{ emergency_contact.number }}</p>
+<body>
+<div class="card-back">
+
+  <!-- ── Header strip ──────────────────────────────────────────────────── -->
+  <div class="back-header">
+    <span class="org-name">SmartHealth Hub</span>
+    <span class="back-title">Patient Health Card</span>
   </div>
+
+  <!-- ── Address row ───────────────────────────────────────────────────── -->
+  <div class="address-row">
+    <div class="section-label">Address</div>
+    {{ patient.address if patient.address else "—" }}
+  </div>
+
+  <!-- ── Two-column row: blood type / allergies ─────────────────────────── -->
+  <div class="two-col-row">
+    <div class="two-col-cell">
+      <div class="section-label">Blood Type</div>
+      {{ patient.blood_type }}
+    </div>
+    <div class="two-col-cell">
+      <div class="section-label">Allergies</div>
+      {{ patient.allergies }}
+    </div>
+  </div>
+
+  <!-- ── Last recorded vital signs ─────────────────────────────────────── -->
+  <div class="vitals-section">
+    <div class="section-label">Last Recorded Vital Signs</div>
+    <div class="vitals-grid">
+      <div class="vital-item">
+        <span class="vital-label">BP:</span> {{ patient.last_bp }}
+      </div>
+      <div class="vital-item">
+        <span class="vital-label">Wt:</span> {{ patient.last_weight }} kg
+      </div>
+      <div class="vital-item">
+        <span class="vital-label">Ht:</span> {{ patient.last_height }} cm
+      </div>
+      <div class="vital-item">
+        <span class="vital-label">Temp:</span> {{ patient.last_temp }}&#176;C
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Important notes (rendered only when non-empty) ────────────────── -->
+  <div class="notes-section">
+    <div class="section-label">Important Notes</div>
+    <div class="notes-text">
+      {%- if patient.medical_notes -%}
+        {{ patient.medical_notes }}
+      {%- else -%}
+        No additional notes on record.
+      {%- endif -%}
+    </div>
+  </div>
+
+  <!-- ── Footer: disclaimer text + official stamp placeholder ─────────── -->
+  <div class="back-footer">
+    <div class="back-footer-text">
+      This card is property of {{ patient.barangay_name }}.<br />
+      If found, please return to the nearest health center.
+    </div>
+    <div class="stamp-circle">
+      <div class="stamp-circle-text">OFFICIAL<br/>SEAL</div>
+    </div>
+  </div>
+
+</div>
 </body>
 </html>

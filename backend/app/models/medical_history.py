@@ -59,7 +59,9 @@ class MedicalHistory(Base):
         nullable=False,
     )
     condition_name: Mapped[str] = mapped_column(sa.String(150), nullable=False)
-    # TODO: encrypted at application layer (AES-256-GCM) before insert — see app/utils/encryption.py
+    # Encrypted at application layer (AES-256-GCM) before insert/after select.
+    # Never read or write this column directly — always go through
+    # app.utils.encryption.encrypt_text / decrypt_text.
     notes: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     severity: Mapped[str | None] = mapped_column(sa.String(20), nullable=True)
     diagnosed_date: Mapped[date | None] = mapped_column(sa.Date, nullable=True)

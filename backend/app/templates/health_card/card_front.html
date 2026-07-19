@@ -1,32 +1,116 @@
 <!DOCTYPE html>
 <!--
-  Health Card — Front Face Template (Jinja2)
-  Rendered server-side by WeasyPrint for PDF generation.
+  Health Card — Front Face Template (Jinja2 + WeasyPrint)
 
-  Context variables (all populated server-side — never from QR/NFC payload):
-    patient.first_name, patient.last_name, patient.middle_name
-    patient.birth_date, patient.sex, patient.blood_type
-    patient.patient_code
-    qr_code_data_uri  — base64 PNG of the QR code image
-    bhc_name          — Barangay Health Center name
-    card_version      — integer card version
-    issued_at         — formatted issue date
+  Rendered server-side by pdf_renderer.render_health_card_pdf().
+  All context variables are populated from the DB by the service layer —
+  NEVER from the QR or NFC payload.
 
-  Full implementation: Phase 3 (Health Cards).
+  Context variables:
+    patient.first_name           (str)
+    patient.last_name            (str)
+    patient.middle_name          (str | None)
+    patient.patient_code         (str)  e.g. "BHC-2026-000042"
+    patient.sex                  (str)  "male" | "female"
+    patient.age                  (int)  computed from birth_date
+    patient.birth_date_display   (str)  e.g. "January 15, 1985"
+    patient.mobile_number        (str | None)
+    patient.philhealth_no        (str | None)
+    patient.philhealth_member_type (str | None)  "member" | "dependent"
+    card.card_number             (str)  e.g. "BHC-2026-000042"
+    card.card_version            (int)
+    card.issued_at               (str)  formatted date string
+    qr_code                      (str)  data URI — "data:image/png;base64,..."
+
+  Security invariant: qr_code data URI encodes ONLY the HMAC-signed URL
+  (patient_id + card_version + sig).  No PHI appears in the QR payload.
+  The template must NOT display any PHI adjacent to the QR image in a way
+  that could be mistaken for QR payload data.
 -->
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>SmartHealth Hub — Health Card</title>
+  <title>SmartHealth Hub — Health Card Front</title>
   <link rel="stylesheet" href="card_styles.css" />
 </head>
-<body class="card-front">
-  <!-- TODO (Phase 3): Implement card front layout with patient info + QR code -->
-  <div class="card-placeholder">
-    <p>Health Card Front — Phase 3</p>
-    <p>Patient: {{ patient.last_name }}, {{ patient.first_name }}</p>
-    <p>Code: {{ patient.patient_code }}</p>
-    <img src="{{ qr_code_data_uri }}" alt="QR Code" class="qr-code" />
+<body>
+<div class="card-front">
+
+  <!-- ── Header strip ──────────────────────────────────────────────────── -->
+  <div class="front-header">
+    <span class="org-name">SmartHealth Hub</span>
+    <span class="bhc-title">Barangay Health Center</span>
+    <!-- NFC contactless icon (Unicode wave symbol) -->
+    <span class="nfc-icon" title="NFC-enabled">&#x1F4F6;</span>
   </div>
+
+  <!-- ── Middle row: photo placeholder + patient demographics ──────────── -->
+  <div class="card-middle">
+
+    <!-- Left: photo placeholder box (actual photo printing is out of scope) -->
+    <div class="photo-col">
+      <div class="photo-placeholder">
+        <span class="photo-placeholder-text">PHOTO</span>
+      </div>
+    </div>
+
+    <!-- Right: patient demographic fields -->
+    <div class="patient-info">
+
+      <div class="patient-full-name">
+        {{ patient.last_name | upper }}, {{ patient.first_name }}
+        {%- if patient.middle_name %} {{ patient.middle_name[0] }}.{%- endif %}
+      </div>
+
+      <div class="patient-detail-row">
+        <span class="label">Age:</span> {{ patient.age }}&nbsp;&nbsp;
+        <span class="label">Sex:</span> {{ patient.sex | capitalize }}
+      </div>
+
+      <div class="patient-detail-row">
+        <span class="label">Birthday:</span> {{ patient.birth_date_display }}
+      </div>
+
+      <div class="patient-detail-row">
+        <span class="label">Contact:</span>
+        {{ patient.mobile_number if patient.mobile_number else "—" }}
+      </div>
+
+      <div class="philhealth-row">
+        <span class="label">PhilHealth:</span>
+        {{ patient.philhealth_no if patient.philhealth_no else "—" }}
+        {%- if patient.philhealth_member_type %}
+        <span class="philhealth-badge">{{ patient.philhealth_member_type }}</span>
+        {%- endif %}
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── Bottom strip: patient code (left) + QR code (right) ───────────── -->
+  <!--
+    Security note: the QR image contains ONLY patient_id + card_version + HMAC sig.
+    The patient_code displayed here is a display-safe identifier only.
+    No PHI is embedded in or beside the QR code itself.
+  -->
+  <div class="card-bottom">
+
+    <div class="patient-code-section">
+      <div class="patient-code-label">Patient Code</div>
+      <div class="patient-code-value">{{ patient.patient_code }}</div>
+      <div class="card-version-text">Card No: {{ card.card_number }} &nbsp; v{{ card.card_version }}</div>
+    </div>
+
+    <div class="qr-section">
+      <img
+        src="{{ qr_code }}"
+        alt="QR Code — scan to verify identity"
+        class="qr-image"
+      />
+    </div>
+
+  </div>
+
+</div>
 </body>
 </html>
