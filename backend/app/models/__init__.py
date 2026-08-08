@@ -9,7 +9,8 @@ which is required for:
 Import order respects FK dependency:
   roles → users → patients → medical_history → immunizations →
   appointments → visits → health_cards → card_verifications →
-  mfa_otp → sms_logs → audit_logs → passkey_credentials
+  mfa_otp → sms_logs → audit_logs → passkey_credentials →
+  ai_risk_scores → ai_anomaly_alerts
 """
 
 from app.models.user import Role, User  # noqa: F401
@@ -24,6 +25,9 @@ from app.models.mfa_otp import MfaOtp  # noqa: F401
 from app.models.sms_log import SmsLog  # noqa: F401
 from app.models.audit_log import AuditLog  # noqa: F401
 from app.models.passkey_credential import PasskeyCredential  # noqa: F401
+from app.models.ai_risk_score import AiRiskScore  # noqa: F401
+from app.models.ai_anomaly_alert import AiAnomalyAlert  # noqa: F401
+from app.models.intake_token import PatientIntakeToken  # noqa: F401
 
 __all__ = [
     "Role",
@@ -39,4 +43,7 @@ __all__ = [
     "SmsLog",
     "AuditLog",
     "PasskeyCredential",
+    "AiRiskScore",
+    "AiAnomalyAlert",
+    "PatientIntakeToken",
 ]

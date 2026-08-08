@@ -123,7 +123,7 @@ function DemoField({ label, value }: { label: string; value: React.ReactNode }) 
         style={{
           fontSize: "0.625rem",
           fontWeight: 700,
-          color: "#94a3b8",
+          color: "#b09090",
           textTransform: "uppercase",
           letterSpacing: "0.075em",
           marginBottom: "0.125rem",
@@ -131,8 +131,8 @@ function DemoField({ label, value }: { label: string; value: React.ReactNode }) 
       >
         {label}
       </div>
-      <div style={{ fontSize: "0.875rem", color: "#0f172a", fontWeight: 500 }}>
-        {value || <span style={{ color: "#cbd5e1", fontStyle: "italic" }}>—</span>}
+      <div style={{ fontSize: "0.875rem", color: "#1a0808", fontWeight: 500 }}>
+        {value || <span style={{ color: "#d4b0b0", fontStyle: "italic" }}>—</span>}
       </div>
     </div>
   );
@@ -144,13 +144,13 @@ function DemoField({ label, value }: { label: string; value: React.ReactNode }) 
 
 function VisitRow({ visit }: { visit: VisitSummary }) {
   return (
-    <tr style={{ borderBottom: "1px solid #f1f5f9" }}>
+    <tr style={{ borderBottom: "1px solid #f0e4dd" }}>
       <td
         style={{
           padding: "0.625rem 1rem",
           fontSize: "0.8125rem",
           fontFamily: "monospace",
-          color: "#0f172a",
+          color: "#1a0808",
           fontWeight: 500,
           whiteSpace: "nowrap",
         }}
@@ -161,20 +161,20 @@ function VisitRow({ visit }: { visit: VisitSummary }) {
         style={{
           padding: "0.625rem 1rem",
           fontSize: "0.8125rem",
-          color: "#475569",
+          color: "#7a5252",
           whiteSpace: "nowrap",
         }}
       >
         {formatDateTime(visit.visitDate)}
       </td>
-      <td style={{ padding: "0.625rem 1rem", fontSize: "0.8125rem", color: "#475569" }}>
+      <td style={{ padding: "0.625rem 1rem", fontSize: "0.8125rem", color: "#7a5252" }}>
         {visit.visitType.replace("_", " ").replace(/\b\w/g, (l) => l.toUpperCase())}
       </td>
       <td
         style={{
           padding: "0.625rem 1rem",
           fontSize: "0.8125rem",
-          color: "#475569",
+          color: "#7a5252",
           maxWidth: 240,
           overflow: "hidden",
           textOverflow: "ellipsis",
@@ -183,10 +183,10 @@ function VisitRow({ visit }: { visit: VisitSummary }) {
         title={visit.chiefComplaint ?? undefined}
       >
         {visit.chiefComplaint ?? (
-          <span style={{ color: "#cbd5e1", fontStyle: "italic" }}>—</span>
+          <span style={{ color: "#d4b0b0", fontStyle: "italic" }}>—</span>
         )}
       </td>
-      <td style={{ padding: "0.625rem 1rem", fontSize: "0.8125rem", color: "#475569" }}>
+      <td style={{ padding: "0.625rem 1rem", fontSize: "0.8125rem", color: "#7a5252" }}>
         {visit.bloodPressure ?? "—"}
       </td>
     </tr>
@@ -263,7 +263,7 @@ export default function PatientProfilePage({
         style={{
           padding: "3rem",
           textAlign: "center",
-          color: "#94a3b8",
+          color: "#b09090",
           fontSize: "0.875rem",
         }}
       >
@@ -306,7 +306,7 @@ export default function PatientProfilePage({
           <div
             style={{
               fontSize: "0.75rem",
-              color: "#64748b",
+              color: "#9b6e6e",
               marginBottom: "0.25rem",
               fontFamily: "monospace",
             }}
@@ -314,7 +314,7 @@ export default function PatientProfilePage({
             {patient.patientCode}
           </div>
           <h1
-            style={{ fontSize: "1.5rem", fontWeight: 700, color: "#0f172a", margin: 0 }}
+            style={{ fontSize: "1.5rem", fontFamily: "var(--font-dm-serif, Georgia, serif)", fontWeight: 400, color: "#1a0808", margin: 0 }}
           >
             {patient.fullName}
           </h1>
@@ -333,11 +333,11 @@ export default function PatientProfilePage({
             href={`/patients/${patientId}/edit`}
             style={{
               padding: "0.5rem 1rem",
-              border: "1px solid #e2e8f0",
+              border: "1px solid #e5d4cc",
               borderRadius: "0.375rem",
               fontSize: "0.875rem",
               fontWeight: 500,
-              color: "#374151",
+              color: "#3d2222",
               textDecoration: "none",
               background: "white",
             }}
@@ -348,11 +348,11 @@ export default function PatientProfilePage({
             href={`/health-cards/${patientId}/print`}
             style={{
               padding: "0.5rem 1rem",
-              border: "1px solid #e2e8f0",
+              border: "1px solid #e5d4cc",
               borderRadius: "0.375rem",
               fontSize: "0.875rem",
               fontWeight: 500,
-              color: "#374151",
+              color: "#3d2222",
               textDecoration: "none",
               background: "white",
             }}
@@ -363,7 +363,7 @@ export default function PatientProfilePage({
             href={`/patients/${patientId}/verify`}
             style={{
               padding: "0.5rem 1rem",
-              background: "#14b8a6",
+              background: "linear-gradient(135deg, #b5343e, #c94060)",
               border: "none",
               borderRadius: "0.375rem",
               fontSize: "0.875rem",
@@ -374,6 +374,26 @@ export default function PatientProfilePage({
           >
             Verify
           </Link>
+          <button
+            type="button"
+            onClick={() => {
+              // Use the same-origin Next.js API proxy so the auth cookie that
+              // was set on the Next.js origin is included in the request.
+              window.open(`/api/v1/patients/${patientId}/summary-pdf`, "_blank");
+            }}
+            style={{
+              padding: "0.5rem 1rem",
+              background: "linear-gradient(135deg, #b5343e, #c94060)",
+              border: "none",
+              borderRadius: "0.375rem",
+              fontSize: "0.875rem",
+              fontWeight: 600,
+              color: "white",
+              cursor: "pointer",
+            }}
+          >
+            Download Summary
+          </button>
           {isAdmin && patient.isActive && (
             <button
               type="button"
@@ -402,22 +422,25 @@ export default function PatientProfilePage({
       <div
         style={{
           background: "white",
-          border: "1px solid #e2e8f0",
-          borderRadius: "0.5rem",
+          border: "1px solid #e5d4cc",
+          borderRadius: "1rem",
           padding: "1.5rem",
           marginBottom: "1.25rem",
+          boxShadow: "0 2px 10px rgba(160,80,80,0.06)",
         }}
       >
         <div
           style={{
             fontSize: "0.875rem",
             fontWeight: 700,
-            color: "#0f172a",
+            color: "#1a0808",
             marginBottom: "1.25rem",
             paddingBottom: "0.5rem",
-            borderBottom: "1px solid #f1f5f9",
+            borderBottom: "1px solid #f0e4dd",
             textTransform: "uppercase",
             letterSpacing: "0.05em",
+            borderLeft: "3px solid #b5343e",
+            paddingLeft: "0.75rem",
           }}
         >
           Patient Demographics
@@ -448,8 +471,8 @@ export default function PatientProfilePage({
                 height: 80,
                 objectFit: "cover",
                 borderRadius: "0.5rem",
-                border: "1px solid #e2e8f0",
-                background: "#f1f5f9",
+                border: "1px solid #e5d4cc",
+                background: "#f0e4dd",
                 display: "block",
               }}
             />
@@ -513,13 +536,102 @@ export default function PatientProfilePage({
         }}
       />
 
+      {/* Latest Recorded Vitals */}
+      {!visitsLoading && visits.length > 0 && (
+        <div
+          style={{
+            background: "white",
+            border: "1px solid #e5d4cc",
+            borderRadius: "1rem",
+            padding: "1.5rem",
+            marginBottom: "1.25rem",
+            boxShadow: "0 2px 10px rgba(160,80,80,0.06)",
+          }}
+        >
+          <div
+            style={{
+              fontSize: "0.875rem",
+              fontWeight: 700,
+              color: "#1a0808",
+              marginBottom: "1.25rem",
+              paddingBottom: "0.5rem",
+              borderBottom: "1px solid #f0e4dd",
+              textTransform: "uppercase",
+              letterSpacing: "0.05em",
+            }}
+          >
+            Latest Recorded Vitals
+          </div>
+
+          {/* 4-column vitals grid */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(4, 1fr)",
+              gap: "0 2rem",
+              marginBottom: "0.75rem",
+            }}
+          >
+            <DemoField
+              label="Blood Pressure"
+              value={visits[0].bloodPressure ?? "—"}
+            />
+            <DemoField
+              label="Temperature"
+              value={
+                visits[0].temperature != null
+                  ? `${visits[0].temperature}°C`
+                  : "—"
+              }
+            />
+            <DemoField
+              label="Pulse Rate"
+              value={
+                visits[0].pulseRate != null
+                  ? `${visits[0].pulseRate} bpm`
+                  : "—"
+              }
+            />
+            <DemoField
+              label="Last Visit"
+              value={formatDateTime(visits[0].visitDate)}
+            />
+          </div>
+
+          {/* 2-column complaint / type row */}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: "0 2rem",
+            }}
+          >
+            <DemoField
+              label="Chief Complaint"
+              value={visits[0].chiefComplaint ?? "—"}
+            />
+            <DemoField
+              label="Visit Type"
+              value={
+                visits[0].visitType
+                  ? visits[0].visitType
+                      .replace(/_/g, " ")
+                      .replace(/\b\w/g, (l) => l.toUpperCase())
+                  : "—"
+              }
+            />
+          </div>
+        </div>
+      )}
+
       {/* Visit history */}
       <div
         style={{
           background: "white",
-          border: "1px solid #e2e8f0",
-          borderRadius: "0.5rem",
+          border: "1px solid #e5d4cc",
+          borderRadius: "1rem",
           overflow: "hidden",
+          boxShadow: "0 2px 10px rgba(160,80,80,0.06)",
         }}
       >
         {/* Header row */}
@@ -529,16 +641,18 @@ export default function PatientProfilePage({
             alignItems: "center",
             justifyContent: "space-between",
             padding: "1rem 1.5rem",
-            borderBottom: "1px solid #f1f5f9",
+            borderBottom: "1px solid #f0e4dd",
           }}
         >
           <div
             style={{
               fontSize: "0.875rem",
               fontWeight: 700,
-              color: "#0f172a",
+              color: "#1a0808",
               textTransform: "uppercase",
               letterSpacing: "0.05em",
+              borderLeft: "3px solid #b5343e",
+              paddingLeft: "0.75rem",
             }}
           >
             Visit History
@@ -547,7 +661,7 @@ export default function PatientProfilePage({
             href={`/patients/${patientId}/visits/new`}
             style={{
               padding: "0.375rem 0.875rem",
-              background: "#0f172a",
+              background: "linear-gradient(135deg, #b5343e, #c94060)",
               color: "white",
               borderRadius: "0.375rem",
               fontSize: "0.75rem",
@@ -573,7 +687,7 @@ export default function PatientProfilePage({
 
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
-            <tr style={{ background: "#f8fafc" }}>
+            <tr style={{ background: "linear-gradient(135deg, #fdf0eb 0%, #ffffff 100%)" }}>
               {[
                 "Case No.",
                 "Date / Time",
@@ -588,7 +702,7 @@ export default function PatientProfilePage({
                     textAlign: "left",
                     fontSize: "0.6875rem",
                     fontWeight: 600,
-                    color: "#64748b",
+                    color: "#9b6e6e",
                     textTransform: "uppercase",
                     letterSpacing: "0.05em",
                     whiteSpace: "nowrap",
@@ -607,7 +721,7 @@ export default function PatientProfilePage({
                   style={{
                     padding: "2rem",
                     textAlign: "center",
-                    color: "#94a3b8",
+                    color: "#b09090",
                     fontSize: "0.875rem",
                   }}
                 >
@@ -622,7 +736,7 @@ export default function PatientProfilePage({
                   style={{
                     padding: "2rem",
                     textAlign: "center",
-                    color: "#94a3b8",
+                    color: "#b09090",
                     fontSize: "0.875rem",
                   }}
                 >

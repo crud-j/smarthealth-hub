@@ -8,7 +8,7 @@
  * - Role filter dropdown + active/inactive toggle above the table.
  * - "Add User" button opens CreateUserModal.
  * - Per-row "Edit" button opens EditUserModal.
- * - Per-row "Deactivate" button with confirm dialog (Admin only).
+ * - Per-row "Deactivate" button with swConfirm dialog (Admin only).
  * - Pagination controls (Previous / Page N of M / Next).
  *
  * Backend endpoints:
@@ -16,8 +16,9 @@
  *   DELETE /users/{id} — deactivate a staff account
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { apiFetch, ApiError } from "@/lib/api-client";
+import { swConfirm, swSuccess, swError } from "@/lib/swal";
 import CreateUserModal from "@/components/modals/CreateUserModal";
 import EditUserModal from "@/components/modals/EditUserModal";
 
@@ -78,111 +79,14 @@ function formatDate(iso: string | null | undefined): string {
 }
 
 // ---------------------------------------------------------------------------
-// Confirm dialog component (inline, avoids external dependency)
-// ---------------------------------------------------------------------------
-
-function ConfirmDialog({
-  open,
-  title,
-  message,
-  onConfirm,
-  onCancel,
-  confirmLabel = "Confirm",
-  confirmClass = "bg-red-600 hover:bg-red-700 text-white",
-}: {
-  open: boolean;
-  title: string;
-  message: string;
-  onConfirm: () => void;
-  onCancel: () => void;
-  confirmLabel?: string;
-  confirmClass?: string;
-}) {
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
-        <h3 className="text-base font-semibold text-slate-900">{title}</h3>
-        <p className="mt-2 text-sm text-slate-600">{message}</p>
-        <div className="mt-5 flex justify-end gap-3">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={onConfirm}
-            className={`rounded-lg px-4 py-2 text-sm font-semibold ${confirmClass}`}
-          >
-            {confirmLabel}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Success / Info banner
-// ---------------------------------------------------------------------------
-
-function SuccessBanner({
-  message,
-  onDismiss,
-}: {
-  message: string;
-  onDismiss: () => void;
-}) {
-  return (
-    <div className="mb-4 flex items-start gap-3 rounded-lg border border-green-200 bg-green-50 p-4">
-      <svg
-        width="18"
-        height="18"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        className="mt-0.5 shrink-0 text-green-600"
-        aria-hidden="true"
-      >
-        <polyline points="20 6 9 17 4 12" />
-      </svg>
-      <p className="text-sm text-green-800">{message}</p>
-      <button
-        type="button"
-        onClick={onDismiss}
-        aria-label="Dismiss"
-        className="ml-auto shrink-0 text-green-600 hover:text-green-800"
-      >
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          aria-hidden="true"
-        >
-          <line x1="18" y1="6" x2="6" y2="18" />
-          <line x1="6" y1="6" x2="18" y2="18" />
-        </svg>
-      </button>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
 export default function SettingsUsersPage() {
   const [data, setData] = useState<PaginatedUsers | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string>("");
-  const [successMsg, setSuccessMsg] = useState<string>("");
+  const [fetchError, setFetchError] = useState<string>("");
+  const lastFetchErrorRef = useRef<string>("");
 
   // Filters and pagination
   const [page, setPage] = useState(1);
@@ -194,8 +98,7 @@ export default function SettingsUsersPage() {
   const [modalMode, setModalMode] = useState<ModalMode>(null);
   const [editTarget, setEditTarget] = useState<StaffUser | null>(null);
 
-  // Deactivate confirm dialog
-  const [deactivateTarget, setDeactivateTarget] = useState<StaffUser | null>(null);
+  // Deactivate in-flight flag (disables the button while the API call is in progress)
   const [deactivating, setDeactivating] = useState(false);
 
   // ---------------------------------------------------------------------------
@@ -204,7 +107,7 @@ export default function SettingsUsersPage() {
 
   const fetchUsers = useCallback(async () => {
     setLoading(true);
-    setError("");
+    setFetchError("");
     try {
       const qs = new URLSearchParams({
         page: String(page),
@@ -212,7 +115,6 @@ export default function SettingsUsersPage() {
       });
       if (roleFilter) qs.set("role", roleFilter);
       if (!showInactive) {
-        // When not showing inactive, only fetch active users
         qs.set("is_active", "true");
       }
       const result = await apiFetch<PaginatedUsers>(`/users?${qs.toString()}`);
@@ -220,12 +122,12 @@ export default function SettingsUsersPage() {
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.status === 403) {
-          setError("You don't have permission to view this page.");
+          setFetchError("You don't have permission to view this page.");
         } else {
-          setError(err.message || "Failed to load users.");
+          setFetchError(err.message || "Failed to load users.");
         }
       } else {
-        setError("Network error. Failed to load staff accounts.");
+        setFetchError("Network error. Failed to load staff accounts.");
       }
     } finally {
       setLoading(false);
@@ -236,27 +138,34 @@ export default function SettingsUsersPage() {
     void fetchUsers();
   }, [fetchUsers]);
 
+  // Surface fetch errors via toast (avoid duplicate toasts on re-renders)
+  useEffect(() => {
+    if (fetchError && fetchError !== lastFetchErrorRef.current) {
+      lastFetchErrorRef.current = fetchError;
+      void swError(fetchError, "Failed to load users");
+    }
+    if (!fetchError) lastFetchErrorRef.current = "";
+  }, [fetchError]);
+
   // ---------------------------------------------------------------------------
   // Deactivate handler
   // ---------------------------------------------------------------------------
 
-  async function handleDeactivate() {
-    if (!deactivateTarget) return;
+  async function handleDeactivate(user: StaffUser) {
+    const result = await swConfirm({
+      title: "Deactivate staff account?",
+      text: `This will mark ${user.full_name} as inactive. They will no longer be able to log in. This can be reversed by editing the account.`,
+      confirmLabel: "Deactivate",
+      isDangerous: true,
+    });
+    if (!result.isConfirmed) return;
     setDeactivating(true);
     try {
-      await apiFetch(`/users/${deactivateTarget.id}`, { method: "DELETE" });
-      setDeactivateTarget(null);
-      setSuccessMsg(
-        `${deactivateTarget.full_name} has been deactivated successfully.`
-      );
+      await apiFetch(`/users/${user.id}`, { method: "DELETE" });
+      void swSuccess(`${user.full_name} has been deactivated.`);
       void fetchUsers();
     } catch (err) {
-      setDeactivateTarget(null);
-      if (err instanceof ApiError) {
-        setError(err.message || "Failed to deactivate user.");
-      } else {
-        setError("Network error. Failed to deactivate user.");
-      }
+      void swError(err instanceof ApiError ? err.message : "Failed to deactivate user.");
     } finally {
       setDeactivating(false);
     }
@@ -277,8 +186,8 @@ export default function SettingsUsersPage() {
       {/* Header */}
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Users</h1>
-          <p className="mt-0.5 text-sm text-slate-500">
+          <h1 className="text-2xl font-bold" style={{ fontFamily: "var(--font-dm-serif, Georgia, serif)", fontWeight: 400, color: "#1a0808" }}>Users</h1>
+          <p className="mt-0.5 text-sm" style={{ color: "#7a5252" }}>
             Manage staff accounts and role assignments
           </p>
         </div>
@@ -288,7 +197,8 @@ export default function SettingsUsersPage() {
             setModalMode("create");
             setEditTarget(null);
           }}
-          className="inline-flex min-h-[44px] items-center gap-2 rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700"
+          className="inline-flex min-h-[44px] items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white"
+          style={{ background: "linear-gradient(135deg, #b5343e, #c94060)" }}
         >
           <svg
             width="16"
@@ -308,7 +218,7 @@ export default function SettingsUsersPage() {
       </div>
 
       {/* Filters */}
-      <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="mb-4 rounded-xl bg-white p-4 shadow-sm" style={{ border: "1px solid #e5d4cc" }}>
         <div className="flex flex-wrap items-center gap-3">
           {/* Role filter */}
           <div className="min-w-[160px]">
@@ -355,33 +265,21 @@ export default function SettingsUsersPage() {
         </div>
       </div>
 
-      {/* Success banner */}
-      {successMsg && (
-        <SuccessBanner message={successMsg} onDismiss={() => setSuccessMsg("")} />
-      )}
-
-      {/* Error banner */}
-      {error && (
-        <div className="mb-4 rounded-lg bg-red-50 p-4 text-sm text-red-700">
-          {error}
-        </div>
-      )}
-
       {/* Table */}
-      <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="rounded-xl bg-white shadow-sm" style={{ border: "1px solid #e5d4cc", boxShadow: "0 2px 10px rgba(160,80,80,0.06)" }}>
         <div className="overflow-x-auto">
           <table
             className="w-full text-sm"
             aria-label="Staff users table"
           >
             <thead>
-              <tr className="border-b border-slate-200 bg-slate-50 text-left">
-                <th className="px-4 py-3 font-semibold text-slate-600">Name</th>
-                <th className="px-4 py-3 font-semibold text-slate-600">Email</th>
-                <th className="px-4 py-3 font-semibold text-slate-600">Role</th>
-                <th className="px-4 py-3 font-semibold text-slate-600">Status</th>
-                <th className="px-4 py-3 font-semibold text-slate-600">Last Login</th>
-                <th className="px-4 py-3 font-semibold text-slate-600">Actions</th>
+              <tr className="text-left" style={{ background: "linear-gradient(135deg, #fdf0eb 0%, #ffffff 100%)", borderBottom: "2px solid #e5d4cc" }}>
+                <th className="px-4 py-3 font-semibold" style={{ color: "#9b6e6e" }}>Name</th>
+                <th className="px-4 py-3 font-semibold" style={{ color: "#9b6e6e" }}>Email</th>
+                <th className="px-4 py-3 font-semibold" style={{ color: "#9b6e6e" }}>Role</th>
+                <th className="px-4 py-3 font-semibold" style={{ color: "#9b6e6e" }}>Status</th>
+                <th className="px-4 py-3 font-semibold" style={{ color: "#9b6e6e" }}>Last Login</th>
+                <th className="px-4 py-3 font-semibold" style={{ color: "#9b6e6e" }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -398,11 +296,12 @@ export default function SettingsUsersPage() {
                 ))}
 
               {/* Empty state */}
-              {!loading && (data?.items ?? []).length === 0 && !error && (
+              {!loading && (data?.items ?? []).length === 0 && !fetchError && (
                 <tr>
                   <td
                     colSpan={6}
-                    className="px-4 py-10 text-center text-slate-400"
+                    className="px-4 py-10 text-center"
+                    style={{ color: "#b09090" }}
                   >
                     No staff accounts found.
                   </td>
@@ -414,7 +313,10 @@ export default function SettingsUsersPage() {
                 (data?.items ?? []).map((u) => (
                   <tr
                     key={u.id}
-                    className="border-b border-slate-100 last:border-0 hover:bg-slate-50"
+                    className="border-b last:border-0 transition-colors"
+                    style={{ borderColor: "#f0e4dd" }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = "#fdf5f0"; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = ""; }}
                   >
                     <td className="px-4 py-3 font-medium text-slate-900">
                       {u.full_name}
@@ -462,8 +364,9 @@ export default function SettingsUsersPage() {
                         {u.is_active && (
                           <button
                             type="button"
-                            onClick={() => setDeactivateTarget(u)}
-                            className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
+                            onClick={() => void handleDeactivate(u)}
+                            disabled={deactivating}
+                            className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
                             aria-label={`Deactivate ${u.full_name}`}
                           >
                             Deactivate
@@ -479,8 +382,8 @@ export default function SettingsUsersPage() {
 
         {/* Pagination */}
         {data && data.total > PAGE_SIZE && (
-          <div className="flex items-center justify-between border-t border-slate-200 px-4 py-3">
-            <p className="text-xs text-slate-500">
+          <div className="flex items-center justify-between px-4 py-3" style={{ borderTop: "1px solid #e5d4cc" }}>
+            <p className="text-xs" style={{ color: "#9b6e6e" }}>
               {data.total} total staff account{data.total !== 1 ? "s" : ""}
             </p>
             <div className="flex items-center gap-2">
@@ -488,19 +391,19 @@ export default function SettingsUsersPage() {
                 type="button"
                 disabled={page <= 1}
                 onClick={() => setPage((p) => p - 1)}
-                className="min-h-[36px] rounded-lg border border-slate-200 px-3 text-sm hover:bg-slate-50 disabled:opacity-40"
+                className="min-h-[36px] rounded-lg px-3 text-sm disabled:opacity-40" style={{ border: "1px solid #e5d4cc" }}
                 aria-label="Previous page"
               >
                 Previous
               </button>
-              <span className="text-xs text-slate-500">
+              <span className="text-xs" style={{ color: "#9b6e6e" }}>
                 Page {page} of {totalPages}
               </span>
               <button
                 type="button"
                 disabled={page >= totalPages}
                 onClick={() => setPage((p) => p + 1)}
-                className="min-h-[36px] rounded-lg border border-slate-200 px-3 text-sm hover:bg-slate-50 disabled:opacity-40"
+                className="min-h-[36px] rounded-lg px-3 text-sm disabled:opacity-40" style={{ border: "1px solid #e5d4cc" }}
                 aria-label="Next page"
               >
                 Next
@@ -516,9 +419,7 @@ export default function SettingsUsersPage() {
         onClose={() => setModalMode(null)}
         onCreated={() => {
           setModalMode(null);
-          setSuccessMsg(
-            "User created. Temporary password has been logged to the server console."
-          );
+          void swSuccess("User created. Temporary password sent via SMS.");
           void fetchUsers();
         }}
       />
@@ -534,19 +435,9 @@ export default function SettingsUsersPage() {
         onUpdated={() => {
           setModalMode(null);
           setEditTarget(null);
-          setSuccessMsg("User updated successfully.");
+          void swSuccess("User updated successfully.");
           void fetchUsers();
         }}
-      />
-
-      {/* Deactivate Confirm Dialog */}
-      <ConfirmDialog
-        open={deactivateTarget !== null && !deactivating}
-        title="Deactivate staff account?"
-        message={`This will mark ${deactivateTarget?.full_name ?? "this user"} as inactive. They will no longer be able to log in. This action can be reversed by editing the account. Continue?`}
-        confirmLabel="Deactivate"
-        onConfirm={handleDeactivate}
-        onCancel={() => setDeactivateTarget(null)}
       />
     </div>
   );

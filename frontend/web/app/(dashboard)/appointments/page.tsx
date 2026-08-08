@@ -12,12 +12,13 @@
  * All data via useAppointmentList / useCancelAppointment hooks.
  */
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import {
   useAppointmentList,
   useCancelAppointment,
 } from "@/hooks/useAppointments";
+import { swConfirm, swError } from "@/lib/swal";
 import type {
   AppointmentStatus,
   AppointmentListParams,
@@ -84,14 +85,31 @@ export default function AppointmentsPage() {
   const { data, loading, error, refetch } = useAppointmentList(effectiveFilters);
   const { cancelAppointment, loading: cancelling } = useCancelAppointment();
 
+  // Surface fetch errors via toast (non-blocking — table shows empty state)
+  useEffect(() => {
+    if (error) {
+      void swError(`Failed to load appointments: ${error.message}`);
+    }
+  }, [error]);
+
   function applyFilters() {
     setFilters((f) => ({ ...f, page: 1 }));
   }
 
   async function handleCancel(id: string) {
-    if (!confirm("Cancel this appointment?")) return;
-    await cancelAppointment(id);
-    refetch();
+    const result = await swConfirm({
+      title: "Cancel appointment?",
+      text: "This appointment will be marked as cancelled and cannot be undone.",
+      confirmLabel: "Yes, cancel it",
+      isDangerous: true,
+    });
+    if (!result.isConfirmed) return;
+    try {
+      await cancelAppointment(id);
+      refetch();
+    } catch (err) {
+      void swError(err instanceof Error ? err.message : "Failed to cancel appointment.");
+    }
   }
 
   // Simple client-side patient name filter over the current page
@@ -111,14 +129,15 @@ export default function AppointmentsPage() {
       {/* Page header */}
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Appointments</h1>
-          <p className="mt-0.5 text-sm text-slate-500">
+          <h1 className="text-2xl font-bold" style={{ fontFamily: "var(--font-dm-serif, Georgia, serif)", fontWeight: 400, color: "#1a0808" }}>Appointments</h1>
+          <p className="mt-0.5 text-sm" style={{ color: "#7a5252" }}>
             Schedule and manage patient appointments
           </p>
         </div>
         <Link
           href="/appointments/new"
-          className="inline-flex min-h-[44px] items-center gap-2 rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal-600"
+          className="inline-flex min-h-[44px] items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white focus-visible:outline focus-visible:outline-2"
+          style={{ background: "linear-gradient(135deg, #b5343e, #c94060)" }}
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true">
             <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
@@ -128,7 +147,7 @@ export default function AppointmentsPage() {
       </div>
 
       {/* Filter bar */}
-      <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="mb-4 rounded-xl bg-white p-4 shadow-sm" style={{ border: "1px solid #e5d4cc" }}>
         <div className="flex flex-wrap gap-3">
           {/* Patient name search */}
           <div className="flex-1 min-w-[160px]">
@@ -196,7 +215,8 @@ export default function AppointmentsPage() {
             <button
               type="button"
               onClick={applyFilters}
-              className="min-h-[44px] rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal-600"
+              className="min-h-[44px] rounded-lg px-4 py-2 text-sm font-medium text-white"
+              style={{ background: "linear-gradient(135deg, #b5343e, #c94060)" }}
             >
               Filter
             </button>
@@ -204,25 +224,18 @@ export default function AppointmentsPage() {
         </div>
       </div>
 
-      {/* Error state */}
-      {error && (
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          Failed to load appointments: {error.message}
-        </div>
-      )}
-
       {/* Table */}
-      <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="rounded-xl bg-white shadow-sm" style={{ border: "1px solid #e5d4cc", boxShadow: "0 2px 10px rgba(160,80,80,0.06)" }}>
         <div className="overflow-x-auto">
           <table className="w-full text-sm" aria-label="Appointments table">
             <thead>
-              <tr className="border-b border-slate-200 bg-slate-50 text-left">
-                <th className="px-4 py-3 font-semibold text-slate-600">Patient</th>
-                <th className="px-4 py-3 font-semibold text-slate-600">Code</th>
-                <th className="px-4 py-3 font-semibold text-slate-600">Type</th>
-                <th className="px-4 py-3 font-semibold text-slate-600">Scheduled At</th>
-                <th className="px-4 py-3 font-semibold text-slate-600">Status</th>
-                <th className="px-4 py-3 font-semibold text-slate-600">Actions</th>
+              <tr className="text-left" style={{ background: "linear-gradient(135deg, #fdf0eb 0%, #ffffff 100%)", borderBottom: "2px solid #e5d4cc" }}>
+                <th className="px-4 py-3 font-semibold" style={{ color: "#9b6e6e" }}>Patient</th>
+                <th className="px-4 py-3 font-semibold" style={{ color: "#9b6e6e" }}>Code</th>
+                <th className="px-4 py-3 font-semibold" style={{ color: "#9b6e6e" }}>Type</th>
+                <th className="px-4 py-3 font-semibold" style={{ color: "#9b6e6e" }}>Scheduled At</th>
+                <th className="px-4 py-3 font-semibold" style={{ color: "#9b6e6e" }}>Status</th>
+                <th className="px-4 py-3 font-semibold" style={{ color: "#9b6e6e" }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -241,7 +254,7 @@ export default function AppointmentsPage() {
 
               {!loading && rows.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center text-slate-400">
+                  <td colSpan={6} className="px-4 py-10 text-center" style={{ color: "#b09090" }}>
                     No appointments found.
                   </td>
                 </tr>
@@ -251,7 +264,10 @@ export default function AppointmentsPage() {
                 rows.map((appt) => (
                   <tr
                     key={appt.id}
-                    className="border-b border-slate-100 transition-colors hover:bg-slate-50"
+                    className="border-b transition-colors"
+                    style={{ borderColor: "#f0e4dd" }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = "#fdf5f0"; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = ""; }}
                   >
                     <td className="px-4 py-3 font-medium text-slate-900">
                       {appt.patientName ?? "—"}
@@ -303,8 +319,8 @@ export default function AppointmentsPage() {
 
         {/* Pagination */}
         {data && data.total > (filters.pageSize ?? 15) && (
-          <div className="flex items-center justify-between border-t border-slate-200 px-4 py-3">
-            <p className="text-xs text-slate-500">
+          <div className="flex items-center justify-between px-4 py-3" style={{ borderTop: "1px solid #e5d4cc" }}>
+            <p className="text-xs" style={{ color: "#9b6e6e" }}>
               Showing {((filters.page ?? 1) - 1) * (filters.pageSize ?? 15) + 1}–
               {Math.min((filters.page ?? 1) * (filters.pageSize ?? 15), data.total)} of{" "}
               {data.total} appointments
@@ -314,19 +330,19 @@ export default function AppointmentsPage() {
                 type="button"
                 disabled={(filters.page ?? 1) <= 1}
                 onClick={() => setFilters((f) => ({ ...f, page: (f.page ?? 1) - 1 }))}
-                className="min-h-[36px] rounded-lg border border-slate-200 px-3 text-sm hover:bg-slate-50 disabled:opacity-40"
+                className="min-h-[36px] rounded-lg px-3 text-sm disabled:opacity-40" style={{ border: "1px solid #e5d4cc" }}
                 aria-label="Previous page"
               >
                 Previous
               </button>
-              <span className="flex items-center text-xs text-slate-500">
+              <span className="flex items-center text-xs" style={{ color: "#9b6e6e" }}>
                 Page {filters.page ?? 1} of {totalPages}
               </span>
               <button
                 type="button"
                 disabled={(filters.page ?? 1) >= totalPages}
                 onClick={() => setFilters((f) => ({ ...f, page: (f.page ?? 1) + 1 }))}
-                className="min-h-[36px] rounded-lg border border-slate-200 px-3 text-sm hover:bg-slate-50 disabled:opacity-40"
+                className="min-h-[36px] rounded-lg px-3 text-sm disabled:opacity-40" style={{ border: "1px solid #e5d4cc" }}
                 aria-label="Next page"
               >
                 Next

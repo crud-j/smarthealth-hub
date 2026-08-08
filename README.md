@@ -52,6 +52,19 @@ cp frontend/web/.env.local.example frontend/web/.env.local
 
 ```bash
 docker-compose -f infra/docker-compose.yml up db redis -d
+
+### Start cloudflare.
+
+```bash
+cloudflared tunnel --url http://localhost:3000
+```
+
+
+### start windows celery
+
+```bash
+celery -A app.workers.celery_app worker --loglevel=info -P solo
+celery -A app.workers.celery_app beat --loglevel=info
 ```
 
 ### 4. Run database migrations
@@ -83,6 +96,10 @@ cd backend && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```bash
 # All workspaces
 turbo test
+
+#NFC Testing
+python backend/scripts/nfc_relay_server.py
+
 
 # Frontend only
 pnpm --filter web test

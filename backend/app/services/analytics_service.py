@@ -585,6 +585,52 @@ async def export_report_data(
     return rows
 
 
+async def get_visit_trends(
+    db: AsyncSession,
+    weeks: int = 12,
+) -> list[dict[str, Any]]:
+    """
+    Return week-by-week visit counts for the last N weeks.
+
+    Args:
+        db:    Async DB session.
+        weeks: Number of past weeks to include (clamped to 1–52).
+
+    Returns:
+        List of dicts:
+        [{"week_label": "2026-W30", "visit_count": 14}, ...]
+
+        Ordered chronologically (earliest week first).
+        Returns [] if no visits exist in the requested window.
+
+    Column used: visits.visit_date (TIMESTAMPTZ).
+    """
+    weeks = max(1, min(52, weeks))
+    cutoff = datetime.now(tz=timezone.utc) - timedelta(weeks=weeks)
+
+    week_trunc = func.date_trunc("week", Visit.visit_date)
+    result = await db.execute(
+        select(
+            week_trunc.label("week_start"),
+            func.count(Visit.id).label("visit_count"),
+        )
+        .where(Visit.visit_date >= cutoff)
+        .group_by(week_trunc)
+        .order_by(week_trunc)
+    )
+    rows = result.all()
+
+    return [
+        {
+            "week_label": (
+                f"{row.week_start.year}-W{row.week_start.isocalendar()[1]:02d}"
+            ),
+            "visit_count": row.visit_count,
+        }
+        for row in rows
+    ]
+
+
 def rows_to_csv(rows: list[dict[str, Any]]) -> str:
     """
     Serialize a list of dicts to a CSV string.

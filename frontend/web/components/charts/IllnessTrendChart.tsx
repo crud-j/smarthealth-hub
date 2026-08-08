@@ -1,15 +1,30 @@
 "use client";
 
 /**
- * IllnessTrendChart — line chart showing illness/diagnosis trends over time.
+ * IllnessTrendChart — multi-series line chart of illness/diagnosis trends.
  *
- * Supports multiple condition_name series rendered as separate polylines.
- * Each point is a { label, conditionName, count } from the illness-trends API.
+ * Pivots flat IllnessTrendPoint[] into one object per x-axis period so
+ * Recharts LineChart can render one Line per unique conditionName.
  *
  * Consumed by: app/(dashboard)/analytics/illness-trends/page.tsx
  * Data source:  useIllnessTrends() hook → GET /analytics/illness-trends
  */
 
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from "recharts";
+import type { TooltipContentProps } from "recharts";
+import type {
+  NameType,
+  ValueType,
+} from "recharts/types/component/DefaultTooltipContent";
 import type { IllnessTrendPoint } from "@/types/analytics";
 
 interface IllnessTrendChartProps {
@@ -17,17 +32,50 @@ interface IllnessTrendChartProps {
   loading?: boolean;
 }
 
-// Color palette for up to 8 condition series
+// Color palette for up to 8 condition series — crimson first per spec
 const SERIES_COLORS = [
-  "#0d9488", // teal-600
+  "#b5343e", // crimson
+  "#0d9488", // teal
   "#0284c7", // sky-600
   "#7c3aed", // violet-600
-  "#dc2626", // red-600
   "#d97706", // amber-600
   "#16a34a", // green-600
   "#db2777", // pink-600
   "#64748b", // slate-500
 ];
+
+const tooltipStyle: React.CSSProperties = {
+  background: "#fff",
+  border: "1px solid #e5d4cc",
+  borderRadius: 8,
+  padding: "8px 12px",
+  fontSize: 12,
+  color: "#1a0808",
+  boxShadow: "0 2px 10px rgba(160,80,80,0.10)",
+};
+
+function TrendTooltip({
+  active,
+  payload,
+  label,
+}: TooltipContentProps<ValueType, NameType>) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div style={tooltipStyle}>
+      <p style={{ fontWeight: 700, marginBottom: 4, color: "#1a0808" }}>
+        {label}
+      </p>
+      {payload.map((entry: { name?: NameType; color?: string; value?: ValueType }) => (
+        <p
+          key={String(entry.name)}
+          style={{ margin: 0, color: String(entry.color) }}
+        >
+          {entry.name}: <strong>{entry.value}</strong>
+        </p>
+      ))}
+    </div>
+  );
+}
 
 export default function IllnessTrendChart({
   points,
@@ -35,7 +83,11 @@ export default function IllnessTrendChart({
 }: IllnessTrendChartProps) {
   if (loading) {
     return (
-      <div className="h-48 animate-pulse rounded-lg bg-slate-100" role="status" aria-label="Loading chart" />
+      <div
+        className="h-48 animate-pulse rounded-lg bg-slate-100"
+        role="status"
+        aria-label="Loading chart"
+      />
     );
   }
 
@@ -47,140 +99,66 @@ export default function IllnessTrendChart({
     );
   }
 
-  // Derive unique labels (x-axis) and unique series (conditions)
+  // Pivot flat array → one object per label with each condition as a key
   const allLabels = [...new Set(points.map((p) => p.label))].sort();
   const allConditions = [...new Set(points.map((p) => p.conditionName))];
 
-  // Build a lookup: label → conditionName → count
-  const lookup: Record<string, Record<string, number>> = {};
-  for (const p of points) {
-    if (!lookup[p.label]) lookup[p.label] = {};
-    lookup[p.label][p.conditionName] = p.count;
-  }
-
-  const maxCount = Math.max(...points.map((p) => p.count), 1);
-
-  const paddingLeft = 40;
-  const paddingRight = 16;
-  const paddingTop = 16;
-  const paddingBottom = 40;
-  const svgWidth = Math.max(480, allLabels.length * 60);
-  const svgHeight = 220;
-  const plotWidth = svgWidth - paddingLeft - paddingRight;
-  const plotHeight = svgHeight - paddingTop - paddingBottom;
-
-  const xPos = (i: number) =>
-    paddingLeft +
-    (allLabels.length > 1 ? (i / (allLabels.length - 1)) * plotWidth : plotWidth / 2);
-  const yPos = (count: number) =>
-    paddingTop + plotHeight - (count / maxCount) * plotHeight;
-
-  // Y-axis grid — 4 lines
-  const yGridLines = [0, 0.25, 0.5, 0.75, 1];
+  const pivoted: Record<string, string | number>[] = allLabels.map((label) => {
+    const row: Record<string, string | number> = { label };
+    for (const cond of allConditions) {
+      const match = points.find(
+        (p) => p.label === label && p.conditionName === cond
+      );
+      row[cond] = match?.count ?? 0;
+    }
+    return row;
+  });
 
   return (
-    <div className="overflow-x-auto" aria-label="Illness trend line chart">
-      <svg
-        viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-        width="100%"
-        style={{ minWidth: 320 }}
-        role="img"
-        aria-label="Line chart of illness trends over time"
-      >
-        <title>Illness Trends Over Time</title>
-
-        {/* Y-axis grid lines */}
-        {yGridLines.map((frac) => {
-          const y = paddingTop + plotHeight - frac * plotHeight;
-          const label = Math.round(frac * maxCount);
-          return (
-            <g key={frac}>
-              <line
-                x1={paddingLeft}
-                y1={y}
-                x2={svgWidth - paddingRight}
-                y2={y}
-                stroke="#e2e8f0"
-                strokeWidth="1"
-              />
-              <text x={paddingLeft - 6} y={y + 4} textAnchor="end" fontSize="9" fill="#94a3b8">
-                {label}
-              </text>
-            </g>
-          );
-        })}
-
-        {/* X-axis labels */}
-        {allLabels.map((label, i) => {
-          // Show every nth label to avoid crowding
-          const step = Math.ceil(allLabels.length / 8);
-          if (i % step !== 0 && i !== allLabels.length - 1) return null;
-          return (
-            <text
-              key={label}
-              x={xPos(i)}
-              y={svgHeight - paddingBottom + 14}
-              textAnchor="middle"
-              fontSize="9"
-              fill="#94a3b8"
-            >
-              {label}
-            </text>
-          );
-        })}
-
-        {/* Series lines */}
-        {allConditions.map((condition, ci) => {
-          const color = SERIES_COLORS[ci % SERIES_COLORS.length];
-          const pts = allLabels.map((label, i) => {
-            const count = lookup[label]?.[condition] ?? 0;
-            return `${xPos(i)},${yPos(count)}`;
-          });
-
-          return (
-            <g key={condition}>
-              <polyline
-                points={pts.join(" ")}
-                fill="none"
-                stroke={color}
-                strokeWidth="2"
-                strokeLinejoin="round"
-                strokeLinecap="round"
-              />
-              {/* Dots */}
-              {allLabels.map((label, i) => {
-                const count = lookup[label]?.[condition] ?? 0;
-                return (
-                  <circle
-                    key={label}
-                    cx={xPos(i)}
-                    cy={yPos(count)}
-                    r="3"
-                    fill={color}
-                    aria-label={`${condition} on ${label}: ${count}`}
-                  />
-                );
-              })}
-            </g>
-          );
-        })}
-      </svg>
-
-      {/* Legend */}
-      {allConditions.length > 1 && (
-        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 px-2">
-          {allConditions.map((cond, ci) => (
-            <div key={cond} className="flex items-center gap-1.5 text-xs text-slate-600">
-              <span
-                className="inline-block h-2.5 w-4 rounded-sm"
-                style={{ backgroundColor: SERIES_COLORS[ci % SERIES_COLORS.length] }}
-                aria-hidden="true"
-              />
-              {cond}
-            </div>
+    <div aria-label="Illness trend line chart">
+      <ResponsiveContainer width="100%" height={220}>
+        <LineChart
+          data={pivoted}
+          margin={{ top: 8, right: 8, bottom: 4, left: 0 }}
+        >
+          <CartesianGrid strokeDasharray="3 3" stroke="#f0e4dd" />
+          <XAxis
+            dataKey="label"
+            tick={{ fontSize: 10, fill: "#94a3b8" }}
+            tickLine={false}
+            axisLine={false}
+            interval="preserveStartEnd"
+          />
+          <YAxis
+            allowDecimals={false}
+            tick={{ fontSize: 10, fill: "#94a3b8" }}
+            tickLine={false}
+            axisLine={false}
+            width={30}
+          />
+          <Tooltip
+            content={(props) => <TrendTooltip {...props} />}
+            cursor={{ stroke: "#e5d4cc", strokeWidth: 1 }}
+          />
+          <Legend
+            wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
+            iconType="circle"
+            iconSize={8}
+          />
+          {allConditions.map((cond, index) => (
+            <Line
+              key={cond}
+              type="monotone"
+              dataKey={cond}
+              stroke={SERIES_COLORS[index % SERIES_COLORS.length]}
+              strokeWidth={2}
+              dot={false}
+              activeDot={{ r: 4, strokeWidth: 0 }}
+              isAnimationActive
+            />
           ))}
-        </div>
-      )}
+        </LineChart>
+      </ResponsiveContainer>
     </div>
   );
 }

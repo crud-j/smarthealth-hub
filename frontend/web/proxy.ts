@@ -24,11 +24,16 @@ export function proxy(request: NextRequest): NextResponse {
   const { pathname } = request.nextUrl;
 
   // Public paths that do not require authentication.
+  const isStaticAsset = /\.(?:png|svg|jpe?g|gif|webp|ico|woff2?|ttf|otf|eot|mp4|pdf)$/i.test(pathname);
+
   const isPublic =
+    isStaticAsset ||
     pathname.startsWith("/login") ||
     pathname.startsWith("/verify-otp") ||
     pathname.startsWith("/forgot-password") ||
-    pathname.startsWith("/verify") ||   // QR code scan landing page (mobile)
+    pathname.startsWith("/verify") ||        // QR code scan landing page (mobile)
+    pathname.startsWith("/intake/") ||       // Public pre-visit patient intake form (token-gated, no JWT)
+    pathname.startsWith("/nfc-monitor") ||   // NFC Wi-Fi relay monitor page (mobile)
     pathname.startsWith("/api/") ||
     pathname.startsWith("/_next/") ||
     pathname === "/favicon.ico" ||

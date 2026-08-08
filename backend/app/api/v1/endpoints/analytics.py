@@ -50,6 +50,8 @@ from app.schemas.analytics import (
     IllnessTrendsResponse,
     NoShowRateResponse,
     VaccinationCoverageResponse,
+    VisitTrendPoint,
+    VisitTrendsResponse,
 )
 from app.services import analytics_service
 
@@ -238,6 +240,44 @@ async def appointments_no_show_rate(
         items=items,
         from_date=resolved_from,
         to_date=resolved_to,
+    )
+
+
+@router.get(
+    "/visit-trends",
+    response_model=VisitTrendsResponse,
+    summary="Week-by-week visit counts for the last N weeks (default 12)",
+    description=(
+        "Returns pre-aggregated weekly visit counts for the last N weeks "
+        "(default 12, clamped to 1–52 server-side even if FastAPI validation "
+        "is bypassed).  week_label format: 'YYYY-WNN' (ISO week, e.g. '2026-W30').  "
+        "No PHI is included — only aggregate counts."
+    ),
+)
+async def visit_trends(
+    db: DbDep,
+    _current_user: CurrentUser,
+    weeks: Annotated[
+        int,
+        Query(
+            ge=1,
+            le=52,
+            description=(
+                "Number of past weeks to include in the response.  "
+                "Must be between 1 and 52 (inclusive).  Defaults to 12."
+            ),
+        ),
+    ] = 12,
+) -> VisitTrendsResponse:
+    """
+    Return week-by-week visit counts for chart rendering.
+
+    Auth: Any authenticated user.
+    """
+    items = await analytics_service.get_visit_trends(db=db, weeks=weeks)
+    return VisitTrendsResponse(
+        weeks=weeks,
+        items=[VisitTrendPoint(**item) for item in items],
     )
 
 

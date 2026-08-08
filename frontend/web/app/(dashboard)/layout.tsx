@@ -1,11 +1,8 @@
 /**
  * Dashboard layout — authenticated shell.
  *
- * This is a Client Component because it needs useState for the mobile
- * sidebar open/close toggle and useCurrentUser for role-aware sidebar links.
- *
- * Server-side auth guard: Next.js middleware (middleware.ts) checks the JWT
- * cookie and redirects unauthenticated users to /login before this renders.
+ * isCollapsed is lifted here so both Sidebar (receives display state) and
+ * Topbar (owns the toggle button) share a single source of truth.
  */
 "use client";
 
@@ -20,25 +17,26 @@ interface DashboardLayoutProps {
 
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const { user } = useCurrentUser();
 
   return (
-    <div className="flex min-h-screen bg-slate-50">
-      {/* Sidebar — fixed on desktop, slide-in on mobile */}
+    <div className="flex h-screen overflow-hidden bg-[#f2ece5]">
       <Sidebar
         user={user}
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
+        isCollapsed={isCollapsed}
       />
 
-      {/* Main content column */}
-      <div className="flex min-w-0 flex-1 flex-col lg:ml-0">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden lg:ml-0">
         <Topbar
           user={user}
           onMenuToggle={() => setSidebarOpen((v) => !v)}
+          isCollapsed={isCollapsed}
+          onToggleCollapse={() => setIsCollapsed((v) => !v)}
         />
 
-        {/* Page content — receives each dashboard page as children */}
         <main className="flex-1 overflow-y-auto p-4 lg:p-6">{children}</main>
       </div>
     </div>

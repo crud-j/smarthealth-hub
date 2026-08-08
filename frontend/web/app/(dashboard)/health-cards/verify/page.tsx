@@ -74,9 +74,9 @@ function AvatarPlaceholder({ size }: { size: number }): React.ReactElement {
       aria-hidden="true"
       style={{ display: "block" }}
     >
-      <rect width="100" height="100" fill="#e2e8f0" />
-      <circle cx="50" cy="35" r="18" fill="#94a3b8" />
-      <ellipse cx="50" cy="80" rx="28" ry="22" fill="#94a3b8" />
+      <rect width="100" height="100" fill="#edd9d0" />
+      <circle cx="50" cy="35" r="18" fill="#b09090" />
+      <ellipse cx="50" cy="80" rx="28" ry="22" fill="#b09090" />
     </svg>
   );
 }
@@ -284,8 +284,8 @@ function PatientQuickView({
               padding: "6px 14px",
               borderRadius: "8px",
               backgroundColor: "transparent",
-              color: "#64748b",
-              border: "1px solid #cbd5e1",
+              color: "#9b6e6e",
+              border: "1px solid #d4b0b0",
               fontSize: "12px",
               fontWeight: "600",
               cursor: "pointer",
@@ -313,8 +313,8 @@ function PatientQuickView({
               height: "72px",
               borderRadius: "50%",
               overflow: "hidden",
-              border: "2px solid #e2e8f0",
-              backgroundColor: "#f8fafc",
+              border: "2px solid #e5d4cc",
+              backgroundColor: "#fdf5f0",
             }}
             aria-label="Patient photo"
           >
@@ -353,7 +353,7 @@ function PatientQuickView({
                 margin: "0 0 2px",
                 fontSize: "18px",
                 fontWeight: "700",
-                color: "#0f172a",
+                color: "#1a0808",
                 lineHeight: 1.25,
                 wordBreak: "break-word",
               }}
@@ -364,7 +364,7 @@ function PatientQuickView({
               style={{
                 margin: "0 0 6px",
                 fontSize: "13px",
-                color: "#0d9488",
+                color: "#b5343e",
                 fontWeight: "700",
                 letterSpacing: "0.03em",
               }}
@@ -375,7 +375,7 @@ function PatientQuickView({
               style={{
                 margin: "0 0 4px",
                 fontSize: "13px",
-                color: "#374151",
+                color: "#3d2222",
               }}
             >
               {summary.age} yrs &bull; {sexDisplay}
@@ -386,7 +386,7 @@ function PatientQuickView({
                 style={{
                   margin: 0,
                   fontSize: "13px",
-                  color: "#374151",
+                  color: "#3d2222",
                   display: "flex",
                   alignItems: "center",
                   gap: "4px",
@@ -403,7 +403,7 @@ function PatientQuickView({
         <div
           style={{
             padding: "0 20px 16px",
-            borderBottom: "1px solid #f1f5f9",
+            borderBottom: "1px solid #f0e4dd",
           }}
         >
           {formattedLastVisit && (
@@ -411,11 +411,11 @@ function PatientQuickView({
               style={{
                 margin: "0 0 10px",
                 fontSize: "13px",
-                color: "#64748b",
+                color: "#9b6e6e",
               }}
             >
               Last Visit:{" "}
-              <strong style={{ color: "#374151" }}>{formattedLastVisit}</strong>
+              <strong style={{ color: "#3d2222" }}>{formattedLastVisit}</strong>
             </p>
           )}
 
@@ -455,7 +455,7 @@ function PatientQuickView({
             style={{
               padding: "12px 8px",
               borderRadius: "10px",
-              backgroundColor: "#0d9488",
+              background: "linear-gradient(135deg, #b5343e, #c94060)",
               color: "#ffffff",
               border: "none",
               fontSize: "13px",
@@ -475,9 +475,9 @@ function PatientQuickView({
             style={{
               padding: "12px 8px",
               borderRadius: "10px",
-              backgroundColor: "#f8fafc",
-              color: "#0f172a",
-              border: "1px solid #cbd5e1",
+              backgroundColor: "#fdf5f0",
+              color: "#1a0808",
+              border: "1px solid #e5d4cc",
               fontSize: "13px",
               fontWeight: "700",
               cursor: "pointer",
@@ -495,9 +495,9 @@ function PatientQuickView({
             style={{
               padding: "12px 8px",
               borderRadius: "10px",
-              backgroundColor: "#f8fafc",
-              color: "#0f172a",
-              border: "1px solid #cbd5e1",
+              backgroundColor: "#fdf5f0",
+              color: "#1a0808",
+              border: "1px solid #e5d4cc",
               fontSize: "13px",
               fontWeight: "700",
               cursor: "pointer",
@@ -516,9 +516,9 @@ function PatientQuickView({
             style={{
               padding: "12px 8px",
               borderRadius: "10px",
-              backgroundColor: pdfLoading ? "#e2e8f0" : "#f8fafc",
-              color: pdfLoading ? "#94a3b8" : "#0f172a",
-              border: "1px solid #cbd5e1",
+              backgroundColor: pdfLoading ? "#edd9d0" : "#fdf5f0",
+              color: pdfLoading ? "#b09090" : "#1a0808",
+              border: "1px solid #e5d4cc",
               fontSize: "13px",
               fontWeight: "700",
               cursor: pdfLoading ? "not-allowed" : "pointer",
@@ -558,8 +558,10 @@ export default function HealthCardVerifyPage(): React.ReactElement {
   const streamRef = useRef<MediaStream | null>(null);
 
   // QR decoder worker (off main thread).
-  const qrWorker = useWebWorker<QrScannerApi>(
-    new URL("../../../../workers/qrScanner.worker.ts", import.meta.url)
+  const qrWorker = useWebWorker<QrScannerApi>(() =>
+    new Worker(new URL("../../../../workers/qrScanner.worker.ts", import.meta.url), {
+      type: "module",
+    })
   );
 
   // ---------------------------------------------------------------------------
@@ -788,7 +790,7 @@ export default function HealthCardVerifyPage(): React.ReactElement {
           <h2 style={{ margin: "0 0 8px", color: "#dc2626" }}>
             Verification Failed
           </h2>
-          <p style={{ margin: "0 0 20px", color: "#374151" }}>
+          <p style={{ margin: "0 0 20px", color: "#3d2222" }}>
             {state.message}
           </p>
           <button
@@ -822,10 +824,10 @@ export default function HealthCardVerifyPage(): React.ReactElement {
 
   return (
     <div style={{ maxWidth: "540px", margin: "0 auto", padding: "24px 16px" }}>
-      <h1 style={{ margin: "0 0 4px", fontSize: "22px", color: "#0f172a" }}>
+      <h1 style={{ margin: "0 0 4px", fontSize: "22px", fontFamily: "var(--font-dm-serif, Georgia, serif)", fontWeight: 400, color: "#1a0808" }}>
         Verify Health Card
       </h1>
-      <p style={{ margin: "0 0 20px", fontSize: "14px", color: "#64748b" }}>
+      <p style={{ margin: "0 0 20px", fontSize: "14px", color: "#9b6e6e" }}>
         Scan the patient&apos;s QR code or tap their NFC card to verify
         identity.
       </p>
@@ -834,7 +836,7 @@ export default function HealthCardVerifyPage(): React.ReactElement {
       <div
         style={{
           display: "flex",
-          borderBottom: "1px solid #e2e8f0",
+          borderBottom: "1px solid #e5d4cc",
           marginBottom: "20px",
         }}
         role="tablist"
@@ -850,11 +852,11 @@ export default function HealthCardVerifyPage(): React.ReactElement {
               padding: "10px 20px",
               fontSize: "14px",
               fontWeight: tab === t ? "bold" : "normal",
-              color: tab === t ? "#0d9488" : "#64748b",
+              color: tab === t ? "#b5343e" : "#9b6e6e",
               background: "transparent",
               border: "none",
               borderBottom:
-                tab === t ? "2px solid #0d9488" : "2px solid transparent",
+                tab === t ? "2px solid #b5343e" : "2px solid transparent",
               cursor: "pointer",
               marginBottom: "-1px",
             }}
@@ -874,7 +876,7 @@ export default function HealthCardVerifyPage(): React.ReactElement {
           {/* Loading state */}
           {state.phase === "loading" && (
             <div
-              style={{ textAlign: "center", padding: "20px", color: "#0d9488" }}
+              style={{ textAlign: "center", padding: "20px", color: "#b5343e" }}
             >
               Verifying...
             </div>
@@ -886,7 +888,7 @@ export default function HealthCardVerifyPage(): React.ReactElement {
               position: "relative",
               width: "100%",
               aspectRatio: "1",
-              backgroundColor: "#0f172a",
+              backgroundColor: "#1a0808",
               borderRadius: "12px",
               overflow: "hidden",
               maxWidth: "400px",
@@ -940,7 +942,7 @@ export default function HealthCardVerifyPage(): React.ReactElement {
                   alignItems: "center",
                   justifyContent: "center",
                   height: "100%",
-                  color: "#94a3b8",
+                  color: "#b09090",
                   gap: "12px",
                 }}
               >
@@ -974,7 +976,7 @@ export default function HealthCardVerifyPage(): React.ReactElement {
             style={{
               textAlign: "center",
               fontSize: "13px",
-              color: "#64748b",
+              color: "#9b6e6e",
               margin: 0,
             }}
           >
@@ -1031,14 +1033,14 @@ export default function HealthCardVerifyPage(): React.ReactElement {
               style={{
                 textAlign: "center",
                 padding: "20px",
-                color: "#0d9488",
+                color: "#b5343e",
               }}
             >
               Verifying...
             </div>
           ) : (
             <>
-              <p style={{ margin: 0, fontSize: "14px", color: "#374151" }}>
+              <p style={{ margin: 0, fontSize: "14px", color: "#3d2222" }}>
                 Ask the patient to hold their NFC health card against the back
                 of this device.
               </p>

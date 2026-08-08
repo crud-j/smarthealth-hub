@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<!--
+  Patient Field Summary — Jinja2 + WeasyPrint template.
+  Rendered server-side by pdf_renderer.render_patient_summary_pdf().
+
+  Security invariant: NO encrypted PHI fields are rendered here.
+    - medical_history.notes     → NEVER included
+    - visits.diagnosis          → NEVER included
+    - visits.treatment_notes    → NEVER included
+
+  Demographics (name, address, phone) are PHI but are NOT encrypted at the
+  application layer.  The VIEW_PHI audit log written by the endpoint covers
+  every download of this document.
+
+  Variables injected by render_patient_summary_pdf():
+    patient              — dict with patient demographics and flag fields
+    latest_vitals        — dict with blood_pressure, weight, height, temperature,
+                           visit_date; or None if no visit records exist
+    upcoming_immunizations — list of dicts: vaccine_name, next_due_date, status
+                             (max 5, ordered by next_due_date ascending)
+    today_date           — formatted date string e.g. "July 29, 2026"
+
+  Page size: A4 portrait via @page rule in summary_styles.css.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Patient Field Summary — {{ patient.patient_code }}</title>
+  <link rel="stylesheet" href="summary_styles.css" />
+</head>
+<body>
+
+  <!-- ─────────────────────────────────────────────────────────────────────── -->
+  <!-- HEADER BAR                                                              -->
+  <!-- ─────────────────────────────────────────────────────────────────────── -->
+  <div class="header-bar">
+    <div class="header-logo-text">SmartHealth Hub</div>
+    <div class="header-title">Patient Field Summary</div>
+    <div class="header-code">{{ patient.patient_code }}</div>
+  </div>
+
+  <!-- ─────────────────────────────────────────────────────────────────────── -->
+  <!-- DEMOGRAPHICS                                                            -->
+  <!-- ─────────────────────────────────────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-heading">Demographics</div>
+    <div class="field-grid">
+
+      <div class="field-block field-wide">
+        <div class="field-label">Full Name</div>
+        <div class="field-value">
+          {{ patient.last_name | upper }}, {{ patient.first_name }}
+          {%- if patient.middle_name %} {{ patient.middle_name }}{%- endif %}
+        </div>
+      </div>
+
+      <div class="field-block">
+        <div class="field-label">Sex</div>
+        <div class="field-value">{{ patient.sex | capitalize }}</div>
+      </div>
+
+      <div class="field-block">
+        <div class="field-label">Age</div>
+        <div class="field-value">{{ patient.age }} years old</div>
+      </div>
+
+      <div class="field-block">
+        <div class="field-label">Date of Birth</div>
+        <div class="field-value">{{ patient.birth_date_display }}</div>
+      </div>
+
+      <div class="field-block field-wide">
+        <div class="field-label">Address</div>
+        <div class="field-value">{{ patient.address if patient.address else "—" }}</div>
+      </div>
+
+      <div class="field-block">
+        <div class="field-label">Mobile Number</div>
+        <div class="field-value">{{ patient.mobile_number if patient.mobile_number else "—" }}</div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ─────────────────────────────────────────────────────────────────────── -->
+  <!-- PHILHEALTH & VULNERABILITY FLAGS (side by side)                        -->
+  <!-- ─────────────────────────────────────────────────────────────────────── -->
+  <div class="two-col-row">
+
+    <!-- PhilHealth -->
+    <div class="section section-half">
+      <div class="section-heading">PhilHealth</div>
+      <div class="field-grid">
+        <div class="field-block">
+          <div class="field-label">PhilHealth No.</div>
+          <div class="field-value">{{ patient.philhealth_no if patient.philhealth_no else "—" }}</div>
+        </div>
+        <div class="field-block">
+          <div class="field-label">Member Type</div>
+          <div class="field-value">
+            {%- if patient.philhealth_member_type %}
+              {{ patient.philhealth_member_type | capitalize }}
+            {%- else %}
+              —
+            {%- endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Vulnerability Flags -->
+    <div class="section section-half">
+      <div class="section-heading">Priority Flags</div>
+      <div class="flags-row">
+        {%- if patient.is_pwd %}
+        <span class="flag-badge flag-pwd">PWD</span>
+        {%- endif %}
+        {%- if patient.is_senior %}
+        <span class="flag-badge flag-senior">Senior Citizen</span>
+        {%- endif %}
+        {%- if patient.is_pregnant %}
+        <span class="flag-badge flag-pregnant">Pregnant</span>
+        {%- endif %}
+        {%- if not patient.is_pwd and not patient.is_senior and not patient.is_pregnant %}
+        <span class="flag-none">None</span>
+        {%- endif %}
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ─────────────────────────────────────────────────────────────────────── -->
+  <!-- BLOOD TYPE                                                              -->
+  <!-- ─────────────────────────────────────────────────────────────────────── -->
+  <div class="section section-inline">
+    <div class="section-heading">Blood Type</div>
+    <div class="blood-type-value">{{ patient.blood_type if patient.blood_type else "—" }}</div>
+  </div>
+
+  <!-- ─────────────────────────────────────────────────────────────────────── -->
+  <!-- LATEST VITALS                                                           -->
+  <!-- (blood_pressure, weight, height, temperature ONLY — no diagnosis)      -->
+  <!-- ─────────────────────────────────────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-heading">Latest Vitals</div>
+    {%- if latest_vitals %}
+    <div class="vitals-note">
+      Recorded on {{ latest_vitals.visit_date }}
+    </div>
+    <div class="vitals-grid">
+
+      <div class="vital-card">
+        <div class="vital-label">Blood Pressure</div>
+        <div class="vital-value">{{ latest_vitals.blood_pressure if latest_vitals.blood_pressure else "—" }}</div>
+      </div>
+
+      <div class="vital-card">
+        <div class="vital-label">Weight</div>
+        <div class="vital-value">
+          {%- if latest_vitals.weight_kg is not none %}
+            {{ latest_vitals.weight_kg }} kg
+          {%- else %}
+            —
+          {%- endif %}
+        </div>
+      </div>
+
+      <div class="vital-card">
+        <div class="vital-label">Height</div>
+        <div class="vital-value">
+          {%- if latest_vitals.height_cm is not none %}
+            {{ latest_vitals.height_cm }} cm
+          {%- else %}
+            —
+          {%- endif %}
+        </div>
+      </div>
+
+      <div class="vital-card">
+        <div class="vital-label">Temperature</div>
+        <div class="vital-value">
+          {%- if latest_vitals.temperature is not none %}
+            {{ latest_vitals.temperature }} °C
+          {%- else %}
+            —
+          {%- endif %}
+        </div>
+      </div>
+
+    </div>
+    {%- else %}
+    <div class="empty-state">No visit records on file.</div>
+    {%- endif %}
+  </div>
+
+  <!-- ─────────────────────────────────────────────────────────────────────── -->
+  <!-- UPCOMING IMMUNIZATIONS                                                  -->
+  <!-- max 5 rows, ordered by next_due_date ascending                         -->
+  <!-- ─────────────────────────────────────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-heading">Upcoming Immunizations</div>
+    {%- if upcoming_immunizations %}
+    <table class="immun-table">
+      <thead>
+        <tr>
+          <th>Vaccine</th>
+          <th>Next Due Date</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {%- for item in upcoming_immunizations %}
+        <tr class="{{ 'row-alt' if loop.index is even else '' }}">
+          <td>{{ item.vaccine_name }}</td>
+          <td>{{ item.next_due_date }}</td>
+          <td>
+            <span class="status-badge status-{{ item.status }}">{{ item.status | capitalize }}</span>
+          </td>
+        </tr>
+        {%- endfor %}
+      </tbody>
+    </table>
+    {%- else %}
+    <div class="empty-state">No upcoming immunizations.</div>
+    {%- endif %}
+  </div>
+
+  <!-- ─────────────────────────────────────────────────────────────────────── -->
+  <!-- FOOTER                                                                  -->
+  <!-- ─────────────────────────────────────────────────────────────────────── -->
+  <div class="doc-footer">
+    Generated by SmartHealth Hub on {{ today_date }}.
+    This document does not contain clinical diagnosis information.
+  </div>
+
+</body>
+</html>

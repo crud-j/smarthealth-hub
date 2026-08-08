@@ -1,22 +1,62 @@
 "use client";
 
 /**
- * PatientVisitsChart — line chart of patient visit counts per week or month.
+ * PatientVisitsChart — area chart of patient visit counts per week.
  *
- * Accepts pre-aggregated TimeSeriesPoint data (from analyticsAggregator.worker.ts
- * or synchronous fallback) and renders a simple SVG line chart.
+ * Implemented with Recharts AreaChart with a teal gradient fill for
+ * interactivity and responsive resizing.
  *
  * Consumed by: app/(dashboard)/analytics/page.tsx
- * Data source:  useVaccinationCoverage or analyticsAggregator groupByWeek output
+ * Data source:  useVisitTrends() hook → GET /analytics/visit-trends
  */
 
-import type { TimeSeriesPoint } from "@/workers/analyticsAggregator.worker";
+import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
+import type { TooltipContentProps } from "recharts";
+import type {
+  NameType,
+  ValueType,
+} from "recharts/types/component/DefaultTooltipContent";
+import type { TimeSeriesPoint } from "@/types/analytics";
 
 interface PatientVisitsChartProps {
   points: TimeSeriesPoint[];
   loading?: boolean;
-  /** Chart title shown above the SVG */
+  /** Chart title shown above the chart */
   title?: string;
+}
+
+const tooltipStyle: React.CSSProperties = {
+  background: "#fff",
+  border: "1px solid #e5d4cc",
+  borderRadius: 8,
+  fontSize: 12,
+  color: "#0f172a",
+  boxShadow: "0 2px 10px rgba(160,80,80,0.10)",
+};
+
+function VisitsTooltip({
+  active,
+  payload,
+  label,
+}: TooltipContentProps<ValueType, NameType>) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div style={{ ...tooltipStyle, borderLeft: "3px solid #0d9488", padding: "10px 14px" }}>
+      <p style={{ fontSize: 11, color: "#94a3b8", margin: "0 0 4px", fontWeight: 500 }}>{label}</p>
+      <p style={{ fontSize: 16, fontWeight: 800, color: "#0d9488", margin: 0 }}>
+        {payload[0].value}{" "}
+        <span style={{ fontSize: 11, fontWeight: 400, color: "#94a3b8" }}>visits</span>
+      </p>
+    </div>
+  );
 }
 
 export default function PatientVisitsChart({
@@ -26,7 +66,11 @@ export default function PatientVisitsChart({
 }: PatientVisitsChartProps) {
   if (loading) {
     return (
-      <div className="h-48 animate-pulse rounded-lg bg-slate-100" role="status" aria-label="Loading chart" />
+      <div
+        style={{ height: 220, borderRadius: 12, background: "#f8fafc" }}
+        role="status"
+        aria-label="Loading chart"
+      />
     );
   }
 
@@ -38,115 +82,51 @@ export default function PatientVisitsChart({
     );
   }
 
-  const maxValue = Math.max(...points.map((p) => p.value), 1);
-
-  const paddingLeft = 40;
-  const paddingRight = 16;
-  const paddingTop = 16;
-  const paddingBottom = 40;
-  const svgWidth = Math.max(480, points.length * 60);
-  const svgHeight = 200;
-  const plotWidth = svgWidth - paddingLeft - paddingRight;
-  const plotHeight = svgHeight - paddingTop - paddingBottom;
-
-  const xPos = (i: number) =>
-    paddingLeft +
-    (points.length > 1 ? (i / (points.length - 1)) * plotWidth : plotWidth / 2);
-  const yPos = (val: number) =>
-    paddingTop + plotHeight - (val / maxValue) * plotHeight;
-
-  const polyPoints = points
-    .map((p, i) => `${xPos(i)},${yPos(p.value)}`)
-    .join(" ");
-
-  // Filled area path
-  const areaPath =
-    `M ${xPos(0)},${yPos(points[0].value)} ` +
-    points
-      .slice(1)
-      .map((p, i) => `L ${xPos(i + 1)},${yPos(p.value)}`)
-      .join(" ") +
-    ` L ${xPos(points.length - 1)},${paddingTop + plotHeight} L ${xPos(0)},${paddingTop + plotHeight} Z`;
-
-  const yGridLines = [0, 0.25, 0.5, 0.75, 1];
-
   return (
     <div aria-label={title}>
-      <div className="overflow-x-auto">
-        <svg
-          viewBox={`0 0 ${svgWidth} ${svgHeight}`}
-          width="100%"
-          style={{ minWidth: 320 }}
-          role="img"
-          aria-label={title}
+      <ResponsiveContainer width="100%" height={220}>
+        <AreaChart
+          data={points}
+          margin={{ top: 8, right: 8, bottom: 4, left: 0 }}
         >
-          <title>{title}</title>
-
-          {/* Area fill */}
-          <path d={areaPath} fill="#0d9488" fillOpacity="0.1" />
-
-          {/* Y-axis grid lines */}
-          {yGridLines.map((frac) => {
-            const y = paddingTop + plotHeight - frac * plotHeight;
-            const label = Math.round(frac * maxValue);
-            return (
-              <g key={frac}>
-                <line
-                  x1={paddingLeft}
-                  y1={y}
-                  x2={svgWidth - paddingRight}
-                  y2={y}
-                  stroke="#e2e8f0"
-                  strokeWidth="1"
-                />
-                <text x={paddingLeft - 6} y={y + 4} textAnchor="end" fontSize="9" fill="#94a3b8">
-                  {label}
-                </text>
-              </g>
-            );
-          })}
-
-          {/* X-axis labels */}
-          {points.map((p, i) => {
-            const step = Math.ceil(points.length / 8);
-            if (i % step !== 0 && i !== points.length - 1) return null;
-            return (
-              <text
-                key={p.label}
-                x={xPos(i)}
-                y={svgHeight - paddingBottom + 14}
-                textAnchor="middle"
-                fontSize="9"
-                fill="#94a3b8"
-              >
-                {p.label}
-              </text>
-            );
-          })}
-
-          {/* Line */}
-          <polyline
-            points={polyPoints}
-            fill="none"
-            stroke="#0d9488"
-            strokeWidth="2.5"
-            strokeLinejoin="round"
-            strokeLinecap="round"
+          <defs>
+            <linearGradient id="visitsGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#0d9488" stopOpacity={0.45} />
+              <stop offset="55%" stopColor="#0d9488" stopOpacity={0.08} />
+              <stop offset="100%" stopColor="#0d9488" stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="4 4" stroke="#f1f5f9" />
+          <XAxis
+            dataKey="label"
+            tick={{ fontSize: 10, fill: "#94a3b8" }}
+            tickLine={false}
+            axisLine={false}
+            interval="preserveStartEnd"
           />
-
-          {/* Dots */}
-          {points.map((p, i) => (
-            <circle
-              key={p.label}
-              cx={xPos(i)}
-              cy={yPos(p.value)}
-              r="3.5"
-              fill="#0d9488"
-              aria-label={`${p.label}: ${p.value} visits`}
-            />
-          ))}
-        </svg>
-      </div>
+          <YAxis
+            allowDecimals={false}
+            tick={{ fontSize: 10, fill: "#94a3b8" }}
+            tickLine={false}
+            axisLine={false}
+            width={32}
+          />
+          <Tooltip
+            content={(props) => <VisitsTooltip {...props} />}
+            cursor={{ stroke: "#b5343e", strokeWidth: 1, strokeDasharray: "3 3" }}
+          />
+          <Area
+            type="monotone"
+            dataKey="value"
+            stroke="#0d9488"
+            strokeWidth={2.5}
+            fill="url(#visitsGrad)"
+            dot={false}
+            activeDot={{ r: 7, fill: "#b5343e", stroke: "#fff", strokeWidth: 2.5 }}
+            isAnimationActive
+          />
+        </AreaChart>
+      </ResponsiveContainer>
     </div>
   );
 }

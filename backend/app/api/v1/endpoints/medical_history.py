@@ -42,7 +42,7 @@ from app.schemas.medical_history import (
     MedicalHistoryListResponse,
     MedicalHistoryResponse,
 )
-from app.schemas.visit import VisitCreate, VisitResponse, VisitSummary
+from app.schemas.visit import VisitCreate, VisitResponse, VisitSummary, VisitUpdate
 from app.services import patient_service, visit_service
 from app.services import medical_history_service
 
@@ -159,6 +159,47 @@ async def get_visit(
         accessed_by_id=current_user.id,
         ip_address=ip,
     )
+
+
+# ---------------------------------------------------------------------------
+# Visit: update (Physician / Admin only)
+# ---------------------------------------------------------------------------
+
+
+@router.put(
+    "/visits/{visit_id}",
+    response_model=VisitResponse,
+    summary="Update an existing visit record (Physician/Admin only)",
+    dependencies=[_PHI_READ],
+)
+async def update_visit(
+    request: Request,
+    visit_id: uuid.UUID,
+    payload: VisitUpdate,
+    db: DbDep,
+    current_user: CurrentUser,
+) -> VisitResponse:
+    """
+    Apply a partial update to an existing visit/consultation record.
+
+    All body fields are optional — only supplied fields are written to the
+    stored record.  ``diagnosis`` and ``treatment_notes`` are supplied as
+    plaintext and re-encrypted with AES-256-GCM before persisting.
+
+    Writes an UPDATE audit log entry.
+
+    Auth: Physician/Nurse/Midwife or Admin only.
+    """
+    ip = _get_client_ip(request)
+    result = await visit_service.update_visit(
+        db=db,
+        visit_id=visit_id,
+        data=payload,
+        updated_by_id=current_user.id,
+        ip_address=ip,
+    )
+    await db.commit()
+    return result
 
 
 # ---------------------------------------------------------------------------

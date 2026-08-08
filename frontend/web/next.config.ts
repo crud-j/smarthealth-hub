@@ -1,9 +1,14 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Enable standalone output for Docker: copies only the files needed to run
+  // the app (no node_modules) into .next/standalone so the production image
+  // is lean and starts with `node server.js` without a full npm install.
+  output: "standalone",
+
   // Allow the LAN IP to access Next.js dev resources (HMR, fonts, etc.)
   // when testing from a mobile device on the same Wi-Fi network.
-  allowedDevOrigins: ["192.168.100.6"],
+  allowedDevOrigins: ["192.168.100.6", "*.loca.lt", "*.trycloudflare.com"],
 
   // Next's rewrite proxy defaults to a 30s timeout (proxy-request.js).
   // /auth/login can take longer than that under slow Gmail SMTP conditions

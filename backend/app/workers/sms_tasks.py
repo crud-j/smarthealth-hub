@@ -156,6 +156,92 @@ async def _load_sms_log_and_send(sms_log_id: str) -> dict:  # type: ignore[type-
     retry_backoff=True,          # exponential backoff: 2s, 4s, 8s, …
     retry_backoff_max=300,       # cap at 5 minutes between retries
     max_retries=settings.SMS_MAX_RETRIES,
+    name="sms.send_sms",
+    acks_late=True,
+)
+def send_sms_task(self: Task, mobile_number: str, message: str) -> dict:  # type: ignore[type-arg]
+    """
+    Celery task: send an SMS directly to a mobile number with a given message.
+
+    Unlike ``send_reminder_task``, this task takes the mobile number and message
+    body directly in its arguments.  It is used for transactional messages where
+    no ``sms_logs`` row needs to be pre-created (e.g. welcome SMS with a
+    temporary password sent immediately after account creation).
+
+    Retry behaviour:
+      - SMSTransientError (network, timeout, 5xx) — retries with exponential
+        backoff up to SMS_MAX_RETRIES (default 3).
+      - SMSPermanentError (invalid number, 4xx) — no retry; failure is logged.
+
+    Security note:
+      The message body travels through the Celery queue.  Callers must ensure
+      that no patient PHI (diagnoses, medical history) is included.  Temporary
+      passwords are acceptable because they are short-lived and delivered only
+      to the account holder's own registered mobile number.
+
+    Args:
+        mobile_number: Destination phone number in E.164 format (+639171234567).
+        message:       SMS body text to deliver.
+
+    Returns:
+        Dict with keys: mobile_number, status, and optionally provider_message_id.
+    """
+    logger.info(
+        "send_sms_task started",
+        extra={
+            "mobile_number": mobile_number,
+            "attempt": self.request.retries + 1,
+            "max_retries": self.max_retries,
+        },
+    )
+
+    async def _send() -> dict:  # type: ignore[type-arg]
+        from app.services.sms_service import SMSService
+
+        sms_svc = SMSService()
+        try:
+            api_result = await sms_svc.send_sms(
+                mobile_number=mobile_number,
+                message=message,
+            )
+            provider_message_id = api_result.get("message_id", "")
+            logger.info(
+                "send_sms_task: SMS sent successfully",
+                extra={
+                    "mobile_number": mobile_number,
+                    "provider_message_id": provider_message_id,
+                },
+            )
+            return {
+                "mobile_number": mobile_number,
+                "status": "sent",
+                "provider_message_id": provider_message_id,
+            }
+        except SMSPermanentError as exc:
+            logger.error(
+                "send_sms_task: permanent SMS failure — no retry",
+                extra={
+                    "mobile_number": mobile_number,
+                    "status_code": exc.status_code,
+                    "body": exc.body[:200],
+                },
+            )
+            return {
+                "mobile_number": mobile_number,
+                "status": "failed",
+                "reason": "permanent_error",
+            }
+        # SMSTransientError is not caught here — it propagates so autoretry fires.
+
+    return _run_async(_send())
+
+
+@celery_app.task(
+    bind=True,
+    autoretry_for=(SMSTransientError,),
+    retry_backoff=True,          # exponential backoff: 2s, 4s, 8s, …
+    retry_backoff_max=300,       # cap at 5 minutes between retries
+    max_retries=settings.SMS_MAX_RETRIES,
     name="sms.send_reminder",
     # Ensure task ID is stable across retries so Flower shows one entry.
     acks_late=True,

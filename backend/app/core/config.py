@@ -11,6 +11,7 @@ CORS_ORIGINS in .env must be a JSON array:
 
 import pathlib
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,6 +23,11 @@ class Settings(BaseSettings):
         # Treat empty env var values as if they were not set (use field defaults)
         env_ignore_empty=True,
     )
+
+    # ── Environment ───────────────────────────────────────────────────────────
+    # "development" | "production" — controls secure cookies, startup guards,
+    # and whether the /auth/dev-token and /auth/dev-otp endpoints are exposed.
+    ENVIRONMENT: str = "development"
 
     # ── Database ──────────────────────────────────────────────────────────────
     DATABASE_URL: str = "postgresql+asyncpg://shh_admin:SmartHealthHub@localhost:5445/smarthealthhub"
@@ -45,8 +51,11 @@ class Settings(BaseSettings):
     QR_BASE_URL: str = "http://localhost:3000"
 
     # ── Semaphore SMS ─────────────────────────────────────────────────────────
-    SEMAPHORE_API_KEY: str = ""
-    SEMAPHORE_SENDER_NAME: str = "BHC-Health"
+    SEMAPHORE_API_KEY: str = "3c1cd5982f75410dbe7e59659cfa4009"
+    # "Semaphore" is the platform default sender — it requires no approval and
+    # works on any account.  Custom org names (e.g. "BHCNotify") require an
+    # approved consent form from Semaphore before sends succeed.
+    SEMAPHORE_SENDER_NAME: str = "Semaphore"
     SEMAPHORE_BASE_URL: str = "https://api.semaphore.co/api/v4"
     # Shared secret for validating X-Semaphore-Signature on the delivery webhook.
     # Leave empty in development (validation is skipped when this is unset).
@@ -90,6 +99,22 @@ class Settings(BaseSettings):
     # Must match exactly — wrong value causes all passkey assertions to fail.
     WEBAUTHN_ORIGIN: str = "http://localhost:3000"
 
+    # ── OpenAI (AI analytics features) ───────────────────────────────────────────
+    # Used by ai_service.py for no-show risk scoring and anomaly alert generation.
+    # Leave empty to disable AI features — the service falls back to threshold-only
+    # logic when this is unset.
+    OPENAI_API_KEY: str = ""
+
+    # ── OCR / Document extraction ─────────────────────────────────────────────
+    # OCR provider: "tesseract" (default, offline) or "azure" (Document Intelligence).
+    # When "azure", AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT and _KEY must be set.
+    OCR_PROVIDER: str = "tesseract"
+    # Azure Document Intelligence — only used when OCR_PROVIDER="azure"
+    AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT: str = ""
+    AZURE_DOCUMENT_INTELLIGENCE_KEY: str = ""
+    # Maximum image upload size for OCR extraction (bytes). Default: 10 MiB.
+    OCR_MAX_IMAGE_BYTES: int = 10 * 1024 * 1024  # 10 MiB
+
     # ── CORS ──────────────────────────────────────────────────────────────────
     # Must be a JSON array in .env:
     #   CORS_ORIGINS=["http://localhost:3000","http://localhost:8000"]
@@ -100,6 +125,19 @@ class Settings(BaseSettings):
         "http://localhost:3000",   # Next.js dev server
         "http://localhost:8000",   # FastAPI itself (Swagger UI try-it-out)
     ]
+
+    @model_validator(mode="after")
+    def validate_azure_ocr_config(self) -> "Settings":
+        if self.OCR_PROVIDER == "azure":
+            if not self.AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT:
+                raise ValueError(
+                    "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT must be set when OCR_PROVIDER=azure"
+                )
+            if not self.AZURE_DOCUMENT_INTELLIGENCE_KEY:
+                raise ValueError(
+                    "AZURE_DOCUMENT_INTELLIGENCE_KEY must be set when OCR_PROVIDER=azure"
+                )
+        return self
 
 
 # Singleton instance imported everywhere:  from app.core.config import settings

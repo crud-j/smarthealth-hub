@@ -24,6 +24,8 @@ import type {
   NoShowRateResponse,
   TrendGroupBy,
   ExportParams,
+  TimeSeriesPoint,
+  VisitTrendsApiResponse,
 } from "@/types/analytics";
 
 // ---------------------------------------------------------------------------
@@ -308,6 +310,46 @@ export function useNoShowRate(from: string, to: string) {
   }, [fetch]);
 
   return { data, loading, error, refetch: fetch };
+}
+
+// ---------------------------------------------------------------------------
+// useVisitTrends — week-by-week visit counts for the last N weeks
+// ---------------------------------------------------------------------------
+
+export function useVisitTrends(weeks = 12) {
+  const [data, setData] = useState<TimeSeriesPoint[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<ApiError | null>(null);
+
+  const fetchTrends = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await apiFetch<VisitTrendsApiResponse>(
+        `/analytics/visit-trends?weeks=${weeks}`
+      );
+      setData(
+        res.items.map((item) => ({
+          label: item.week_label,
+          value: item.visit_count,
+        }))
+      );
+    } catch (err) {
+      setError(
+        err instanceof ApiError
+          ? err
+          : new ApiError(String(err), 0, "unknown")
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [weeks]);
+
+  useEffect(() => {
+    void fetchTrends();
+  }, [fetchTrends]);
+
+  return { data, loading, error, refetch: fetchTrends };
 }
 
 // ---------------------------------------------------------------------------

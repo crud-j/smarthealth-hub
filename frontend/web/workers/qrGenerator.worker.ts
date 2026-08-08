@@ -25,10 +25,18 @@ const qrGeneratorApi = {
    *          (e.g. "https://smarthealthhub.local/verify?pid=...&v=1&sig=...")
    *          Only the URL string is encoded — no PHI in the payload.
    *
-   * Returns: A "data:image/png;base64,..." string ready for use in <img src>.
+   * Returns: A "data:image/svg+xml,..." string ready for use in <img src>.
+   *
+   * Uses the SVG renderer (QRCode.toString), not toDataURL(). toDataURL()
+   * renders via document.createElement('canvas') — Web Workers have no DOM,
+   * so calling it here threw "document is not defined" inside the exposed
+   * async function, which Comlink then failed to relay cleanly back to the
+   * main thread (surfaced as "DataCloneError: #<Promise> could not be
+   * cloned" instead of a normal rejection). toString()'s SVG renderer is
+   * pure string generation with no DOM dependency, so it works in a Worker.
    */
   async generateDataUri(text: string): Promise<string> {
-    return QRCode.toDataURL(text, {
+    const svg = await QRCode.toString(text, {
       width: 200,
       margin: 1,
       color: {
@@ -36,6 +44,7 @@ const qrGeneratorApi = {
         light: "#ffffff",
       },
     });
+    return `data:image/svg+xml,${encodeURIComponent(svg)}`;
   },
 };
 

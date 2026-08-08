@@ -79,8 +79,10 @@ export default function ReportsPage() {
   const { fetchExportData, loading } = useAnalyticsExport();
 
   // csvExport.worker.ts for off-thread CSV formatting (SDP §7.4.1)
-  const csvWorker = useWebWorker<CsvExportApi>(
-    new URL("../../../../workers/csvExport.worker.ts", import.meta.url)
+  const csvWorker = useWebWorker<CsvExportApi>(() =>
+    new Worker(new URL("../../../../workers/csvExport.worker.ts", import.meta.url), {
+      type: "module",
+    })
   );
 
   async function handleExport() {

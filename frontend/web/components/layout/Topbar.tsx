@@ -1,92 +1,176 @@
 "use client";
 
-/**
- * Topbar — authenticated shell top navigation bar.
- *
- * Displays the current user name + role badge and a logout button.
- * On mobile (< lg breakpoint), shows a hamburger button to open the sidebar.
- *
- * WCAG 2.1 AA: logout and hamburger buttons are ≥44px touch targets.
- */
-
 import { useLogout } from "@/hooks/useAuth";
 import type { CurrentUser } from "@/hooks/useAuth";
 
 const ROLE_LABELS: Record<string, string> = {
-  admin: "Admin",
+  admin: "Administrator",
   bhw: "BHW",
   physician: "Physician",
   admin_staff: "Admin Staff",
 };
 
-const ROLE_COLORS: Record<string, string> = {
-  admin: "bg-purple-100 text-purple-700",
-  bhw: "bg-teal-100 text-teal-700",
-  physician: "bg-blue-100 text-blue-700",
-  admin_staff: "bg-slate-100 text-slate-700",
-};
+// ---------------------------------------------------------------------------
+// Icons
+// ---------------------------------------------------------------------------
+
+function IconHamburger() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="3" y1="6" x2="21" y2="6" />
+      <line x1="3" y1="12" x2="21" y2="12" />
+      <line x1="3" y1="18" x2="21" y2="18" />
+    </svg>
+  );
+}
+
+function IconChevronLeft() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="15 18 9 12 15 6" />
+    </svg>
+  );
+}
+
+function IconChevronRight() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="9 18 15 12 9 6" />
+    </svg>
+  );
+}
+
+function IconSignOut() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <polyline points="16,17 21,12 16,7" />
+      <line x1="21" y1="12" x2="9" y2="12" />
+    </svg>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Shared button style helpers
+// ---------------------------------------------------------------------------
+
+function onDarkHover(e: React.MouseEvent<HTMLButtonElement>, active = true) {
+  if (!active) return;
+  (e.currentTarget as HTMLButtonElement).style.color = "#D36969";
+  (e.currentTarget as HTMLButtonElement).style.background = "#252525";
+}
+function onDarkLeave(e: React.MouseEvent<HTMLButtonElement>) {
+  (e.currentTarget as HTMLButtonElement).style.color = "#666";
+  (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
 
 interface TopbarProps {
   user: CurrentUser | null;
   onMenuToggle: () => void;
+  isCollapsed: boolean;
+  onToggleCollapse: () => void;
 }
 
-export default function Topbar({ user, onMenuToggle }: TopbarProps) {
+export default function Topbar({
+  user,
+  onMenuToggle,
+  isCollapsed,
+  onToggleCollapse,
+}: TopbarProps) {
   const { performLogout, isLoading: logoutLoading } = useLogout();
-
   const role = user?.role?.toLowerCase() ?? "";
   const roleLabel = ROLE_LABELS[role] ?? role;
-  const roleColor = ROLE_COLORS[role] ?? "bg-slate-100 text-slate-700";
 
   return (
-    <header className="flex h-16 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 lg:px-6">
-      {/* Left: hamburger (mobile only) */}
-      <button
-        type="button"
-        onClick={onMenuToggle}
-        aria-label="Toggle navigation menu"
-        className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal-600 lg:hidden"
-      >
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <line x1="3" y1="6" x2="21" y2="6" />
-          <line x1="3" y1="12" x2="21" y2="12" />
-          <line x1="3" y1="18" x2="21" y2="18" />
-        </svg>
-      </button>
+    <header
+      className="flex h-16 shrink-0 items-center justify-between px-4 lg:px-3"
+      style={{ background: "#1a1a1a", borderBottom: "1px solid #2a2a2a" }}
+    >
+      {/* ── Left: hamburger (mobile) + sidebar toggle (desktop) ──── */}
+      <div className="flex items-center gap-1">
+        {/* Hamburger — mobile only */}
+        <button
+          type="button"
+          onClick={onMenuToggle}
+          aria-label="Toggle navigation menu"
+          className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#D36969] lg:hidden"
+          style={{ color: "#666", background: "transparent" }}
+          onMouseEnter={(e) => onDarkHover(e)}
+          onMouseLeave={(e) => onDarkLeave(e)}
+        >
+          <IconHamburger />
+        </button>
 
-      {/* Spacer on desktop */}
-      <div className="hidden lg:flex lg:flex-1" />
+        {/* Sidebar collapse/expand toggle — desktop only */}
+        <button
+          type="button"
+          onClick={onToggleCollapse}
+          aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          className="hidden lg:flex h-9 w-9 items-center justify-center rounded-lg transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#D36969]"
+          style={{ color: "#666", background: "transparent" }}
+          onMouseEnter={(e) => onDarkHover(e)}
+          onMouseLeave={(e) => onDarkLeave(e)}
+          suppressHydrationWarning
+        >
+          {isCollapsed ? <IconChevronRight /> : <IconChevronLeft />}
+        </button>
+      </div>
 
-      {/* Right: user info + logout */}
+      {/* ── Right: user info + sign out ──────────────────────────── */}
       <div className="flex items-center gap-3">
         {user && (
-          <div className="flex items-center gap-2">
-            {/* Role badge */}
+          <>
+            <div className="hidden h-5 w-px sm:block" style={{ background: "#2a2a2a" }} />
+
             <span
-              className={`hidden rounded-full px-2.5 py-0.5 text-xs font-semibold sm:inline-block ${roleColor}`}
+              className="hidden rounded-md px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest sm:inline-block"
+              style={{
+                background: "rgba(211,105,105,0.1)",
+                color: "#D36969",
+                border: "1px solid rgba(211,105,105,0.2)",
+              }}
             >
               {roleLabel}
             </span>
-            {/* Name */}
-            <span className="hidden text-sm font-medium text-slate-700 sm:block">
+
+            <span
+              className="hidden text-sm font-medium sm:block"
+              style={{ color: "#c0c0c0" }}
+            >
               {user.full_name}
             </span>
-          </div>
+
+            <div className="hidden h-5 w-px sm:block" style={{ background: "#2a2a2a" }} />
+          </>
         )}
 
-        {/* Logout button */}
+        {/* Sign out */}
         <button
           type="button"
           onClick={() => void performLogout()}
           disabled={logoutLoading}
           aria-label="Log out"
-          className="flex min-h-[44px] items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal-600 disabled:opacity-60"
+          className="flex min-h-[36px] items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#D36969] disabled:opacity-40"
+          style={{ color: "#888", border: "1px solid #2e2e2e", background: "transparent" }}
+          suppressHydrationWarning
+          onMouseEnter={(e) => {
+            if (!logoutLoading) {
+              (e.currentTarget as HTMLButtonElement).style.color = "#D36969";
+              (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(211,105,105,0.35)";
+              (e.currentTarget as HTMLButtonElement).style.background = "rgba(211,105,105,0.06)";
+            }
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.color = "#888";
+            (e.currentTarget as HTMLButtonElement).style.borderColor = "#2e2e2e";
+            (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+          }}
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-            <polyline points="16,17 21,12 16,7" />
-            <line x1="21" y1="12" x2="9" y2="12" />
-          </svg>
+          <IconSignOut />
           <span className="hidden sm:inline">
             {logoutLoading ? "Signing out…" : "Sign out"}
           </span>

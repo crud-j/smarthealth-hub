@@ -1,8 +1,10 @@
-# SmartHealth Hub — local development Docker Compose
-# Usage:
-#   Start infrastructure only:  docker-compose up db redis -d
-#   Start full stack:           docker-compose up --build
-#   View logs:                  docker-compose logs -f api
+# SmartHealth Hub — infra/docker-compose.yml
+# Legacy compose file used by the infra/ setup.
+# Prefer the canonical root-level docker-compose.yml for new deployments.
+#
+# Usage (from repo root):
+#   docker compose -f infra/docker-compose.yml up --build
+#   Infrastructure only: docker compose -f infra/docker-compose.yml up db redis -d
 
 services:
   # ── Next.js Frontend ─────────────────────────────────────────────────────────
@@ -13,9 +15,12 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api/v1
+      SERVER_SIDE_API_URL: http://api:8000
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000/api/v1
     depends_on:
       - api
+    networks:
+      - smarthealth
 
   # ── FastAPI Backend ───────────────────────────────────────────────────────────
   api:
@@ -27,15 +32,15 @@ services:
     env_file:
       - ../backend/.env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://shh_admin:SmartHealthHub@db:5432/smarthealthhub
-      - REDIS_URL=redis://redis:6379/0
+      DATABASE_URL: postgresql+asyncpg://shh_admin:SmartHealthHub@db:5432/smarthealthhub
+      REDIS_URL: redis://redis:6379/0
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
-    volumes:
-      - ../backend:/app  # hot-reload in dev (remove in prod)
+    networks:
+      - smarthealth
 
   # ── Celery Worker ─────────────────────────────────────────────────────────────
   celery-worker:
@@ -46,20 +51,17 @@ services:
     env_file:
       - ../backend/.env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://shh_admin:SmartHealthHub@db:5432/smarthealthhub
-      - REDIS_URL=redis://redis:6379/0
+      DATABASE_URL: postgresql+asyncpg://shh_admin:SmartHealthHub@db:5432/smarthealthhub
+      REDIS_URL: redis://redis:6379/0
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
-    volumes:
-      - ../backend:/app
+    networks:
+      - smarthealth
 
-  # ── Celery Beat Scheduler (periodic tasks) ────────────────────────────────────
-  # Runs the hourly appointment-reminder sweep and the daily immunization-reminder
-  # sweep defined in app/workers/celery_app.py beat_schedule.
-  # Only ONE beat instance must run at a time — do not scale this service.
+  # ── Celery Beat Scheduler ─────────────────────────────────────────────────────
   worker-beat:
     build:
       context: ../backend
@@ -68,14 +70,14 @@ services:
     env_file:
       - ../backend/.env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://shh_admin:SmartHealthHub@db:5432/smarthealthhub
-      - REDIS_URL=redis://redis:6379/0
+      DATABASE_URL: postgresql+asyncpg://shh_admin:SmartHealthHub@db:5432/smarthealthhub
+      REDIS_URL: redis://redis:6379/0
     depends_on:
       - redis
       - api
     restart: unless-stopped
-    volumes:
-      - ../backend:/app
+    networks:
+      - smarthealth
 
   # ── PostgreSQL Database ───────────────────────────────────────────────────────
   db:
@@ -94,24 +96,32 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    networks:
+      - smarthealth
 
-  # ── Redis (Celery broker + backend) ──────────────────────────────────────────
-  # Host port pinned to 6380 (not 6379) — an unrelated project's Redis
-  # container was already squatting on the host's default 6379, causing
-  # intermittent ECONNRESET against the wrong Redis instance. Container-to-
-  # container traffic (api/worker services using redis://redis:6379/0) is
-  # unaffected since that resolves over the Docker network, not this mapping.
+  # ── Redis ─────────────────────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
     restart: unless-stopped
     ports:
       - "6380:6379"
+    volumes:
+      - redisdata:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10
+    networks:
+      - smarthealth
 
 volumes:
   pgdata:
     name: smarthealth_pgdata
+  redisdata:
+    name: smarthealth_redisdata
+
+networks:
+  smarthealth:
+    driver: bridge
+    name: smarthealth_network

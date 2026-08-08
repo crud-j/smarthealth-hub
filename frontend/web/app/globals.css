@@ -1,5 +1,25 @@
 @import "tailwindcss";
 
+@theme {
+  --color-primary: #0d9488;
+  --color-primary-foreground: #ffffff;
+  --color-muted: #f1f5f9;
+  --color-muted-foreground: #94a3b8;
+  --color-border: #e2e8f0;
+  --color-ring: #0d9488;
+}
+
+/* Auth pages use the rose palette derived from the BHC logo seal color.
+   Scoped so the dashboard retains the teal brand tokens. */
+[data-theme="rose"] {
+  --color-primary: #b5343e;
+  --color-primary-foreground: #ffffff;
+  --color-muted: #fef2f4;
+  --color-muted-foreground: #a07882;
+  --color-border: #fcd5da;
+  --color-ring: #b5343e;
+}
+
 /*
  * SmartHealth Hub — Design tokens
  * Blue-green palette suited for a health information system.
@@ -67,7 +87,7 @@ body {
   background-color: var(--color-surface-alt);
   color: var(--color-text-primary);
   font-family:
-    "Inter",
+    var(--font-dm-sans),
     system-ui,
     -apple-system,
     BlinkMacSystemFont,

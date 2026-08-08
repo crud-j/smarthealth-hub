@@ -424,6 +424,67 @@ async def update_appointment(
     return _appointment_to_response(appt, patient)
 
 
+async def confirm_appointment(
+    db: AsyncSession,
+    appointment_id: uuid.UUID,
+    confirmation_source: str = "sms_reply",
+) -> None:
+    """
+    Confirm an appointment by setting status='confirmed'.
+
+    Called by the SMS inbound reply handler when a patient replies
+    "CONFIRM <token>" to their appointment reminder SMS.
+
+    Idempotent: if the appointment is already 'confirmed' or 'completed',
+    this function returns without making any changes.  If the appointment
+    does not exist (e.g. deleted after the reminder was sent), it also
+    returns silently — the webhook handler must not raise a 500.
+
+    Args:
+        db:                   Active async session.
+        appointment_id:       UUID of the appointment to confirm.
+        confirmation_source:  Audit detail string (e.g. "sms_reply").
+    """
+    appointment: Appointment | None = await db.get(Appointment, appointment_id)
+    if appointment is None:
+        logger.info(
+            "confirm_appointment: appointment not found — skipping",
+            extra={"appointment_id": str(appointment_id)},
+        )
+        return
+
+    if appointment.status in ("confirmed", "completed"):
+        logger.info(
+            "confirm_appointment: appointment already confirmed/completed — skipping",
+            extra={
+                "appointment_id": str(appointment_id),
+                "current_status": appointment.status,
+            },
+        )
+        return
+
+    appointment.status = "confirmed"
+    await db.flush()
+
+    await write_audit_log(
+        db=db,
+        action="UPDATE",
+        entity_type="appointment",
+        user_id=None,  # system action — no human user performed this
+        entity_id=appointment_id,
+        metadata={"confirmed_via": confirmation_source},
+    )
+    await db.commit()
+
+    logger.info(
+        "confirm_appointment: appointment confirmed",
+        extra={
+            "appointment_id": str(appointment_id),
+            "confirmation_source": confirmation_source,
+        },
+    )
+
+
 async def cancel_appointment(
     db: AsyncSession,
     appointment_id: uuid.UUID,

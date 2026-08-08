@@ -4,14 +4,29 @@
  * VaccinationCoverageChart — horizontal bar chart showing vaccination
  * coverage percentage per vaccine name.
  *
- * Implemented as an accessible SVG chart using Tailwind classes for
- * theming. Recharts is not installed; this keeps the bundle small
- * for low-bandwidth rural BHC environments (SDP §7.3).
+ * Implemented with Recharts BarChart (layout="vertical") for interactivity
+ * and responsive resizing.
  *
  * Consumed by: app/(dashboard)/analytics/page.tsx
  * Data source:  useVaccinationCoverage() hook → GET /analytics/vaccination-coverage
  */
 
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  LabelList,
+  Cell,
+  ResponsiveContainer,
+} from "recharts";
+import type { TooltipContentProps } from "recharts";
+import type {
+  NameType,
+  ValueType,
+} from "recharts/types/component/DefaultTooltipContent";
 import type { VaccinationCoverageItem } from "@/types/analytics";
 
 interface VaccinationCoverageChartProps {
@@ -20,9 +35,43 @@ interface VaccinationCoverageChartProps {
   loading?: boolean;
 }
 
-const CHART_HEIGHT = 220;
-const BAR_COLOR = "#0d9488"; // teal-600
-const GRID_COLOR = "#e2e8f0"; // slate-200
+/** Color-codes bars by coverage threshold. */
+function barColor(pct: number): string {
+  if (pct >= 90) return "#16a34a"; // green — good
+  if (pct >= 70) return "#0d9488"; // teal — acceptable
+  if (pct >= 50) return "#d97706"; // amber — warning
+  return "#b5343e";                 // crimson — critical
+}
+
+const tooltipStyle: React.CSSProperties = {
+  background: "#fff",
+  border: "1px solid #e5d4cc",
+  borderRadius: 8,
+  fontSize: 12,
+  color: "#0f172a",
+  boxShadow: "0 2px 10px rgba(160,80,80,0.10)",
+};
+
+function VaccinationTooltip({
+  active,
+  payload,
+}: TooltipContentProps<ValueType, NameType>) {
+  if (!active || !payload?.length) return null;
+  const item = payload[0].payload as VaccinationCoverageItem;
+  return (
+    <div style={{ ...tooltipStyle, borderLeft: `3px solid ${barColor(item.coveragePct)}`, padding: "10px 14px" }}>
+      <p style={{ fontWeight: 700, marginBottom: 4, color: "#0f172a" }}>
+        {item.vaccineName}
+      </p>
+      <p style={{ margin: 0, color: barColor(item.coveragePct) }}>
+        Coverage: <strong>{item.coveragePct}%</strong>
+      </p>
+      <p style={{ margin: 0, color: "#64748b" }}>
+        {item.completed} / {item.totalEligible} eligible
+      </p>
+    </div>
+  );
+}
 
 export default function VaccinationCoverageChart({
   items,
@@ -30,14 +79,11 @@ export default function VaccinationCoverageChart({
 }: VaccinationCoverageChartProps) {
   if (loading) {
     return (
-      <div className="space-y-3 p-4" role="status" aria-label="Loading chart">
+      <div style={{ padding: "16px 0" }} role="status" aria-label="Loading chart">
         {[80, 65, 50, 40, 30].map((w, i) => (
-          <div key={i} className="flex items-center gap-3">
-            <div className="h-4 w-24 animate-pulse rounded bg-slate-200" />
-            <div
-              className="h-6 animate-pulse rounded bg-slate-200"
-              style={{ width: `${w}%` }}
-            />
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+            <div style={{ height: 14, width: 96, borderRadius: 6, background: "#f1f5f9" }} />
+            <div style={{ height: 22, borderRadius: 6, background: "#f1f5f9", width: `${w}%` }} />
           </div>
         ))}
       </div>
@@ -52,112 +98,57 @@ export default function VaccinationCoverageChart({
     );
   }
 
-  const maxPct = 100; // always 0–100%
-  const paddingLeft = 130; // space for vaccine labels
-  const paddingRight = 48;
-  const paddingTop = 12;
-  const paddingBottom = 24;
-  const chartWidth = 480;
-  const plotWidth = chartWidth - paddingLeft - paddingRight;
-  const barHeight = 22;
-  const barGap = 10;
-  const totalHeight =
-    paddingTop + items.length * (barHeight + barGap) + paddingBottom;
-
-  // Grid lines at 0%, 25%, 50%, 75%, 100%
-  const gridLines = [0, 25, 50, 75, 100];
+  // Height scales with item count so bars don't get cramped
+  const chartHeight = Math.max(220, items.length * 42);
 
   return (
-    <div className="overflow-x-auto" aria-label="Vaccination coverage bar chart">
-      <svg
-        viewBox={`0 0 ${chartWidth} ${totalHeight}`}
-        width="100%"
-        style={{ maxHeight: CHART_HEIGHT + 40 }}
-        role="img"
-        aria-label="Bar chart of vaccination coverage by vaccine"
-      >
-        <title>Vaccination Coverage by Vaccine</title>
-
-        {/* Grid lines */}
-        {gridLines.map((pct) => {
-          const x = paddingLeft + (pct / maxPct) * plotWidth;
-          return (
-            <g key={pct}>
-              <line
-                x1={x}
-                y1={paddingTop}
-                x2={x}
-                y2={totalHeight - paddingBottom}
-                stroke={GRID_COLOR}
-                strokeWidth="1"
+    <div aria-label="Vaccination coverage bar chart">
+      <ResponsiveContainer width="100%" height={chartHeight}>
+        <BarChart
+          data={items}
+          layout="vertical"
+          margin={{ top: 4, right: 60, bottom: 8, left: 8 }}
+        >
+          <CartesianGrid
+            horizontal={false}
+            stroke="#f1f5f9"
+          />
+          <XAxis
+            type="number"
+            domain={[0, 100]}
+            tickFormatter={(v: number) => `${v}%`}
+            tick={{ fontSize: 11, fill: "#94a3b8" }}
+            tickLine={false}
+            axisLine={false}
+          />
+          <YAxis
+            type="category"
+            dataKey="vaccineName"
+            width={140}
+            tick={{ fontSize: 12, fill: "#475569", fontWeight: 600 }}
+            tickLine={false}
+            axisLine={false}
+          />
+          <Tooltip
+            content={(props) => <VaccinationTooltip {...props} />}
+            cursor={{ fill: "rgba(0,0,0,0.02)" }}
+          />
+          <Bar dataKey="coveragePct" radius={[4, 4, 4, 4]} isAnimationActive>
+            {items.map((item) => (
+              <Cell
+                key={item.vaccineName}
+                fill={barColor(item.coveragePct)}
               />
-              <text
-                x={x}
-                y={totalHeight - paddingBottom + 14}
-                textAnchor="middle"
-                fontSize="10"
-                fill="#94a3b8"
-              >
-                {pct}%
-              </text>
-            </g>
-          );
-        })}
-
-        {/* Bars */}
-        {items.map((item, i) => {
-          const y = paddingTop + i * (barHeight + barGap);
-          const barWidth = (item.coveragePct / maxPct) * plotWidth;
-
-          return (
-            <g key={item.vaccineName}>
-              {/* Label */}
-              <text
-                x={paddingLeft - 8}
-                y={y + barHeight / 2 + 4}
-                textAnchor="end"
-                fontSize="11"
-                fill="#475569"
-              >
-                {item.vaccineName.length > 16
-                  ? item.vaccineName.slice(0, 15) + "…"
-                  : item.vaccineName}
-              </text>
-
-              {/* Background track */}
-              <rect
-                x={paddingLeft}
-                y={y}
-                width={plotWidth}
-                height={barHeight}
-                rx="3"
-                fill="#f1f5f9"
-              />
-
-              {/* Filled bar */}
-              <rect
-                x={paddingLeft}
-                y={y}
-                width={Math.max(barWidth, 2)}
-                height={barHeight}
-                rx="3"
-                fill={BAR_COLOR}
-                aria-label={`${item.vaccineName}: ${item.coveragePct}%`}
-              />
-
-              {/* Percentage label */}
-              <text
-                x={paddingLeft + barWidth + 5}
-                y={y + barHeight / 2 + 4}
-                fontSize="10"
-                fill="#475569"
-              >
-                {item.coveragePct}%
-              </text>
-            </g>
-          );
-        })}
-      </svg>
+            ))}
+            <LabelList
+              dataKey="coveragePct"
+              position="right"
+              formatter={(v: unknown) => `${v}%`}
+              style={{ fontSize: 11, fill: "#475569" }}
+            />
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
     </div>
   );
 }

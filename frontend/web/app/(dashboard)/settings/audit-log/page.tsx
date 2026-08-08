@@ -100,14 +100,14 @@ export default function AuditLogPage() {
   return (
     <div>
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-900">Audit Log</h1>
-        <p className="mt-0.5 text-sm text-slate-500">
+        <h1 className="text-2xl font-bold" style={{ fontFamily: "var(--font-dm-serif, Georgia, serif)", fontWeight: 400, color: "#1a0808" }}>Audit Log</h1>
+        <p className="mt-0.5 text-sm" style={{ color: "#7a5252" }}>
           Full trail of all system actions — who did what, when, and from where
         </p>
       </div>
 
       {/* Filters */}
-      <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="mb-4 rounded-xl bg-white p-4 shadow-sm" style={{ border: "1px solid #e5d4cc" }}>
         <div className="flex flex-wrap items-end gap-3">
           <div className="min-w-[160px]">
             <label htmlFor="audit-action" className="mb-1 block text-xs font-medium text-slate-600">Action</label>
@@ -128,7 +128,8 @@ export default function AuditLogPage() {
               className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500" />
           </div>
           <button type="button" onClick={handleApply}
-            className="min-h-[44px] rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700">
+            className="min-h-[44px] rounded-lg px-4 py-2 text-sm font-medium text-white"
+          style={{ background: "linear-gradient(135deg, #b5343e, #c94060)" }}>
             Apply
           </button>
         </div>
@@ -139,17 +140,17 @@ export default function AuditLogPage() {
       )}
 
       {/* Table */}
-      <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="rounded-xl bg-white shadow-sm" style={{ border: "1px solid #e5d4cc", boxShadow: "0 2px 10px rgba(160,80,80,0.06)" }}>
         <div className="overflow-x-auto">
           <table className="w-full text-sm" aria-label="Audit log table">
             <thead>
-              <tr className="border-b border-slate-200 bg-slate-50 text-left">
-                <th className="px-4 py-3 font-semibold text-slate-600">Timestamp</th>
-                <th className="px-4 py-3 font-semibold text-slate-600">User</th>
-                <th className="px-4 py-3 font-semibold text-slate-600">Action</th>
-                <th className="px-4 py-3 font-semibold text-slate-600">Entity Type</th>
-                <th className="px-4 py-3 font-semibold text-slate-600">Entity ID</th>
-                <th className="px-4 py-3 font-semibold text-slate-600">IP</th>
+              <tr className="text-left" style={{ background: "linear-gradient(135deg, #fdf0eb 0%, #ffffff 100%)", borderBottom: "2px solid #e5d4cc" }}>
+                <th className="px-4 py-3 font-semibold" style={{ color: "#9b6e6e" }}>Timestamp</th>
+                <th className="px-4 py-3 font-semibold" style={{ color: "#9b6e6e" }}>User</th>
+                <th className="px-4 py-3 font-semibold" style={{ color: "#9b6e6e" }}>Action</th>
+                <th className="px-4 py-3 font-semibold" style={{ color: "#9b6e6e" }}>Entity Type</th>
+                <th className="px-4 py-3 font-semibold" style={{ color: "#9b6e6e" }}>Entity ID</th>
+                <th className="px-4 py-3 font-semibold" style={{ color: "#9b6e6e" }}>IP</th>
               </tr>
             </thead>
             <tbody>
@@ -164,13 +165,13 @@ export default function AuditLogPage() {
               ))}
               {!loading && (data?.items ?? []).length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center text-slate-400">
+                  <td colSpan={6} className="px-4 py-10 text-center" style={{ color: "#b09090" }}>
                     No audit log entries found.
                   </td>
                 </tr>
               )}
               {!loading && (data?.items ?? []).map((entry) => (
-                <tr key={entry.id} className="border-b border-slate-100 hover:bg-slate-50">
+                <tr key={entry.id} className="border-b transition-colors" style={{ borderColor: "#f0e4dd" }} onMouseEnter={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = "#fdf5f0"; }} onMouseLeave={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = ""; }}>
                   <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-500">
                     {formatDateTime(entry.created_at)}
                   </td>
@@ -193,14 +194,14 @@ export default function AuditLogPage() {
 
         {/* Pagination */}
         {data && data.total > PAGE_SIZE && (
-          <div className="flex items-center justify-between border-t border-slate-200 px-4 py-3">
-            <p className="text-xs text-slate-500">{data.total} total entries</p>
+          <div className="flex items-center justify-between px-4 py-3" style={{ borderTop: "1px solid #e5d4cc" }}>
+            <p className="text-xs" style={{ color: "#9b6e6e" }}>{data.total} total entries</p>
             <div className="flex gap-2">
               <button type="button" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}
-                className="min-h-[36px] rounded-lg border border-slate-200 px-3 text-sm hover:bg-slate-50 disabled:opacity-40" aria-label="Previous page">
+                className="min-h-[36px] rounded-lg px-3 text-sm disabled:opacity-40" style={{ border: "1px solid #e5d4cc" }} aria-label="Previous page">
                 Previous
               </button>
-              <span className="flex items-center text-xs text-slate-500">Page {page} of {totalPages}</span>
+              <span className="flex items-center text-xs" style={{ color: "#9b6e6e" }}>Page {page} of {totalPages}</span>
               <button type="button" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}
                 className="min-h-[36px] rounded-lg border border-slate-200 px-3 text-sm hover:bg-slate-50 disabled:opacity-40" aria-label="Next page">
                 Next

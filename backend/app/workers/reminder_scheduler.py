@@ -26,6 +26,7 @@ Template registry (extend here for Filipino / other language variants):
 from __future__ import annotations
 
 import asyncio
+import random
 import uuid
 from datetime import date, datetime, timedelta, UTC
 
@@ -127,12 +128,25 @@ async def _dispatch_appointment_reminders_async() -> int:
             scheduled_date = appt.scheduled_at.strftime("%m/%d/%Y")
             scheduled_time = appt.scheduled_at.strftime("%I:%M %p")
 
-            message = SMS_TEMPLATES["appointment_reminder"]["en"].format(
+            base_message = SMS_TEMPLATES["appointment_reminder"]["en"].format(
                 patient_name=full_name,
                 appointment_type=appt.appointment_type,
                 scheduled_date=scheduled_date,
                 scheduled_time=scheduled_time,
             )
+
+            # Generate a 4-digit confirmation token for SMS reply-confirm flow.
+            token = str(random.randint(1000, 9999))
+            confirm_suffix = f" CONFIRM {token} to confirm."  # 25 chars
+
+            # Ensure the final SMS body stays within 160 characters.
+            # If the base message is too long, truncate it and add an ellipsis
+            # before appending the suffix.
+            max_base_len = 160 - len(confirm_suffix)
+            if len(base_message) > max_base_len:
+                base_message = base_message[: max_base_len - 3].rstrip() + "..."
+
+            message = base_message + confirm_suffix
 
             sms_log = SmsLog(
                 id=uuid.uuid4(),
@@ -141,6 +155,10 @@ async def _dispatch_appointment_reminders_async() -> int:
                 mobile_number=patient.mobile_number,
                 message=message,
                 status="queued",
+                sms_metadata={
+                    "confirmation_token": token,
+                    "appointment_id": str(appt.id),
+                },
             )
             db.add(sms_log)
             await db.flush()  # get the UUID before commit

@@ -184,3 +184,33 @@ class NoShowRateResponse(BaseSchema):
     )
     from_date: date = Field(description="Start of the requested date range (inclusive).")
     to_date: date = Field(description="End of the requested date range (inclusive).")
+
+
+class VisitTrendPoint(BaseSchema):
+    """
+    A single data point in the week-by-week visit trend series.
+
+    week_label is formatted as 'YYYY-WNN' (e.g. '2026-W30').
+    """
+
+    week_label: str = Field(
+        description="ISO week label for this data point (e.g. '2026-W30')."
+    )
+    visit_count: int = Field(
+        description="Number of visits recorded in this ISO week.",
+        ge=0,
+    )
+
+
+class VisitTrendsResponse(BaseSchema):
+    """Full visit trends response including the requested window size."""
+
+    weeks: int = Field(
+        description="Number of past weeks included in the response (1–52).",
+        ge=1,
+        le=52,
+    )
+    items: list[VisitTrendPoint] = Field(
+        description="Weekly visit counts ordered chronologically (earliest first).",
+        default_factory=list,
+    )

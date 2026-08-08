@@ -26,10 +26,10 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
-from sqlalchemy import func, select
+import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError
@@ -41,6 +41,7 @@ from app.schemas.patient import (
     PatientVerifySummary,
 )
 from app.services.audit_service import write_audit_log
+from app.utils.encryption import decrypt_text, encrypt_text
 
 logger = get_logger(__name__)
 
@@ -77,7 +78,7 @@ async def _next_patient_code(db: AsyncSession) -> str:
     prefix = f"BHC-{year}-"
 
     result = await db.execute(
-        select(func.max(Patient.patient_code)).where(
+        sa.select(sa.func.max(Patient.patient_code)).where(
             Patient.patient_code.like(f"{prefix}%")
         )
     )
@@ -90,6 +91,42 @@ async def _next_patient_code(db: AsyncSession) -> str:
         seq = 1
 
     return f"{prefix}{seq:06d}"
+
+
+def _clean_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _compose_address(
+    *,
+    address: str | None,
+    sitio_purok: str | None = None,
+    barangay: str | None = None,
+    municipality: str | None = None,
+    province: str | None = None,
+) -> str:
+    structured_parts = [sitio_purok, barangay, municipality, province]
+    cleaned_structured = [part.strip() for part in structured_parts if part and part.strip()]
+    if cleaned_structured:
+        return ", ".join(cleaned_structured)
+    cleaned_address = _clean_text(address)
+    return cleaned_address or ""
+
+
+def _encrypt_optional_text(value: str | None) -> str | None:
+    cleaned = _clean_text(value)
+    if cleaned is None:
+        return None
+    return encrypt_text(cleaned)
+
+
+def _decrypt_optional_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    return decrypt_text(value)
 
 
 # ---------------------------------------------------------------------------
@@ -135,7 +172,7 @@ async def list_patients(
     Returns:
         Tuple of (list of Patient ORM objects, total_count).
     """
-    base_query = select(Patient).where(Patient.is_active.is_(True))
+    base_query = sa.select(Patient).where(Patient.is_active.is_(True))
 
     if q:
         term = f"%{q}%"
@@ -144,6 +181,9 @@ async def list_patients(
             | Patient.first_name.ilike(term)
             | Patient.patient_code.ilike(term)
             | Patient.mobile_number.ilike(term)
+            | Patient.philhealth_no.ilike(term)
+            | Patient.address.ilike(term)
+            | sa.cast(Patient.birth_date, sa.String).ilike(term)
         )
     if is_senior is not None:
         base_query = base_query.where(Patient.is_senior.is_(is_senior))
@@ -154,7 +194,7 @@ async def list_patients(
 
     # Count query (same filters, no pagination)
     count_result = await db.execute(
-        select(func.count()).select_from(base_query.subquery())
+        sa.select(sa.func.count()).select_from(base_query.subquery())
     )
     total: int = count_result.scalar_one()
 
@@ -186,7 +226,7 @@ async def get_patient(db: AsyncSession, patient_id: uuid.UUID) -> Patient:
         NotFoundError: If no patient with the given ID exists (active or not).
     """
     result = await db.execute(
-        select(Patient).where(Patient.id == patient_id)
+        sa.select(Patient).where(Patient.id == patient_id)
     )
     patient: Patient | None = result.scalar_one_or_none()
     if patient is None:
@@ -232,12 +272,26 @@ async def create_patient(
         duplicate warning was returned instead of creating a record.
     """
     # Duplicate detection: same last_name + first_name + birth_date (case-insensitive)
-    dup_check = await db.execute(
-        select(Patient).where(
-            func.lower(Patient.last_name) == data.last_name.lower(),
-            func.lower(Patient.first_name) == data.first_name.lower(),
+    duplicate_filters: list[Any] = [
+        sa.and_(
+            sa.func.lower(Patient.last_name) == data.last_name.lower(),
+            sa.func.lower(Patient.first_name) == data.first_name.lower(),
             Patient.birth_date == data.birth_date,
+        )
+    ]
+    if data.mobile_number:
+        duplicate_filters.append(
+            sa.func.lower(Patient.mobile_number) == data.mobile_number.lower()
+        )
+    if data.philhealth_no:
+        duplicate_filters.append(
+            sa.func.lower(Patient.philhealth_no) == data.philhealth_no.lower()
+        )
+
+    dup_check = await db.execute(
+        sa.select(Patient).where(
             Patient.is_active.is_(True),
+            sa.or_(*duplicate_filters),
         )
     )
     matches: list[Patient] = list(dup_check.scalars().all())
@@ -246,7 +300,7 @@ async def create_patient(
         logger.info(
             "Duplicate patient warning returned (not confirmed)",
             extra={
-                "name": f"{data.last_name}, {data.first_name}",
+                "patient_name": f"{data.last_name}, {data.first_name}",
                 "birth_date": str(data.birth_date),
                 "match_count": len(matches),
             },
@@ -265,16 +319,51 @@ async def create_patient(
         birth_date=data.birth_date,
         sex=data.sex,
         civil_status=data.civil_status,
+        household_number=data.household_number,
+        sitio_purok=data.sitio_purok,
+        barangay=data.barangay,
+        municipality=data.municipality,
+        province=data.province,
+        occupation=data.occupation,
         mobile_number=data.mobile_number,
-        address=data.address,
+        address=_compose_address(
+            address=data.address,
+            sitio_purok=data.sitio_purok,
+            barangay=data.barangay,
+            municipality=data.municipality,
+            province=data.province,
+        ),
         guardian_name=data.guardian_name,
         guardian_contact=data.guardian_contact,
+        emergency_contact_name=data.emergency_contact_name,
+        emergency_contact_number=data.emergency_contact_number,
         philhealth_no=data.philhealth_no,
         philhealth_member_type=data.philhealth_member_type,
+        philhealth_category=data.philhealth_category,
+        is_4ps_beneficiary=data.is_4ps_beneficiary,
+        household_id_4ps=data.household_id_4ps,
+        is_indigenous=data.is_indigenous,
+        place_of_birth=data.place_of_birth,
+        mothers_maiden_name=data.mothers_maiden_name,
         is_pwd=data.is_pwd,
         is_senior=is_senior,
         is_pregnant=data.is_pregnant,
         is_active=True,
+        blood_type=data.blood_type,
+        senior_id_number=data.senior_id_number,
+        pwd_id_number=data.pwd_id_number,
+        last_menstrual_period=data.last_menstrual_period,
+        gravida=data.gravida,
+        para=data.para,
+        estimated_due_date=data.estimated_due_date,
+        height_cm=data.height_cm,
+        weight_kg=data.weight_kg,
+        allergies=_encrypt_optional_text(data.allergies),
+        known_conditions=_encrypt_optional_text(data.known_conditions),
+        registration_source=data.registration_source,
+        registration_data_source=data.registration_data_source,
+        data_privacy_consent=data.data_privacy_consent,
+        data_privacy_consent_at=datetime.now(UTC),
         created_by=created_by_id,
     )
 
@@ -284,6 +373,8 @@ async def create_patient(
     audit_metadata: dict[str, Any] = {
         "patient_code": patient_code,
         "name": f"{data.last_name}, {data.first_name}",
+        "data_privacy_consent": data.data_privacy_consent,
+        "registration_data_source": data.registration_data_source,
     }
     if matches and confirm_duplicate:
         audit_metadata["confirmed_duplicate"] = True
@@ -333,14 +424,41 @@ async def update_patient(
 
     update_fields: dict[str, Any] = {}
     for field, value in data.model_dump(exclude_none=True).items():
-        update_fields[field] = value
-        setattr(patient, field, value)
+        if field == "allergies":
+            stored_value = _encrypt_optional_text(value)
+        elif field == "known_conditions":
+            stored_value = _encrypt_optional_text(value)
+        elif field == "address":
+            stored_value = _compose_address(address=value)
+        else:
+            stored_value = value
+        update_fields[field] = stored_value
+        setattr(patient, field, stored_value)
+
+    if any(
+        field in update_fields
+        for field in ("sitio_purok", "barangay", "municipality", "province", "address")
+    ):
+        patient.address = _compose_address(
+            address=update_fields.get("address", patient.address),
+            sitio_purok=patient.sitio_purok,
+            barangay=patient.barangay,
+            municipality=patient.municipality,
+            province=patient.province,
+        )
+        update_fields["address"] = patient.address
 
     # Re-compute is_senior if birth_date changed
     new_birth_date: date | None = data.birth_date
     if new_birth_date is not None:
         patient.is_senior = _compute_age(new_birth_date) >= 60
         update_fields["is_senior"] = patient.is_senior
+
+    if data.data_privacy_consent is True:
+        patient.data_privacy_consent = True
+        patient.data_privacy_consent_at = datetime.now(UTC)
+        update_fields["data_privacy_consent"] = True
+        update_fields["data_privacy_consent_at"] = patient.data_privacy_consent_at
 
     patient.updated_at = datetime.utcnow()  # type: ignore[assignment]
 
@@ -416,13 +534,13 @@ async def verify_patient(
 
     # Latest visit date
     latest_visit_result = await db.execute(
-        select(func.max(Visit.visit_date)).where(Visit.patient_id == patient_id)
+        sa.select(sa.func.max(Visit.visit_date)).where(Visit.patient_id == patient_id)
     )
     last_visit_date: datetime | None = latest_visit_result.scalar_one_or_none()
 
     # Health card status
     card_result = await db.execute(
-        select(HealthCard.status).where(HealthCard.patient_id == patient_id)
+        sa.select(HealthCard.status).where(HealthCard.patient_id == patient_id)
     )
     card_status: str | None = card_result.scalar_one_or_none()
 

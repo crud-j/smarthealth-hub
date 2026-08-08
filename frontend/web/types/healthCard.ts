@@ -34,6 +34,23 @@ export interface HealthCardData {
 }
 
 // ---------------------------------------------------------------------------
+// Maybe response — returned by GET /health-cards/{patient_id}?allow_missing=true
+// ---------------------------------------------------------------------------
+
+/**
+ * Envelope returned when the caller passes ?allow_missing=true to
+ * GET /health-cards/{patient_id}.
+ *
+ * card_found=false means the patient has no card yet (HTTP 200, not 404).
+ * This prevents the browser console from logging network errors during
+ * the health-cards list view where many patients may lack a card.
+ */
+export interface HealthCardMaybeResponse {
+  card_found: boolean;
+  card: HealthCardData | null;
+}
+
+// ---------------------------------------------------------------------------
 // Generate / reissue response (mirrors CardGenerateResponse schema)
 // ---------------------------------------------------------------------------
 

@@ -29,7 +29,7 @@ from app.schemas._base import BaseSchema
 
 
 # ---------------------------------------------------------------------------
-# VitalSigns — sub-model (embedded in VisitCreate / VisitResponse)
+# VitalSigns — sub-model (embedded in VisitCreate / VisitUpdate / VisitResponse)
 # ---------------------------------------------------------------------------
 
 
@@ -150,6 +150,42 @@ class VisitCreate(BaseSchema):
         None,
         description="Treatment plan and notes — will be AES-256-GCM encrypted before storage",
     )
+
+
+# ---------------------------------------------------------------------------
+# VisitUpdate — PATCH-style payload for PUT /visits/{visit_id}
+# ---------------------------------------------------------------------------
+
+
+class VisitUpdate(BaseSchema):
+    """
+    Payload for updating an existing patient visit record.
+
+    All fields are optional — only supplied fields are applied to the stored
+    record (``model_dump(exclude_unset=True)`` in the service layer).
+
+    ``diagnosis`` and ``treatment_notes`` are supplied as plaintext; the
+    service layer re-encrypts them with AES-256-GCM before persisting.
+    Passing ``None`` explicitly clears the encrypted field (stores NULL).
+
+    Only Physician/Nurse/Midwife and Admin roles may supply these PHI fields;
+    the endpoint enforces the role check before calling the service.
+    """
+
+    visit_type: str | None = Field(None, max_length=50)
+    visit_date: datetime | None = None
+
+    # Vital signs — supplied as a nested object; unpacked to individual columns
+    vital_signs: VitalSigns | None = None
+
+    # Complaint / history (plaintext — no PHI)
+    chief_complaint: str | None = None
+    past_medical_history: str | None = None
+    present_medical_history: str | None = None
+
+    # PHI fields — supplied as plaintext; service layer re-encrypts
+    diagnosis: str | None = None
+    treatment_notes: str | None = None
 
 
 # ---------------------------------------------------------------------------

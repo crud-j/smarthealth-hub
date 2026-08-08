@@ -232,6 +232,15 @@ class ForgotPasswordResponse(BaseModel):
     message: str = Field(
         default="If the email is registered, a reset OTP has been sent to the linked mobile number."
     )
+    session_hint: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "User's UUID — pass this as ``user_id`` to /auth/reset-password. "
+            "None when the email is not registered (anti-enumeration: the HTTP "
+            "status and message are identical in both cases). "
+            "This is not a secret; the OTP itself is the authenticating factor."
+        ),
+    )
 
 
 class ResetPasswordRequest(BaseModel):

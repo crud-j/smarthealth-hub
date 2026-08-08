@@ -32,6 +32,7 @@ import type {
   PatientUpdatePayload,
   VisitSummary,
   VisitCreatePayload,
+  VisitUpdatePayload,
   Visit,
 } from "@/types/patient";
 
@@ -39,7 +40,7 @@ import type {
 // API response shapes (snake_case from backend)
 // ---------------------------------------------------------------------------
 
-interface PatientApiResponse {
+export interface PatientApiResponse {
   id: string;
   patient_code: string;
   first_name: string;
@@ -50,16 +51,52 @@ interface PatientApiResponse {
   birth_date: string;
   sex: "male" | "female";
   civil_status?: string | null;
+  household_number?: string | null;
+  sitio_purok?: string | null;
+  barangay?: string | null;
+  municipality?: string | null;
+  province?: string | null;
+  occupation?: string | null;
   mobile_number?: string | null;
   address: string;
   guardian_name?: string | null;
   guardian_contact?: string | null;
+  emergency_contact_name?: string | null;
+  emergency_contact_number?: string | null;
   philhealth_no?: string | null;
   philhealth_member_type?: "member" | "dependent" | null;
+  philhealth_category?:
+    | "indigent"
+    | "sponsored"
+    | "formal_economy"
+    | "informal_economy"
+    | "lifetime_member"
+    | null;
+  is_4ps_beneficiary: boolean;
+  household_id_4ps?: string | null;
+  is_indigenous: boolean;
+  place_of_birth?: string | null;
+  mothers_maiden_name?: string | null;
   is_pwd: boolean;
   is_senior: boolean;
   is_pregnant: boolean;
+  senior_id_number?: string | null;
+  pwd_id_number?: string | null;
+  last_menstrual_period?: string | null;
+  gravida?: number | null;
+  para?: number | null;
+  estimated_due_date?: string | null;
+  height_cm?: number | null;
+  weight_kg?: number | null;
+  allergies?: string | null;
+  known_conditions?: string | null;
+  registration_source?: "walk_in" | "referral" | "outreach" | "others" | null;
+  registration_data_source?: "manual" | "ocr" | "pre_visit";
+  data_privacy_consent: boolean;
+  data_privacy_consent_at?: string | null;
   is_active: boolean;
+  /** ABO/Rh blood group. Null when not recorded. */
+  blood_type?: string | null;
   created_at: string;
   updated_at: string;
   /** Root-relative URL to the patient's profile photo, or null. */
@@ -81,6 +118,8 @@ interface PatientSummaryApiResponse {
   is_pwd: boolean;
   is_pregnant: boolean;
   is_active: boolean;
+  /** ABO/Rh blood group. Null when not recorded. */
+  blood_type?: string | null;
 }
 
 interface PaginatedPatientsApiResponse {
@@ -133,28 +172,58 @@ interface VisitApiResponse extends VisitSummaryApiResponse {
 // Mapping helpers (snake_case → camelCase)
 // ---------------------------------------------------------------------------
 
-function mapPatient(r: PatientApiResponse): Patient {
+export function mapPatient(r: PatientApiResponse): Patient {
   return {
     id: r.id,
     patientCode: r.patient_code,
     firstName: r.first_name,
     middleName: r.middle_name,
     lastName: r.last_name,
-    fullName: r.full_name,
-    age: r.age,
+    fullName: r.full_name ||
+      [r.first_name, r.middle_name, r.last_name].filter(Boolean).join(" "),
+    age: r.age ?? 0,
     birthDate: r.birth_date,
     sex: r.sex,
     civilStatus: r.civil_status,
+    householdNumber: r.household_number ?? null,
+    sitioPurok: r.sitio_purok ?? null,
+    barangay: r.barangay ?? null,
+    municipality: r.municipality ?? null,
+    province: r.province ?? null,
+    occupation: r.occupation ?? null,
     mobileNumber: r.mobile_number,
     address: r.address,
     guardianName: r.guardian_name,
     guardianContact: r.guardian_contact,
+    emergencyContactName: r.emergency_contact_name ?? null,
+    emergencyContactNumber: r.emergency_contact_number ?? null,
     philhealthNo: r.philhealth_no,
     philhealthMemberType: r.philhealth_member_type,
+    philhealthCategory: r.philhealth_category ?? null,
+    is4psBeneficiary: r.is_4ps_beneficiary ?? false,
+    householdId4ps: r.household_id_4ps ?? null,
+    isIndigenous: r.is_indigenous ?? false,
+    placeOfBirth: r.place_of_birth ?? null,
+    mothersMaidenName: r.mothers_maiden_name ?? null,
     isPwd: r.is_pwd,
     isSenior: r.is_senior,
     isPregnant: r.is_pregnant,
+    seniorIdNumber: r.senior_id_number ?? null,
+    pwdIdNumber: r.pwd_id_number ?? null,
+    lastMenstrualPeriod: r.last_menstrual_period ?? null,
+    gravida: r.gravida ?? null,
+    para: r.para ?? null,
+    estimatedDueDate: r.estimated_due_date ?? null,
+    heightCm: r.height_cm ?? null,
+    weightKg: r.weight_kg ?? null,
+    allergies: r.allergies ?? null,
+    knownConditions: r.known_conditions ?? null,
+    registrationSource: r.registration_source ?? null,
+    registrationDataSource: r.registration_data_source ?? "manual",
+    dataPrivacyConsent: r.data_privacy_consent ?? false,
+    dataPrivacyConsentAt: r.data_privacy_consent_at ?? null,
     isActive: r.is_active,
+    bloodType: r.blood_type ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     photoPath: r.photo_path ?? null,
@@ -177,8 +246,9 @@ function mapPatientSummary(r: PatientSummaryApiResponse): PatientSummary {
     firstName: r.first_name,
     middleName: r.middle_name,
     lastName: r.last_name,
-    fullName: r.full_name,
-    age: r.age,
+    fullName: r.full_name ||
+      [r.first_name, r.middle_name, r.last_name].filter(Boolean).join(" "),
+    age: r.age ?? 0,
     birthDate: r.birth_date,
     sex: r.sex,
     mobileNumber: r.mobile_number,
@@ -186,6 +256,7 @@ function mapPatientSummary(r: PatientSummaryApiResponse): PatientSummary {
     isPwd: r.is_pwd,
     isPregnant: r.is_pregnant,
     isActive: r.is_active,
+    bloodType: r.blood_type ?? null,
   };
 }
 
@@ -229,14 +300,42 @@ function toApiPayload(data: PatientCreatePayload): Record<string, unknown> {
     birth_date: data.birthDate,
     sex: data.sex,
     civil_status: data.civilStatus,
+    household_number: data.householdNumber,
+    sitio_purok: data.sitioPurok,
+    barangay: data.barangay,
+    municipality: data.municipality,
+    province: data.province,
+    occupation: data.occupation,
     mobile_number: data.mobileNumber,
     address: data.address,
     guardian_name: data.guardianName,
     guardian_contact: data.guardianContact,
+    emergency_contact_name: data.emergencyContactName,
+    emergency_contact_number: data.emergencyContactNumber,
     philhealth_no: data.philhealthNo,
     philhealth_member_type: data.philhealthMemberType,
+    philhealth_category: data.philhealthCategory,
+    is_4ps_beneficiary: data.is4psBeneficiary,
+    household_id_4ps: data.householdId4ps,
+    is_indigenous: data.isIndigenous,
+    place_of_birth: data.placeOfBirth,
+    mothers_maiden_name: data.mothersMaidenName,
     is_pwd: data.isPwd,
     is_pregnant: data.isPregnant,
+    senior_id_number: data.seniorIdNumber,
+    pwd_id_number: data.pwdIdNumber,
+    last_menstrual_period: data.lastMenstrualPeriod,
+    gravida: data.gravida,
+    para: data.para,
+    estimated_due_date: data.estimatedDueDate,
+    height_cm: data.heightCm,
+    weight_kg: data.weightKg,
+    allergies: data.allergies,
+    known_conditions: data.knownConditions,
+    registration_source: data.registrationSource,
+    registration_data_source: data.registrationDataSource ?? "manual",
+    data_privacy_consent: data.dataPrivacyConsent,
+    blood_type: data.bloodType ?? null,
     confirm_duplicate: data.confirmDuplicate ?? false,
   };
 }
@@ -521,4 +620,78 @@ export function useCreateVisit(patientId: string) {
   );
 
   return { createVisit, loading, error };
+}
+
+// ---------------------------------------------------------------------------
+// useBatchPdf — batch-print health cards for selected patients
+//
+// Calls POST /health-cards/batch-pdf with up to 50 patient UUIDs.
+// On success, opens the returned PDF blob in a new browser tab.
+// The object URL is revoked after 60 seconds to free browser memory.
+//
+// Only admin and bhw roles may call the underlying endpoint — the UI gates
+// the button by role before calling printBatch, but the backend enforces
+// this constraint independently with HTTP 403.
+// ---------------------------------------------------------------------------
+
+export function useBatchPdf(): {
+  printBatch: (patientIds: string[]) => Promise<void>;
+  loading: boolean;
+} {
+  const [loading, setLoading] = useState(false);
+
+  const printBatch = useCallback(async (patientIds: string[]): Promise<void> => {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/v1/health-cards/batch-pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ patient_ids: patientIds }),
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank");
+      // Revoke after 60 s to release browser memory.
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  return { printBatch, loading };
+}
+
+// ---------------------------------------------------------------------------
+// useUpdateVisit — mutation: PUT /visits/{visitId}
+// ---------------------------------------------------------------------------
+
+export function useUpdateVisit() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const updateVisit = useCallback(
+    async (visitId: string, payload: VisitUpdatePayload): Promise<Visit | null> => {
+      setLoading(true);
+      setError(null);
+      try {
+        const raw = await apiFetch<VisitApiResponse>(`/visits/${visitId}`, {
+          method: "PUT",
+          body: JSON.stringify(payload),
+        });
+        return mapVisit(raw);
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : "Failed to update visit.");
+        return null;
+      } finally {
+        setLoading(false);
+      }
+    },
+    []
+  );
+
+  return { updateVisit, loading, error };
 }

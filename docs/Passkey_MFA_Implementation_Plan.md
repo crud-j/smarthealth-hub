@@ -681,6 +681,9 @@ File: tests/test_passkey.py
    Use realistic BYTEA values for credential_id (32 random bytes) and
    public_key (a static ES256 key from py_webauthn's test suite).
 
+
+
+
 2. Test: GET /auth/passkey/credentials — returns empty list when no passkeys.
 3. Test: POST /auth/passkey/register/begin — requires auth → 401 without JWT.
 4. Test: POST /auth/passkey/register/begin — authenticated → returns dict with

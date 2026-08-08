@@ -1,0 +1,57 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# SmartHealth Hub — docker-compose.override.yml  (development overrides)
+#
+# Docker Compose applies this file automatically when you run:
+#   docker compose up [--build]
+#
+# These overrides:
+#   - Mount the backend source as a bind-mount so code changes are reflected
+#     inside the running container without a rebuild.
+#   - Switch uvicorn to --reload mode so the API process hot-restarts on
+#     file changes (requires the source bind-mount above).
+#   - Mount the frontend source for Next.js hot-module replacement (HMR)
+#     via the dev server.  Note: the frontend Dockerfile is still used to
+#     install node_modules; only src/ changes are picked up by HMR.
+#
+# To run WITHOUT these overrides (e.g. for a prod-like local test):
+#   docker compose -f docker-compose.yml up --build
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  backend:
+    # Bind-mount the backend source so changes are live inside the container.
+    # The .venv and media directories are excluded via the source path — they
+    # were installed into the image layer and must not be overwritten.
+    volumes:
+      - ./backend/app:/app/app
+      - ./backend/alembic:/app/alembic
+      - ./backend/alembic.ini:/app/alembic.ini
+      # Persist uploaded media outside the container filesystem.
+      - ./backend/media:/app/media
+    # Override CMD to enable uvicorn auto-reload on source changes.
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  worker:
+    volumes:
+      - ./backend/app:/app/app
+      - ./backend/alembic:/app/alembic
+
+  beat:
+    volumes:
+      - ./backend/app:/app/app
+      - ./backend/alembic:/app/alembic
+
+  frontend:
+    # Override the production CMD to use the Next.js dev server with HMR.
+    # The standalone build is not used in dev — the dev server reads source directly.
+    command: npm run dev
+    volumes:
+      # Bind-mount source for HMR, but exclude node_modules (from image) and
+      # .next (let the container rebuild it).
+      - ./frontend/web:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      SERVER_SIDE_API_URL: http://backend:8000
+      NEXT_PUBLIC_API_BASE_URL: http://backend:8000/api/v1

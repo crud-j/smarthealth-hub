@@ -70,12 +70,19 @@ class Immunization(Base):
         ),
         nullable=True,
     )
+    batch_number: Mapped[str | None] = mapped_column(sa.String(50), nullable=True)
+    notes: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     status: Mapped[str] = mapped_column(
         sa.String(20),
         nullable=False,
         server_default=sa.text("'scheduled'"),
     )
     created_at: Mapped[datetime] = mapped_column(
+        sa.TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=sa.text("now()"),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
         sa.TIMESTAMP(timezone=True),
         nullable=False,
         server_default=sa.text("now()"),

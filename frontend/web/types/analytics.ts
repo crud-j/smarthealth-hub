@@ -88,6 +88,32 @@ export interface NoShowRateResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Visit trends (GET /analytics/visit-trends)
+// ---------------------------------------------------------------------------
+
+/**
+ * Generic time-series data point used by PatientVisitsChart.
+ * label: ISO week string (e.g. "2026-W30") or any period label.
+ * value: the numeric count for that period.
+ */
+export interface TimeSeriesPoint {
+  label: string;
+  value: number;
+}
+
+/** Wire shape for a single item from GET /analytics/visit-trends */
+export interface VisitTrendPointApi {
+  week_label: string;
+  visit_count: number;
+}
+
+/** Wire shape for the full GET /analytics/visit-trends response */
+export interface VisitTrendsApiResponse {
+  weeks: number;
+  items: VisitTrendPointApi[];
+}
+
+// ---------------------------------------------------------------------------
 // Export (GET /analytics/export)
 // ---------------------------------------------------------------------------
 

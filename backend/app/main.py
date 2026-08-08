@@ -313,16 +313,25 @@ _SWAGGER_AUTO_AUTH_JS = """
     const originalResponseInterceptor = window.ui.getConfigs().responseInterceptor;
     window.ui.setConfigs({
       responseInterceptor: function(response) {
+        // Auto-fill bearerAuth whenever any auth endpoint returns an access_token.
+        // This covers three flows:
+        //   1. POST /auth/verify-otp  — normal MFA two-step login
+        //   2. POST /auth/swagger-token — OAuth2 Authorize dialog (combined login+OTP)
+        //   3. POST /auth/dev-token    — dev-only single-step token (no OTP required)
+        const isAuthEndpoint = response.url && (
+          response.url.includes('/auth/verify-otp') ||
+          response.url.includes('/auth/swagger-token') ||
+          response.url.includes('/auth/dev-token')
+        );
         if (
-          response.url &&
-          response.url.includes('/auth/verify-otp') &&
+          isAuthEndpoint &&
           response.status === 200 &&
           response.body &&
           response.body.access_token
         ) {
           const token = response.body.access_token;
           window.ui.preauthorizeApiKey('bearerAuth', token);
-          console.info('[SmartHealth Hub] Bearer token auto-set from verify-otp response.');
+          console.info('[SmartHealth Hub] Bearer token auto-set from ' + response.url);
         }
         return originalResponseInterceptor
           ? originalResponseInterceptor(response)

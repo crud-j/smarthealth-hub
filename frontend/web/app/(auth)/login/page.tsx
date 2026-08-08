@@ -1,353 +1,373 @@
 "use client";
 
-/**
- * Login page — Phase 1 MFA flow, step 1.
- *
- * Collects email + password and calls POST /auth/login.
- * On success the session_hint (user UUID) is stored in sessionStorage and the
- * user is redirected to /verify-otp to complete the second factor.
- *
- * No external form library is used — validation is done with vanilla React
- * state so there are no extra package dependencies.
- */
+import { type FormEvent, useEffect, useRef, useState } from "react";
+import { ChevronLeft, Fingerprint, KeyRound, ScanFace, ShieldCheck } from "lucide-react";
 
-import { type FormEvent, useState } from "react";
 import { useLogin } from "../../../hooks/useAuth";
 import { ApiError } from "../../../lib/api-client";
+import { isPasskeySupported, startPasskeyAuthentication } from "../../../lib/passkey";
+import { passkeyAuthBegin, passkeyAuthComplete } from "../../../lib/auth";
+
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+
+const BHC_LOGO = "/BHCFINALLOGO.png";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [fieldErrors, setFieldErrors] = useState<{
-    email?: string;
-    password?: string;
-  }>({});
+  const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
+  const [mode, setMode] = useState<"email-only" | "password">("email-only");
+  const [isPasskeyLoading, setIsPasskeyLoading] = useState(false);
+  const [passkeyError, setPasskeyError] = useState<string | null>(null);
+  const [passkeySupported, setPasskeySupported] = useState(false);
+
+  const passwordRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setPasskeySupported(isPasskeySupported());
+  }, []);
+
+  useEffect(() => {
+    if (mode === "password") passwordRef.current?.focus();
+  }, [mode]);
 
   const { runStep1, isLoading, error: apiError, clearError } = useLogin();
 
   // ---------------------------------------------------------------------------
-  // Client-side validation
+  // Validation
   // ---------------------------------------------------------------------------
 
-  function validate(): boolean {
-    const errors: { email?: string; password?: string } = {};
-
+  function validateEmail(): boolean {
     if (!email.trim()) {
-      errors.email = "Email address is required.";
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      errors.email = "Enter a valid email address.";
+      setFieldErrors((p) => ({ ...p, email: "Email address is required." }));
+      return false;
     }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setFieldErrors((p) => ({ ...p, email: "Enter a valid email address." }));
+      return false;
+    }
+    setFieldErrors((p) => ({ ...p, email: undefined }));
+    return true;
+  }
 
+  function validatePassword(): boolean {
     if (!password) {
-      errors.password = "Password is required.";
-    } else if (password.length < 8) {
-      errors.password = "Password must be at least 8 characters.";
+      setFieldErrors((p) => ({ ...p, password: "Password is required." }));
+      return false;
     }
-
-    setFieldErrors(errors);
-    return Object.keys(errors).length === 0;
+    if (password.length < 8) {
+      setFieldErrors((p) => ({ ...p, password: "Password must be at least 8 characters." }));
+      return false;
+    }
+    setFieldErrors((p) => ({ ...p, password: undefined }));
+    return true;
   }
 
   // ---------------------------------------------------------------------------
-  // Submit handler
+  // Handlers
   // ---------------------------------------------------------------------------
 
-  /**
-   * Client-side device fingerprint — a simple hash of stable browser/device
-   * signals, NOT a cryptographic device attestation. It lets a browser that
-   * has already completed OTP verification once skip repeat OTP prompts for
-   * 30 days if the user opts in via "Remember this device" on the OTP page.
-   * A motivated attacker who already has the victim's password could forge
-   * this value; the OTP flow remains the authoritative second factor.
-   */
-  function computeDeviceFingerprint(): string {
-    if (typeof window === "undefined") return "";
-    const raw = [
-      navigator.userAgent,
-      String(screen.width),
-      String(screen.colorDepth),
-      navigator.language,
-    ].join("|");
-    return btoa(raw).slice(0, 64);
+  function handleUsePassword() {
+    if (!validateEmail()) return;
+    clearError();
+    setPasskeyError(null);
+    setMode("password");
+  }
+
+  async function handlePasskeyLogin() {
+    if (!validateEmail()) return;
+    setPasskeyError(null);
+    setIsPasskeyLoading(true);
+    try {
+      const { options } = await passkeyAuthBegin(email.trim());
+      const assertion = await startPasskeyAuthentication(options);
+      await passkeyAuthComplete(assertion, email.trim());
+      const params = new URLSearchParams(window.location.search);
+      const next = params.get("next");
+      const safeNext = next && next.startsWith("/") && !next.startsWith("//") ? next : null;
+      window.location.href = safeNext ?? "/dashboard";
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === "NotAllowedError") {
+        setPasskeyError("Passkey sign-in was cancelled.");
+      } else if (err instanceof ApiError) {
+        setPasskeyError(
+          err.message.includes("No passkeys")
+            ? "No passkey found for this account. Use the password flow to sign in, then add a passkey in Settings → Security."
+            : err.message
+        );
+      } else {
+        setPasskeyError("Passkey sign-in failed. Please use the password flow instead.");
+      }
+    } finally {
+      setIsPasskeyLoading(false);
+    }
   }
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     clearError();
-
-    if (!validate()) return;
-
+    if (!validateEmail() || !validatePassword()) return;
     try {
-      const fingerprint = computeDeviceFingerprint();
-      const { sessionHint, mfaRequired } = await runStep1(
-        email.trim(),
-        password,
-        fingerprint
-      );
-
-      // Store the fingerprint regardless of outcome — if OTP is still
-      // required, verify-otp needs it to submit "remember this device".
-      sessionStorage.setItem("device_fingerprint", fingerprint);
-
+      const { sessionHint } = await runStep1(email.trim(), password);
+      sessionStorage.setItem("mfa_user_id", sessionHint);
       const params = new URLSearchParams(window.location.search);
       const next = params.get("next");
-      const safeNext = next && next.startsWith("/") && !next.startsWith("//") ? next : null;
-
-      if (!mfaRequired) {
-        // Trusted device recognized — backend already set auth cookies and
-        // issued tokens. Skip /verify-otp entirely.
-        sessionStorage.removeItem("mfa_user_id");
-        window.location.href = safeNext ?? "/dashboard";
-        return;
-      }
-
-      // Store the user UUID between the two login steps.
-      sessionStorage.setItem("mfa_user_id", sessionHint);
-      // Carry the ?next= param through to verify-otp so post-OTP redirect works.
-      window.location.href = safeNext
-        ? `/verify-otp?next=${encodeURIComponent(safeNext)}`
+      window.location.href = next
+        ? `/verify-otp?next=${encodeURIComponent(next)}`
         : "/verify-otp";
     } catch (err) {
-      // ApiError message is surfaced via the `apiError` state from useLogin.
-      // Non-ApiError failures (network outage, etc.) get a generic message.
-      if (!(err instanceof ApiError)) {
-        console.error("Unexpected login error:", err);
-      }
+      if (!(err instanceof ApiError)) console.error("Unexpected login error:", err);
     }
   }
 
+  function backToEmailOnly() {
+    setMode("email-only");
+    setPassword("");
+    setFieldErrors({});
+    clearError();
+    setPasskeyError(null);
+  }
+
+  const errorMessage = apiError ?? passkeyError;
+
   // ---------------------------------------------------------------------------
-  // Styles (inline to keep zero external CSS dependencies)
+  // Email-only mode
   // ---------------------------------------------------------------------------
 
-  const inputStyle: React.CSSProperties = {
-    width: "100%",
-    padding: "0.625rem 0.875rem",
-    border: "1.5px solid #e2e8f0",
-    borderRadius: "0.5rem",
-    fontSize: "0.9375rem",
-    color: "#0f172a",
-    outline: "none",
-    boxSizing: "border-box",
-    transition: "border-color 0.15s ease",
-  };
-
-  const errorTextStyle: React.CSSProperties = {
-    color: "#ef4444",
-    fontSize: "0.8125rem",
-    marginTop: "0.25rem",
-    display: "block",
-  };
-
-  const labelStyle: React.CSSProperties = {
-    display: "block",
-    fontSize: "0.875rem",
-    fontWeight: 500,
-    color: "#374151",
-    marginBottom: "0.375rem",
-  };
-
-  const buttonStyle: React.CSSProperties = {
-    width: "100%",
-    padding: "0.75rem",
-    backgroundColor: isLoading ? "#93c5fd" : "#2563eb",
-    color: "#ffffff",
-    border: "none",
-    borderRadius: "0.5rem",
-    fontSize: "0.9375rem",
-    fontWeight: 600,
-    cursor: isLoading ? "not-allowed" : "pointer",
-    marginTop: "0.5rem",
-    transition: "background-color 0.15s ease",
-  };
-
-  return (
-    <>
-      {/* Header */}
-      <div style={{ marginBottom: "1.75rem" }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "0.625rem",
-            marginBottom: "0.75rem",
-          }}
-        >
-          <div
-            style={{
-              width: "2.5rem",
-              height: "2.5rem",
-              backgroundColor: "#2563eb",
-              borderRadius: "0.5rem",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="white"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M9 11l3 3L22 4" />
-              <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
-            </svg>
-          </div>
-          <span
-            style={{ fontSize: "1.125rem", fontWeight: 700, color: "#0f172a" }}
-          >
-            SmartHealth Hub
-          </span>
+  if (mode === "email-only") {
+    return (
+      <div>
+        {/* Logo + heading */}
+        <div className="flex flex-col items-center mb-8">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={BHC_LOGO}
+            alt="Barangay Health Center"
+            width={72}
+            height={72}
+            className="rounded-full ring-2 ring-rose-100 mb-4"
+          />
+          <h1 className="text-xl font-semibold text-slate-900 tracking-tight">
+            Sign in to SmartHealth Hub
+          </h1>
+          <p className="text-slate-500 text-sm mt-1 text-center max-w-[28ch]">
+            {passkeySupported
+              ? "Use a passkey or your password to continue."
+              : "Enter your credentials to continue."}
+          </p>
         </div>
-        <h1
-          style={{
-            fontSize: "1.375rem",
-            fontWeight: 700,
-            color: "#0f172a",
-            margin: 0,
-          }}
-        >
-          Sign in to your account
-        </h1>
-        <p
-          style={{
-            color: "#64748b",
-            fontSize: "0.875rem",
-            marginTop: "0.375rem",
-          }}
-        >
-          Enter your credentials to access the health information system.
+
+        {/* Error banner */}
+        {errorMessage && (
+          <div
+            role="alert"
+            className="mb-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+          >
+            {errorMessage}
+          </div>
+        )}
+
+        {/* Email field */}
+        <div className="flex flex-col gap-1.5 mb-5">
+          <Label htmlFor="pk-email" className="text-sm font-medium text-slate-700">
+            Email address
+          </Label>
+          <Input
+            id="pk-email"
+            type="email"
+            placeholder="you@bhc.gov.ph"
+            autoComplete="email webauthn"
+            value={email}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              if (fieldErrors.email) setFieldErrors((p) => ({ ...p, email: undefined }));
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                passkeySupported ? void handlePasskeyLogin() : handleUsePassword();
+              }
+            }}
+            aria-describedby={fieldErrors.email ? "email-err" : undefined}
+            aria-invalid={!!fieldErrors.email}
+            disabled={isPasskeyLoading}
+            className={
+              fieldErrors.email
+                ? "border-red-400 focus:border-red-400 focus:ring-red-200/40"
+                : ""
+            }
+          />
+          {fieldErrors.email && (
+            <span id="email-err" className="text-xs text-red-600" role="alert">
+              {fieldErrors.email}
+            </span>
+          )}
+        </div>
+
+        {/* Action buttons */}
+        <div className="flex flex-col gap-2.5 mb-7">
+          {passkeySupported && (
+            <Button
+              className="w-full gap-2 h-11"
+              onClick={() => void handlePasskeyLogin()}
+              disabled={isPasskeyLoading}
+            >
+              {isPasskeyLoading ? (
+                <Fingerprint className="size-4 animate-pulse" aria-hidden />
+              ) : (
+                <ScanFace className="size-4" aria-hidden />
+              )}
+              {isPasskeyLoading ? "Verifying…" : "Continue with passkey"}
+            </Button>
+          )}
+
+          <Button
+            variant={passkeySupported ? "outline" : "default"}
+            className="w-full gap-2 h-11"
+            onClick={handleUsePassword}
+            disabled={isPasskeyLoading}
+          >
+            <KeyRound className="size-4" aria-hidden />
+            {passkeySupported ? "Use password instead" : "Continue with password"}
+          </Button>
+        </div>
+
+        {/* Security note */}
+        <p className="flex items-center justify-center gap-1.5 text-xs text-slate-400">
+          <ShieldCheck className="size-3.5 flex-shrink-0" aria-hidden />
+          Phishing-resistant · For BHC staff only
         </p>
       </div>
+    );
+  }
 
-      {/* API-level error banner */}
+  // ---------------------------------------------------------------------------
+  // Password mode
+  // ---------------------------------------------------------------------------
+
+  return (
+    <div>
+      {/* Back + account header */}
+      <div className="mb-8">
+        <button
+          type="button"
+          onClick={backToEmailOnly}
+          className="flex items-center gap-1 text-sm text-slate-500 hover:text-slate-800 transition-colors mb-5 -ml-0.5"
+        >
+          <ChevronLeft className="size-4" aria-hidden />
+          {passkeySupported ? "Use passkey instead" : "Back"}
+        </button>
+
+        <div className="flex items-center gap-3">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={BHC_LOGO}
+            alt=""
+            width={40}
+            height={40}
+            className="rounded-full ring-1 ring-slate-200 flex-shrink-0"
+            aria-hidden="true"
+          />
+          <div className="min-w-0">
+            <h1 className="text-lg font-semibold text-slate-900 tracking-tight leading-tight">
+              Welcome back
+            </h1>
+            <p
+              className="text-sm text-slate-500 truncate max-w-[22ch]"
+              title={email}
+            >
+              {email}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Error banner */}
       {apiError && (
         <div
           role="alert"
-          style={{
-            padding: "0.75rem 1rem",
-            backgroundColor: "#fef2f2",
-            border: "1px solid #fecaca",
-            borderRadius: "0.5rem",
-            color: "#dc2626",
-            fontSize: "0.875rem",
-            marginBottom: "1rem",
-          }}
+          className="mb-5 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
         >
           {apiError}
         </div>
       )}
 
-      {/* Login form */}
-      <form onSubmit={handleSubmit} noValidate>
-        {/* Email */}
-        <div style={{ marginBottom: "1.125rem" }}>
-          <label htmlFor="email" style={labelStyle}>
+      <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4">
+        {/* Email — editable so user can correct a typo */}
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="email-pw" className="text-sm font-medium text-slate-700">
             Email address
-          </label>
-          <input
-            id="email"
+          </Label>
+          <Input
+            id="email-pw"
             type="email"
             autoComplete="email"
             value={email}
             onChange={(e) => {
               setEmail(e.target.value);
-              if (fieldErrors.email) {
-                setFieldErrors((prev) => ({ ...prev, email: undefined }));
-              }
+              if (fieldErrors.email) setFieldErrors((p) => ({ ...p, email: undefined }));
             }}
-            style={{
-              ...inputStyle,
-              borderColor: fieldErrors.email ? "#ef4444" : "#e2e8f0",
-            }}
-            placeholder="staff@example.com"
-            aria-describedby={fieldErrors.email ? "email-error" : undefined}
-            aria-invalid={fieldErrors.email !== undefined}
             disabled={isLoading}
+            className={
+              fieldErrors.email ? "border-red-400 focus:border-red-400" : ""
+            }
           />
           {fieldErrors.email && (
-            <span id="email-error" style={errorTextStyle} role="alert">
+            <span className="text-xs text-red-600" role="alert">
               {fieldErrors.email}
             </span>
           )}
         </div>
 
         {/* Password */}
-        <div style={{ marginBottom: "1.5rem" }}>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "baseline",
-              marginBottom: "0.375rem",
-            }}
-          >
-            <label htmlFor="password" style={{ ...labelStyle, margin: 0 }}>
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-baseline justify-between">
+            <Label htmlFor="password" className="text-sm font-medium text-slate-700">
               Password
-            </label>
+            </Label>
             <a
               href="/forgot-password"
-              style={{
-                fontSize: "0.8125rem",
-                color: "#2563eb",
-                textDecoration: "none",
-              }}
+              className="text-xs text-primary hover:underline"
             >
               Forgot password?
             </a>
           </div>
-          <input
+          <Input
+            ref={passwordRef}
             id="password"
             type="password"
             autoComplete="current-password"
+            placeholder="Your password"
             value={password}
             onChange={(e) => {
               setPassword(e.target.value);
-              if (fieldErrors.password) {
-                setFieldErrors((prev) => ({ ...prev, password: undefined }));
-              }
+              if (fieldErrors.password)
+                setFieldErrors((p) => ({ ...p, password: undefined }));
             }}
-            style={{
-              ...inputStyle,
-              borderColor: fieldErrors.password ? "#ef4444" : "#e2e8f0",
-            }}
-            placeholder="Your password"
-            aria-describedby={
-              fieldErrors.password ? "password-error" : undefined
-            }
-            aria-invalid={fieldErrors.password !== undefined}
+            aria-describedby={fieldErrors.password ? "pw-err" : undefined}
+            aria-invalid={!!fieldErrors.password}
             disabled={isLoading}
+            className={
+              fieldErrors.password ? "border-red-400 focus:border-red-400" : ""
+            }
           />
           {fieldErrors.password && (
-            <span id="password-error" style={errorTextStyle} role="alert">
+            <span id="pw-err" className="text-xs text-red-600" role="alert">
               {fieldErrors.password}
             </span>
           )}
         </div>
 
-        {/* Submit */}
-        <button type="submit" style={buttonStyle} disabled={isLoading}>
-          {isLoading ? "Verifying..." : "Continue"}
-        </button>
+        <Button type="submit" className="w-full h-11 mt-1" disabled={isLoading}>
+          {isLoading ? "Signing in…" : "Sign in"}
+        </Button>
       </form>
 
-      {/* Footer note */}
-      <p
-        style={{
-          marginTop: "1.5rem",
-          color: "#94a3b8",
-          fontSize: "0.75rem",
-          textAlign: "center",
-        }}
-      >
+      <p className="mt-6 text-center text-xs text-slate-400">
         For BHC staff only. Unauthorised access is prohibited.
       </p>
-    </>
+    </div>
   );
 }

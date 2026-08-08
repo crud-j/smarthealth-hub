@@ -3,22 +3,30 @@ Health card generation, retrieval, and verification endpoints — Phase 3.
 
 Routes use full paths and are mounted without a prefix on the API router.
 
-  POST /health-cards/{patient_id}/generate  — generate card (QR + NFC payload)
-  GET  /health-cards/{patient_id}           — get card metadata (no QR image)
-  GET  /health-cards/{patient_id}/pdf       — render + stream printable PDF
-  POST /health-cards/{patient_id}/nfc-link  — bind physical NFC UID to card
-  POST /health-cards/verify                 — verify QR scan or NFC tap
-  POST /health-cards/{patient_id}/reissue   — reissue lost/damaged card
+  POST /health-cards/{patient_id}/generate      — generate card (QR + NFC payload)
+  GET  /health-cards/{patient_id}               — get card metadata (no QR image)
+  GET  /health-cards/{patient_id}/pdf           — render + stream printable PDF
+  POST /health-cards/{patient_id}/nfc-link      — bind physical NFC UID to card
+  POST /health-cards/{patient_id}/link-nfc-uid  — alias used by NFC relay testing
+  POST /health-cards/verify                     — verify QR scan or NFC tap
+  POST /health-cards/{patient_id}/reissue       — reissue lost/damaged card
+  POST /health-cards/scan-uid                   — public NFC relay scan (no JWT)
+  GET  /health-cards/last-scan                  — last NFC scan result cache (no JWT)
 
 Security invariants enforced in this file:
-  1. Every route requires JWT authentication.
-  2. Mutation routes (generate, nfc-link, reissue) require BHW+ role.
+  1. Every route requires JWT authentication, EXCEPT:
+       - /health-cards/scan-uid  (hardware relay integration point)
+       - /health-cards/last-scan (polling endpoint for NFC monitor page)
+       - /health-cards/verify/public (QR mobile scan target)
+  2. Mutation routes (generate, nfc-link, link-nfc-uid, reissue) require BHW+ role.
   3. The verify endpoint returns a GENERIC 403 for ALL failure modes —
      no information about WHY verification failed is exposed to the caller.
   4. The verify response contains ONLY PatientVerifySummary fields
      (patient_code, full_name, age, sex, priority flags, last_visit, card_status).
      No address, philhealth_no, diagnosis, or other PHI is returned.
   5. Every card event writes an audit log entry.
+  6. scan-uid returns ONLY name, DOB, blood_type placeholder, emergency contact,
+     allergies — never diagnosis, treatment_notes, or encrypted PHI fields.
 
 SDP Reference: Section 6.6, Section 8
 """
@@ -27,11 +35,14 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from datetime import datetime, timezone
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Query, Request, Response
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, select
+from pydantic import BaseModel, Field
+from sqlalchemy import desc, func, select
 
 from app.core.exceptions import ForbiddenError, NotFoundError
 from app.core.logging import get_logger
@@ -39,11 +50,14 @@ from app.core.security import CurrentUser, require_role
 from app.db.session import DbDep
 from app.models.card_verification import CardVerification
 from app.models.health_card import HealthCard
+from app.models.medical_history import MedicalHistory
 from app.models.patient import Patient
 from app.models.visit import Visit
 from app.schemas.health_card import (
+    BatchPdfRequest,
     CardGenerateResponse,
     CardVerifyRequest,
+    HealthCardMaybeResponse,
     HealthCardResponse,
     NfcLinkRequest,
     PatientVerifySummary,
@@ -56,6 +70,75 @@ from app.services.patient_service import get_patient
 logger = get_logger(__name__)
 
 router = APIRouter(tags=["health-cards"])
+
+# ---------------------------------------------------------------------------
+# In-memory last-scan cache — for NFC Wi-Fi relay testing only.
+# Module-level dict; cleared when the process restarts.
+# Never stores diagnosis, treatment_notes, or encrypted PHI.
+# ---------------------------------------------------------------------------
+_last_scan_cache: dict[str, Any] = {
+    "scanned_at": None,
+    "found": False,
+    "uid": None,
+    "patient": None,
+}
+
+
+# ---------------------------------------------------------------------------
+# Request / response schemas for the NFC relay endpoints
+# ---------------------------------------------------------------------------
+
+
+class NfcScanUidRequest(BaseModel):
+    """Body for POST /health-cards/scan-uid (sent by the relay server)."""
+
+    uid: str = Field(..., min_length=1, max_length=64, description="Raw hardware NFC UID hex string")
+
+
+class NfcScanPatientInfo(BaseModel):
+    """Safe patient info returned by a successful NFC UID scan. No PHI beyond name/DOB/contact."""
+
+    patient_id: str
+    patient_code: str
+    full_name: str
+    date_of_birth: str
+    sex: str
+    blood_type: str | None
+    emergency_contact_name: str | None
+    emergency_contact_number: str | None
+    allergies: str
+    card_status: str
+    is_senior: bool
+    is_pwd: bool
+    is_pregnant: bool
+
+
+class NfcScanResponse(BaseModel):
+    """Response body for POST /health-cards/scan-uid."""
+
+    found: bool
+    uid: str
+    message: str
+    patient: NfcScanPatientInfo | None = None
+
+
+class LastScanResponse(BaseModel):
+    """Response body for GET /health-cards/last-scan."""
+
+    scanned_at: str | None
+    found: bool
+    uid: str | None
+    patient: NfcScanPatientInfo | None = None
+
+
+class ViewByIdentifierResponse(BaseModel):
+    """Response body for GET /health-cards/view/{identifier}."""
+
+    found: bool
+    identifier: str
+    message: str
+    patient: NfcScanPatientInfo | None = None
+
 
 # ── Role groups ───────────────────────────────────────────────────────────────
 # BHW, Physician, Admin Staff, and Admin may mutate cards.
@@ -78,6 +161,241 @@ def _get_client_ip(request: Request) -> str | None:
     if forwarded_for:
         return forwarded_for.split(",")[0].strip()
     return getattr(request.client, "host", None)
+
+
+# ---------------------------------------------------------------------------
+# POST /health-cards/scan-uid  [PUBLIC — no JWT]
+# NOTE: Declared FIRST so FastAPI does not treat "scan-uid" as a patient_id UUID.
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/health-cards/scan-uid",
+    response_model=NfcScanResponse,
+    summary="NFC relay scan — look up patient by raw hardware UID (no auth required)",
+    description=(
+        "Accepts a raw NFC hardware UID hex string from the Wi-Fi relay server.  "
+        "Looks up the health_cards table for a matching nfc_uid (case-insensitive).  "
+        "Returns safe patient info (name, DOB, blood type, emergency contact, allergies).  "
+        "NO diagnosis, treatment_notes, or encrypted PHI is returned.  "
+        "Writes an NFC_SCAN audit log entry.  No JWT required — the relay server "
+        "is the hardware integration point and cannot hold credentials."
+    ),
+)
+async def scan_nfc_uid_early(
+    body: NfcScanUidRequest,
+    request: Request,
+    db: DbDep,
+) -> NfcScanResponse:
+    """Thin shim — delegates to the implementation function below."""
+    return await _scan_nfc_uid_impl(body, request, db)
+
+
+# ---------------------------------------------------------------------------
+# GET /health-cards/last-scan  [PUBLIC — no JWT]
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/health-cards/last-scan",
+    response_model=LastScanResponse,
+    summary="Return the most recent NFC scan result from in-memory cache (no auth required)",
+    description=(
+        "Returns the last NFC UID scan result cached by POST /health-cards/scan-uid.  "
+        "Intended for the /nfc-monitor polling page during Wi-Fi relay testing.  "
+        "No JWT required.  Cache resets when the FastAPI process restarts.  "
+        "Returns scanned_at=None when no scan has been received yet."
+    ),
+)
+async def get_last_scan_early() -> LastScanResponse:
+    """Thin shim — delegates to the implementation function below."""
+    return await _get_last_scan_impl()
+
+
+# ---------------------------------------------------------------------------
+# GET /health-cards/view/{identifier}  [PUBLIC — no JWT]
+# NFC testing convenience endpoint — look up by card_number OR nfc_uid.
+# The school ID is used only as a tap trigger; the patient is identified by
+# the health card code embedded in the NFC Tools Task URL path segment.
+# No UID linking required — change the URL to test any patient.
+# NOTE: Declared BEFORE /{patient_id} routes to avoid path-param conflicts.
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/health-cards/view/{identifier}",
+    response_model=ViewByIdentifierResponse,
+    summary="Look up a health card by card_number or NFC UID (no auth required)",
+    description=(
+        "Accepts either a health card code (e.g. HC-2026-00004) or a raw NFC UID "
+        "(e.g. C9:49:3B:07).  Tries card_number match first, then nfc_uid "
+        "(case-insensitive).  Returns the same safe NfcScanPatientInfo fields — "
+        "no diagnosis, treatment_notes, or encrypted PHI.  "
+        "Updates the in-memory last-scan cache so the /nfc-monitor page reflects "
+        "the lookup.  Writes a HEALTH_CARD_VIEW audit log entry.  "
+        "No JWT required — intended for NFC Tools Task URL testing workflow."
+    ),
+)
+async def view_health_card_by_identifier(
+    identifier: str,
+    request: Request,
+    db: DbDep,
+) -> ViewByIdentifierResponse:
+    """
+    Dual-mode lookup: card_number first, then nfc_uid.
+
+    Security design (mirrors scan-uid):
+    - Returns only NfcScanPatientInfo fields (name, DOB, sex, blood_type,
+      emergency contact, allergies, card_status, priority flags).
+    - NO diagnosis, treatment_notes, or encrypted PHI fields are returned.
+    - Audit log records only identifier prefix (8 chars), patient name, card_status.
+    - Cache update mirrors POST /scan-uid so the /nfc-monitor page stays current.
+    """
+    from urllib.parse import unquote as _unquote  # noqa: PLC0415
+
+    raw_identifier = _unquote(identifier).strip()
+    scanned_at_iso = datetime.now(timezone.utc).isoformat()
+
+    # ── Try card_number match first ───────────────────────────────────────────
+    card_result = await db.execute(
+        select(HealthCard).where(HealthCard.card_number == raw_identifier)
+    )
+    card: HealthCard | None = card_result.scalar_one_or_none()
+
+    # ── Fallback: case-insensitive nfc_uid match ──────────────────────────────
+    if card is None:
+        card_result2 = await db.execute(
+            select(HealthCard).where(
+                func.upper(HealthCard.nfc_uid) == raw_identifier.upper()
+            )
+        )
+        card = card_result2.scalar_one_or_none()
+
+    # ── Not found ─────────────────────────────────────────────────────────────
+    if card is None:
+        _last_scan_cache.update(
+            scanned_at=scanned_at_iso,
+            found=False,
+            uid=raw_identifier,
+            patient=None,
+        )
+        await write_audit_log(
+            db=db,
+            action="HEALTH_CARD_VIEW",
+            entity_type="health_card",
+            metadata={
+                "result": "not_found",
+                "identifier_prefix": raw_identifier[:8] + ("..." if len(raw_identifier) > 8 else ""),
+                "ip": _get_client_ip(request),
+            },
+            ip_address=_get_client_ip(request),
+        )
+        await db.commit()
+        return ViewByIdentifierResponse(
+            found=False,
+            identifier=raw_identifier,
+            message="Health card not found.",
+        )
+
+    # ── Load patient ──────────────────────────────────────────────────────────
+    patient_result = await db.execute(
+        select(Patient).where(Patient.id == card.patient_id)
+    )
+    patient: Patient | None = patient_result.scalar_one_or_none()
+
+    if patient is None or not patient.is_active:
+        _last_scan_cache.update(
+            scanned_at=scanned_at_iso,
+            found=False,
+            uid=raw_identifier,
+            patient=None,
+        )
+        await write_audit_log(
+            db=db,
+            action="HEALTH_CARD_VIEW",
+            entity_type="health_card",
+            entity_id=card.id,
+            metadata={
+                "result": "patient_inactive_or_missing",
+                "identifier_prefix": raw_identifier[:8] + ("..." if len(raw_identifier) > 8 else ""),
+                "card_id": str(card.id),
+            },
+            ip_address=_get_client_ip(request),
+        )
+        await db.commit()
+        return ViewByIdentifierResponse(
+            found=False,
+            identifier=raw_identifier,
+            message="Patient record not found or is inactive.",
+        )
+
+    # ── Build response — mirrors _scan_nfc_uid_impl exactly ──────────────────
+    name_parts = [patient.first_name]
+    if patient.middle_name:
+        name_parts.append(patient.middle_name)
+    name_parts.append(patient.last_name)
+    full_name = " ".join(name_parts)
+
+    dob_str = (
+        patient.birth_date.strftime("%B %d, %Y") if patient.birth_date else "Unknown"
+    )
+
+    allergies_result = await db.execute(
+        select(MedicalHistory.condition_name).where(
+            MedicalHistory.patient_id == patient.id
+        )
+    )
+    allergy_rows = allergies_result.scalars().all()
+    allergies_str = ", ".join(r for r in allergy_rows if r) or "None on record"
+
+    patient_info = NfcScanPatientInfo(
+        patient_id=str(patient.id),
+        patient_code=patient.patient_code,
+        full_name=full_name,
+        date_of_birth=dob_str,
+        sex=patient.sex,
+        blood_type=patient.blood_type,
+        emergency_contact_name=patient.guardian_name,
+        emergency_contact_number=patient.guardian_contact,
+        allergies=allergies_str,
+        card_status=card.status,
+        is_senior=patient.is_senior,
+        is_pwd=patient.is_pwd,
+        is_pregnant=patient.is_pregnant,
+    )
+
+    # Update last-scan cache so /nfc-monitor page reflects this lookup.
+    _last_scan_cache.update(
+        scanned_at=scanned_at_iso,
+        found=True,
+        uid=raw_identifier,
+        patient=patient_info.model_dump(),
+    )
+
+    # Audit log — identifier prefix + patient name + card_status only (no PHI).
+    await write_audit_log(
+        db=db,
+        action="HEALTH_CARD_VIEW",
+        entity_type="health_card",
+        entity_id=card.id,
+        metadata={
+            "result": "found",
+            "identifier_prefix": raw_identifier[:8] + ("..." if len(raw_identifier) > 8 else ""),
+            "patient_name": full_name,
+            "card_status": card.status,
+            "ip": _get_client_ip(request),
+        },
+        ip_address=_get_client_ip(request),
+    )
+    await db.commit()
+
+    status_label = "active" if card.status == "active" else card.status
+    return ViewByIdentifierResponse(
+        found=True,
+        identifier=raw_identifier,
+        message=f"Patient found: {full_name} (card: {status_label})",
+        patient=patient_info,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -118,31 +436,279 @@ async def generate_health_card(
 
 
 # ---------------------------------------------------------------------------
+# POST /health-cards/batch-pdf
+# NOTE: Declared BEFORE /health-cards/{patient_id} routes so FastAPI does
+#       not interpret "batch-pdf" as a patient_id UUID path parameter.
+# ---------------------------------------------------------------------------
+
+_BATCH_PDF_ROLES = require_role("admin", "bhw")
+
+
+@router.post(
+    "/health-cards/batch-pdf",
+    summary="Generate a multi-page PDF for multiple patients' health cards",
+    description=(
+        "Renders a single PDF containing the health cards for up to 50 patients.  "
+        "Each patient occupies 2 pages (front + back).  "
+        "Patients without an active health card are silently skipped.  "
+        "Requires admin or bhw role.  One audit_log row is written per request."
+    ),
+    dependencies=[_BATCH_PDF_ROLES],
+)
+async def batch_health_card_pdf(
+    body: BatchPdfRequest,
+    db: DbDep,
+    current_user: CurrentUser,
+) -> Response:
+    """
+    Build a batch multi-page PDF for the requested patient health cards.
+
+    Processing order:
+      1. For each patient_id, load the Patient and their active HealthCard.
+         Patients without an active card are logged as a WARNING and skipped.
+      2. Generate the QR data URI for each card (patient_id + card_version +
+         HMAC only — no PHI in the QR payload).
+      3. Resolve each patient's profile photo as a base64 data URI (async,
+         before entering the synchronous WeasyPrint renderer).
+      4. Call render_batch_health_card_pdf() in a thread pool.
+      5. Write a single BATCH_PDF audit log entry.
+      6. Return the raw PDF bytes as a downloadable attachment.
+
+    Security invariants:
+      - QR payloads contain ONLY patient_id + card_version + HMAC sig.
+      - Only admin and bhw roles may call this endpoint (HTTP 403 for others).
+      - One audit row per request (not per patient) to avoid log spam.
+    """
+    from datetime import date as _date  # noqa: PLC0415
+
+    from app.services.patient_photo_service import get_photo_data_uri  # noqa: PLC0415
+    from app.services.pdf_renderer import render_batch_health_card_pdf  # noqa: PLC0415
+
+    cards: list[tuple[dict[str, object], dict[str, object], str, str | None]] = []
+
+    _today = _date.today()
+
+    for patient_id in body.patient_ids:
+        # ── Load patient ──────────────────────────────────────────────────
+        patient_result = await db.execute(
+            select(Patient).where(Patient.id == patient_id)
+        )
+        patient: Patient | None = patient_result.scalar_one_or_none()
+
+        if patient is None or not patient.is_active:
+            logger.warning(
+                "batch_health_card_pdf: patient %s not found or inactive — skipping",
+                patient_id,
+            )
+            continue
+
+        # ── Load active health card ───────────────────────────────────────
+        card_result = await db.execute(
+            select(HealthCard).where(
+                HealthCard.patient_id == patient_id,
+                HealthCard.status == "active",
+            )
+        )
+        card: HealthCard | None = card_result.scalar_one_or_none()
+
+        if card is None:
+            logger.warning(
+                "batch_health_card_pdf: no active health card for patient %s — skipping",
+                patient_id,
+            )
+            continue
+
+        # ── Generate QR (no PHI in payload) ──────────────────────────────
+        _signed_url, qr_data_uri = qr_service.encode_qr_payload(
+            str(patient_id), card.card_version
+        )
+
+        # ── Build template context dicts ──────────────────────────────────
+        _bd = patient.birth_date
+        _age: int = (
+            _today.year
+            - _bd.year
+            - ((_today.month, _today.day) < (_bd.month, _bd.day))
+            if _bd
+            else 0
+        )
+        _birth_date_display: str = (
+            _bd.strftime("%B %d, %Y").replace(" 0", " ") if _bd else "—"
+        )
+
+        # Most-recent Visit for vitals.
+        _visit_result = await db.execute(
+            select(Visit)
+            .where(Visit.patient_id == patient_id)
+            .order_by(Visit.visit_date.desc())
+            .limit(1)
+        )
+        _latest_visit: Visit | None = _visit_result.scalar_one_or_none()
+
+        if _latest_visit is not None:
+            _last_bp: str = _latest_visit.blood_pressure or "—"
+            _last_weight: str = (
+                str(_latest_visit.weight_kg) if _latest_visit.weight_kg is not None else "—"
+            )
+            _last_height: str = (
+                str(_latest_visit.height_cm) if _latest_visit.height_cm is not None else "—"
+            )
+            _last_temp: str = (
+                str(_latest_visit.temperature) if _latest_visit.temperature is not None else "—"
+            )
+        else:
+            _last_bp = "—"
+            _last_weight = "—"
+            _last_height = "—"
+            _last_temp = "—"
+
+        # Allergies from medical_history condition_name (plain text, not encrypted).
+        _allergies: str
+        if patient.medical_histories:
+            _allergies = (
+                ", ".join(
+                    mh.condition_name
+                    for mh in patient.medical_histories
+                    if mh.condition_name
+                )
+                or "None on record"
+            )
+        else:
+            _allergies = "None on record"
+
+        patient_dict: dict[str, object] = {
+            "first_name": patient.first_name,
+            "last_name": patient.last_name,
+            "middle_name": patient.middle_name,
+            "patient_code": patient.patient_code,
+            "sex": patient.sex,
+            "birth_date": patient.birth_date.strftime("%Y-%m-%d") if _bd else "",
+            "age": _age,
+            "birth_date_display": _birth_date_display,
+            "mobile_number": patient.mobile_number or "—",
+            "philhealth_no": patient.philhealth_no or "—",
+            "philhealth_member_type": patient.philhealth_member_type or "",
+            "address": patient.address or "—",
+            # Structured address fields for the back-face template.
+            "sitio_purok": patient.sitio_purok or "",
+            "barangay": patient.barangay or "",
+            "municipality": patient.municipality or "",
+            "province": patient.province or "",
+            "blood_type": patient.blood_type or "—",
+            "allergies": _allergies,
+            "last_bp": _last_bp,
+            "last_weight": _last_weight,
+            "last_height": _last_height,
+            "last_temp": _last_temp,
+            "medical_notes": "",
+            # Dedicated emergency contact fields.
+            "emergency_contact_name": patient.emergency_contact_name or "—",
+            "emergency_contact_number": patient.emergency_contact_number or "—",
+            "guardian_name": patient.guardian_name or "—",
+            "guardian_contact": patient.guardian_contact or "—",
+            "is_senior": patient.is_senior,
+            "is_pwd": patient.is_pwd,
+            "is_pregnant": patient.is_pregnant,
+            "barangay_name": "Sta. Rosa 1 BHS, Marilao, Bulacan",
+        }
+        card_dict: dict[str, object] = {
+            "card_number": card.card_number,
+            "card_version": card.card_version,
+            "issued_at": card.issued_at.strftime("%B %d, %Y") if card.issued_at else "",
+        }
+
+        # Resolve profile photo (blocking file I/O → thread).
+        photo_data_uri: str = await asyncio.to_thread(get_photo_data_uri, patient)
+
+        cards.append((patient_dict, card_dict, qr_data_uri, photo_data_uri))
+
+    # ── Render PDF in thread pool ─────────────────────────────────────────────
+    pdf_bytes: bytes = await asyncio.to_thread(render_batch_health_card_pdf, cards)
+
+    # ── Audit log: one row per request ────────────────────────────────────────
+    await write_audit_log(
+        db=db,
+        user_id=current_user.id,
+        action="BATCH_PDF",
+        entity_type="health_card",
+        entity_id=None,
+        metadata={"patient_count": len(cards)},
+    )
+    await db.commit()
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="health_cards_batch.pdf"'},
+    )
+
+
+# ---------------------------------------------------------------------------
 # GET /health-cards/{patient_id}
 # ---------------------------------------------------------------------------
 
 
 @router.get(
     "/health-cards/{patient_id}",
-    response_model=HealthCardResponse,
+    response_model=HealthCardResponse | HealthCardMaybeResponse,
     summary="Get health card metadata for a patient",
     description=(
-        "Returns card metadata only.  Does NOT return the QR image — "
-        "the frontend regenerates QR preview client-side from patient_id + card_version."
+        "Returns the patient's ACTIVE card if one exists.  If no active card "
+        "exists, falls back to the most recently issued card of any status so "
+        "the UI can display the correct state (e.g. 'reissued' warning).  "
+        "Returns 404 only when the patient has no card at all AND "
+        "``allow_missing`` is not set.  "
+        "Pass ``?allow_missing=true`` to receive ``{card_found: false, card: null}`` "
+        "with HTTP 200 instead — this suppresses browser console network errors "
+        "when polling card status for patients who may not have a card yet.  "
+        "Does NOT return the QR image — the frontend regenerates the QR "
+        "preview client-side from patient_id + card_version."
     ),
 )
 async def get_health_card(
     patient_id: uuid.UUID,
     db: DbDep,
     current_user: CurrentUser,
-) -> HealthCardResponse:
-    result = await db.execute(
-        select(HealthCard).where(HealthCard.patient_id == patient_id)
+    allow_missing: bool = Query(
+        False,
+        description=(
+            "When true, return HTTP 200 with {card_found: false, card: null} "
+            "instead of HTTP 404 when the patient has no health card.  "
+            "Use this from list-view callers to avoid browser console network errors."
+        ),
+    ),
+) -> HealthCardResponse | HealthCardMaybeResponse:
+    # Prefer the active card; fall back to most-recently-issued card of any status.
+    # This is needed because a patient may have multiple rows after a reissue
+    # (old row with status='reissued', new row with status='active').
+    active_result = await db.execute(
+        select(HealthCard).where(
+            HealthCard.patient_id == patient_id,
+            HealthCard.status == "active",
+        )
     )
-    card: HealthCard | None = result.scalar_one_or_none()
+    card: HealthCard | None = active_result.scalar_one_or_none()
+
     if card is None:
+        # No active card — try to return the latest card of any status so the
+        # frontend can show the correct state banner instead of a bare 404.
+        fallback_result = await db.execute(
+            select(HealthCard)
+            .where(HealthCard.patient_id == patient_id)
+            .order_by(desc(HealthCard.issued_at))
+            .limit(1)
+        )
+        card = fallback_result.scalar_one_or_none()
+
+    if card is None:
+        if allow_missing:
+            # Return 200 with card_found=False so the browser does not log a
+            # network error — this is the normal state for new patients who
+            # haven't been issued a card yet.
+            return HealthCardMaybeResponse(card_found=False, card=None)
         raise NotFoundError(f"No health card found for patient {patient_id}.")
-    return HealthCardResponse(
+
+    card_data = HealthCardResponse(
         id=str(card.id),
         patient_id=str(card.patient_id),
         card_number=card.card_number,
@@ -153,6 +719,13 @@ async def get_health_card(
         nfc_uid=card.nfc_uid,
         qr_data_uri=None,  # intentionally omitted on GET metadata
     )
+
+    if allow_missing:
+        # Wrap in the envelope so callers using allow_missing=true get a
+        # consistent response shape regardless of whether a card was found.
+        return HealthCardMaybeResponse(card_found=True, card=card_data)
+
+    return card_data
 
 
 # ---------------------------------------------------------------------------
@@ -215,6 +788,42 @@ async def download_health_card_pdf(
         else "—"
     )
 
+    # ── Vitals: fetch most recent Visit for this patient ──────────────────
+    _visit_result = await db.execute(
+        select(Visit)
+        .where(Visit.patient_id == patient_id)
+        .order_by(Visit.visit_date.desc())
+        .limit(1)
+    )
+    _latest_visit: Visit | None = _visit_result.scalar_one_or_none()
+
+    if _latest_visit is not None:
+        _last_bp: str = _latest_visit.blood_pressure or "—"
+        _last_weight: str = (
+            str(_latest_visit.weight_kg) if _latest_visit.weight_kg is not None else "—"
+        )
+        _last_height: str = (
+            str(_latest_visit.height_cm) if _latest_visit.height_cm is not None else "—"
+        )
+        _last_temp: str = (
+            str(_latest_visit.temperature) if _latest_visit.temperature is not None else "—"
+        )
+    else:
+        _last_bp = "—"
+        _last_weight = "—"
+        _last_height = "—"
+        _last_temp = "—"
+
+    # ── Allergies: derive from medical_histories already loaded via selectin ──
+    # condition_name is a plain-text field (not encrypted) — safe to display.
+    _allergies: str
+    if patient.medical_histories:
+        _allergies = ", ".join(
+            mh.condition_name for mh in patient.medical_histories if mh.condition_name
+        ) or "None on record"
+    else:
+        _allergies = "None on record"
+
     patient_dict: dict[str, object] = {
         # ── Front face fields ──────────────────────────────────────────
         "first_name": patient.first_name,
@@ -222,27 +831,41 @@ async def download_health_card_pdf(
         "middle_name": patient.middle_name,
         "patient_code": patient.patient_code,
         "sex": patient.sex,
-        # Retained for backward compatibility — templates now use the
-        # display-formatted fields below.
+        # Retained for backward compatibility — templates use display-formatted fields.
         "birth_date": patient.birth_date.strftime("%Y-%m-%d") if _bd else "",
-        # New front-face fields:
         "age": _age,
         "birth_date_display": _birth_date_display,
         "mobile_number": patient.mobile_number or "—",
         "philhealth_no": patient.philhealth_no or "—",
         "philhealth_member_type": patient.philhealth_member_type or "",
-        # ── Back face fields (safe placeholder defaults) ───────────────
-        # address is a required non-null column on Patient.
+        # ── Back face fields ───────────────────────────────────────────
         "address": patient.address or "—",
-        # Clinical snapshot fields — populated by a future visit-data
-        # enrichment step; defaults shown until that layer is wired in.
-        "blood_type": "—",
-        "allergies": "None on record",
-        "last_bp": "—",
-        "last_weight": "—",
-        "last_height": "—",
-        "last_temp": "—",
+        # Structured address fields for the back-face template.
+        # The template prefers these over the composite address field.
+        "sitio_purok": patient.sitio_purok or "",
+        "barangay": patient.barangay or "",
+        "municipality": patient.municipality or "",
+        "province": patient.province or "",
+        # blood_type: use stored value or fall back to em-dash placeholder.
+        "blood_type": patient.blood_type or "—",
+        # Allergies sourced from medical_history condition_name rows.
+        "allergies": _allergies,
+        # Vitals from most-recent Visit, or "—" if no visit exists.
+        "last_bp": _last_bp,
+        "last_weight": _last_weight,
+        "last_height": _last_height,
+        "last_temp": _last_temp,
         "medical_notes": "",
+        # ── Dedicated emergency contact (separate from guardian) ───────
+        "emergency_contact_name": patient.emergency_contact_name or "—",
+        "emergency_contact_number": patient.emergency_contact_number or "—",
+        # ── Guardian (for minors / PWD — shown as fallback) ───────────
+        "guardian_name": patient.guardian_name or "—",
+        "guardian_contact": patient.guardian_contact or "—",
+        # ── Demographic priority flags ─────────────────────────────────
+        "is_senior": patient.is_senior,
+        "is_pwd": patient.is_pwd,
+        "is_pregnant": patient.is_pregnant,
         # BHC facility name shown in the footer disclaimer.
         "barangay_name": "Sta. Rosa 1 BHS, Marilao, Bulacan",
     }
@@ -700,6 +1323,232 @@ async def verify_health_card(
             exc_info=True,
         )
         raise _VERIFY_FAIL
+
+
+# ---------------------------------------------------------------------------
+# POST /health-cards/{patient_id}/link-nfc-uid
+# Convenience alias for /nfc-link with the field name the relay uses ("uid").
+# Requires BHW+ JWT — identical security to /nfc-link.
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/health-cards/{patient_id}/link-nfc-uid",
+    response_model=HealthCardResponse,
+    summary="Bind a physical NFC tag UID to the patient's health card (relay alias)",
+    description=(
+        "Alias for /nfc-link that accepts {'uid': '...'} instead of {'nfc_uid': '...'}.  "
+        "Used by the NFC relay testing flow so staff can register a school ID's UID "
+        "to a test patient via curl before scanning.  Requires BHW role or above."
+    ),
+    dependencies=[_BHW_PLUS],
+)
+async def link_nfc_uid_alias(
+    patient_id: uuid.UUID,
+    body: NfcScanUidRequest,
+    request: Request,
+    db: DbDep,
+    current_user: CurrentUser,
+) -> HealthCardResponse:
+    updated_card = await nfc_payload_service.link_nfc_uid(
+        db=db,
+        patient_id=patient_id,
+        nfc_uid=body.uid,
+    )
+    await write_audit_log(
+        db=db,
+        user_id=current_user.id,
+        action="UPDATE",
+        entity_type="health_card",
+        entity_id=updated_card.id,  # type: ignore[union-attr]
+        metadata={
+            "action_detail": "nfc_uid_linked_via_relay_alias",
+            "nfc_uid": body.uid,
+            "patient_id": str(patient_id),
+        },
+        ip_address=_get_client_ip(request),
+    )
+    await db.commit()
+    return HealthCardResponse(
+        id=str(updated_card.id),  # type: ignore[union-attr]
+        patient_id=str(updated_card.patient_id),  # type: ignore[union-attr]
+        card_number=updated_card.card_number,  # type: ignore[union-attr]
+        card_version=updated_card.card_version,  # type: ignore[union-attr]
+        status=updated_card.status,  # type: ignore[arg-type, union-attr]
+        issued_at=updated_card.issued_at,  # type: ignore[union-attr]
+        expires_at=updated_card.expires_at,  # type: ignore[union-attr]
+        nfc_uid=updated_card.nfc_uid,  # type: ignore[attr-defined]
+        qr_data_uri=None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /health-cards/scan-uid
+# Public endpoint — no JWT required.
+# Called by the NFC relay server when a tag is scanned on the Android phone.
+# Returns safe patient info; writes NFC_SCAN audit log; updates last-scan cache.
+# ---------------------------------------------------------------------------
+
+
+async def _scan_nfc_uid_impl(
+    body: NfcScanUidRequest,
+    request: Request,
+    db: DbDep,
+) -> NfcScanResponse:
+    """Implementation shared by the early-registered scan-uid route shim."""
+    uid = body.uid.strip()
+    scanned_at_iso = datetime.now(timezone.utc).isoformat()
+
+    # Case-insensitive match: normalise both sides to upper hex.
+    # SQLAlchemy func.upper works across PostgreSQL.
+    card_result = await db.execute(
+        select(HealthCard).where(
+            func.upper(HealthCard.nfc_uid) == uid.upper()
+        )
+    )
+    card: HealthCard | None = card_result.scalar_one_or_none()
+
+    if card is None:
+        # Update cache with a "not found" entry.
+        _last_scan_cache.update(
+            scanned_at=scanned_at_iso,
+            found=False,
+            uid=uid,
+            patient=None,
+        )
+        # Audit the failed scan (no user_id — anonymous relay call).
+        await write_audit_log(
+            db=db,
+            action="NFC_SCAN",
+            entity_type="health_card",
+            metadata={
+                "result": "not_found",
+                # Log only first 8 chars of UID to avoid full UID in logs.
+                "uid_prefix": uid[:8] + ("..." if len(uid) > 8 else ""),
+                "ip": _get_client_ip(request),
+            },
+            ip_address=_get_client_ip(request),
+        )
+        await db.commit()
+        return NfcScanResponse(
+            found=False,
+            uid=uid,
+            message="Tag not registered. Scan a health card that has been provisioned.",
+        )
+
+    # Load associated patient.
+    patient_result = await db.execute(
+        select(Patient).where(Patient.id == card.patient_id)
+    )
+    patient: Patient | None = patient_result.scalar_one_or_none()
+
+    if patient is None or not patient.is_active:
+        _last_scan_cache.update(
+            scanned_at=scanned_at_iso,
+            found=False,
+            uid=uid,
+            patient=None,
+        )
+        await write_audit_log(
+            db=db,
+            action="NFC_SCAN",
+            entity_type="health_card",
+            entity_id=card.id,
+            metadata={
+                "result": "patient_inactive_or_missing",
+                "uid_prefix": uid[:8] + ("..." if len(uid) > 8 else ""),
+                "card_id": str(card.id),
+            },
+            ip_address=_get_client_ip(request),
+        )
+        await db.commit()
+        return NfcScanResponse(
+            found=False,
+            uid=uid,
+            message="Patient record not found or is inactive.",
+        )
+
+    # Build full name.
+    name_parts = [patient.first_name]
+    if patient.middle_name:
+        name_parts.append(patient.middle_name)
+    name_parts.append(patient.last_name)
+    full_name = " ".join(name_parts)
+
+    # DOB — plain date field, safe to display.
+    dob_str = patient.birth_date.strftime("%B %d, %Y") if patient.birth_date else "Unknown"
+
+    # Allergies from medical_history.condition_name (plain text, not encrypted).
+    allergies_result = await db.execute(
+        select(MedicalHistory.condition_name).where(
+            MedicalHistory.patient_id == patient.id
+        )
+    )
+    allergy_rows = allergies_result.scalars().all()
+    allergies_str = ", ".join(r for r in allergy_rows if r) or "None on record"
+
+    patient_info = NfcScanPatientInfo(
+        patient_id=str(patient.id),
+        patient_code=patient.patient_code,
+        full_name=full_name,
+        date_of_birth=dob_str,
+        sex=patient.sex,
+        blood_type=patient.blood_type,
+        emergency_contact_name=patient.guardian_name,
+        emergency_contact_number=patient.guardian_contact,
+        allergies=allergies_str,
+        card_status=card.status,
+        is_senior=patient.is_senior,
+        is_pwd=patient.is_pwd,
+        is_pregnant=patient.is_pregnant,
+    )
+
+    # Update the in-memory last-scan cache.
+    _last_scan_cache.update(
+        scanned_at=scanned_at_iso,
+        found=True,
+        uid=uid,
+        patient=patient_info.model_dump(),
+    )
+
+    # Audit log — NFC_SCAN with patient name only (no diagnosis/PHI).
+    await write_audit_log(
+        db=db,
+        action="NFC_SCAN",
+        entity_type="health_card",
+        entity_id=card.id,
+        metadata={
+            "result": "found",
+            "patient_name": full_name,
+            "card_status": card.status,
+            "uid_prefix": uid[:8] + ("..." if len(uid) > 8 else ""),
+            "ip": _get_client_ip(request),
+        },
+        ip_address=_get_client_ip(request),
+    )
+    await db.commit()
+
+    status_label = "active" if card.status == "active" else card.status
+    return NfcScanResponse(
+        found=True,
+        uid=uid,
+        message=f"Patient found: {full_name} (card: {status_label})",
+        patient=patient_info,
+    )
+
+
+async def _get_last_scan_impl() -> LastScanResponse:
+    """Implementation shared by the early-registered last-scan route shim."""
+    patient_data = _last_scan_cache.get("patient")
+    patient_info: NfcScanPatientInfo | None = (
+        NfcScanPatientInfo(**patient_data) if patient_data else None
+    )
+    return LastScanResponse(
+        scanned_at=_last_scan_cache.get("scanned_at"),
+        found=bool(_last_scan_cache.get("found")),
+        uid=_last_scan_cache.get("uid"),
+        patient=patient_info,
+    )
 
 
 # ---------------------------------------------------------------------------

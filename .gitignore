@@ -1,5 +1,6 @@
 # ─── Claude Code (local AI context — never commit) ───────────────────────────
 .claude/
+docs/
 
 # ─── Environment / secrets ───────────────────────────────────────────────────
 .env

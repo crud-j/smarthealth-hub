@@ -248,13 +248,14 @@ async def passkey_list_credentials(
 @router.delete(
     "/credentials/{credential_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,  # 204 must have no body — explicit no-content class
     summary="Revoke (soft-delete) a passkey credential",
 )
 async def passkey_revoke_credential(
     credential_id: uuid.UUID,
     current_user: CurrentUser,
     db: DbDep,
-) -> None:
+) -> Response:
     """
     Revoke a passkey by setting ``is_active=False``.
 
@@ -270,3 +271,4 @@ async def passkey_revoke_credential(
         revoked_by=current_user.id,
     )
     await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -1,22 +1,67 @@
-FROM python:3.12-slim
+# ─────────────────────────────────────────────────────────────────────────────
+# SmartHealth Hub — Celery Worker Dockerfile  (infra/docker/Dockerfile.worker)
+#
+# Used by the `celery-worker` and `worker-beat` services in infra/docker-compose.yml.
+# Shares the same multi-stage pattern as Dockerfile.api so the app code and
+# venv are identical.  Build context: backend/
+# ─────────────────────────────────────────────────────────────────────────────
 
-# WeasyPrint system dependencies (worker may generate PDFs for bulk card runs)
+# ── Stage 1: builder ──────────────────────────────────────────────────────────
+FROM python:3.12-slim AS builder
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpango-1.0-0 \
     libpangoft2-1.0-0 \
-    libffi-dev \
+    libpangocairo-1.0-0 \
     libcairo2 \
+    libcairo2-dev \
     libgdk-pixbuf2.0-0 \
+    libffi-dev \
+    libssl-dev \
+    fontconfig \
+    fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir uv==0.4.30
 
 WORKDIR /app
 
-# Install Python runtime dependencies (no dev extras for worker)
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir -e "."
+RUN uv venv /app/.venv && \
+    uv pip install --python /app/.venv/bin/python --no-cache -e "."
 
-# Copy application source
-COPY . .
+# ── Stage 2: runtime ──────────────────────────────────────────────────────────
+FROM python:3.12-slim AS runtime
+
+# WeasyPrint system deps — workers may generate PDFs for bulk card runs.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpango-1.0-0 \
+    libpangoft2-1.0-0 \
+    libpangocairo-1.0-0 \
+    libcairo2 \
+    libgdk-pixbuf2.0-0 \
+    fontconfig \
+    fonts-liberation \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd --system appuser && useradd --system --gid appuser --shell /bin/sh appuser
+
+WORKDIR /app
+
+COPY --from=builder /app/.venv /app/.venv
+
+COPY app ./app
+COPY alembic ./alembic
+COPY alembic.ini ./
+COPY pyproject.toml ./
+
+RUN mkdir -p /app/media/patient_photos && chown -R appuser:appuser /app
+
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+USER appuser
 
 CMD ["celery", "-A", "app.workers.celery_app", "worker", "--loglevel=info"]

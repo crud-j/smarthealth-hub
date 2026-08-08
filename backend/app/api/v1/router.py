@@ -18,12 +18,14 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
+    ai_analytics,
     analytics,
     appointments,
     audit,
     auth,
     health_cards,
     immunizations,
+    intake,
     medical_history,
     mfa,
     passkey,
@@ -68,6 +70,10 @@ api_router.include_router(health_cards.router)
 # analytics.router already carries prefix="/analytics"
 api_router.include_router(analytics.router)
 
+# ── AI Analytics ──────────────────────────────────────────────────────────────
+# ai_analytics.router carries prefix="/analytics" — routes are at /analytics/ai/*
+api_router.include_router(ai_analytics.router)
+
 # ── SMS ───────────────────────────────────────────────────────────────────────
 # sms.router already carries prefix="/sms"
 api_router.include_router(sms.router)
@@ -79,3 +85,7 @@ api_router.include_router(users.router)
 # ── Audit logs ────────────────────────────────────────────────────────────────
 # audit.router already carries prefix="/audit-logs"
 api_router.include_router(audit.router)
+
+# ── Pre-visit intake ──────────────────────────────────────────────────────────
+# intake.router carries prefix="/intake" — public routes (no JWT) + finalize (JWT required)
+api_router.include_router(intake.router)

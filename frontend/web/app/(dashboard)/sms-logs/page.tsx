@@ -150,13 +150,14 @@ export default function SmsLogsPage() {
       {/* Page header */}
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">SMS Logs</h1>
-          <p className="mt-0.5 text-sm text-slate-500">Delivery history and manual SMS dispatch</p>
+          <h1 className="text-2xl font-bold" style={{ fontFamily: "var(--font-dm-serif, Georgia, serif)", fontWeight: 400, color: "#1a0808" }}>SMS Logs</h1>
+          <p className="mt-0.5 text-sm" style={{ color: "#7a5252" }}>Delivery history and manual SMS dispatch</p>
         </div>
         <button
           type="button"
           onClick={() => setDialogOpen(true)}
-          className="inline-flex min-h-[44px] items-center gap-2 rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal-600"
+          className="inline-flex min-h-[44px] items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white focus-visible:outline focus-visible:outline-2"
+          style={{ background: "linear-gradient(135deg, #b5343e, #c94060)" }}
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
@@ -166,7 +167,7 @@ export default function SmsLogsPage() {
       </div>
 
       {/* Filter bar */}
-      <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="mb-4 rounded-xl bg-white p-4 shadow-sm" style={{ border: "1px solid #e5d4cc" }}>
         <div className="flex flex-wrap gap-3">
           <div className="min-w-[140px]">
             <label htmlFor="sms-status" className="mb-1 block text-xs font-medium text-slate-600">Status</label>
@@ -194,7 +195,8 @@ export default function SmsLogsPage() {
           </div>
           <div className="flex items-end">
             <button type="button" onClick={() => setFilters((f) => ({ ...f, page: 1 }))}
-              className="min-h-[44px] rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700">
+              className="min-h-[44px] rounded-lg px-4 py-2 text-sm font-medium text-white"
+              style={{ background: "linear-gradient(135deg, #b5343e, #c94060)" }}>
               Filter
             </button>
           </div>
@@ -209,16 +211,16 @@ export default function SmsLogsPage() {
       )}
 
       {/* Table */}
-      <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="rounded-xl bg-white shadow-sm" style={{ border: "1px solid #e5d4cc", boxShadow: "0 2px 10px rgba(160,80,80,0.06)" }}>
         <div className="overflow-x-auto">
           <table className="w-full text-sm" aria-label="SMS logs table">
             <thead>
-              <tr className="border-b border-slate-200 bg-slate-50 text-left">
-                <th className="px-4 py-3 font-semibold text-slate-600">Patient</th>
-                <th className="px-4 py-3 font-semibold text-slate-600">Mobile</th>
-                <th className="px-4 py-3 font-semibold text-slate-600">Message</th>
-                <th className="px-4 py-3 font-semibold text-slate-600">Status</th>
-                <th className="px-4 py-3 font-semibold text-slate-600">Sent At</th>
+              <tr className="text-left" style={{ background: "linear-gradient(135deg, #fdf0eb 0%, #ffffff 100%)", borderBottom: "2px solid #e5d4cc" }}>
+                <th className="px-4 py-3 font-semibold" style={{ color: "#9b6e6e" }}>Patient</th>
+                <th className="px-4 py-3 font-semibold" style={{ color: "#9b6e6e" }}>Mobile</th>
+                <th className="px-4 py-3 font-semibold" style={{ color: "#9b6e6e" }}>Message</th>
+                <th className="px-4 py-3 font-semibold" style={{ color: "#9b6e6e" }}>Status</th>
+                <th className="px-4 py-3 font-semibold" style={{ color: "#9b6e6e" }}>Sent At</th>
               </tr>
             </thead>
             <tbody>
@@ -234,14 +236,14 @@ export default function SmsLogsPage() {
 
               {!loading && (data?.items ?? []).length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-10 text-center text-slate-400">
+                  <td colSpan={5} className="px-4 py-10 text-center" style={{ color: "#b09090" }}>
                     No SMS logs found.
                   </td>
                 </tr>
               )}
 
               {!loading && (data?.items ?? []).map((log) => (
-                <tr key={log.id} className="border-b border-slate-100 hover:bg-slate-50">
+                <tr key={log.id} className="border-b transition-colors" style={{ borderColor: "#f0e4dd" }} onMouseEnter={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = "#fdf5f0"; }} onMouseLeave={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = ""; }}>
                   <td className="px-4 py-3 text-slate-800">{log.patientName ?? "—"}</td>
                   <td className="px-4 py-3 font-mono text-xs text-slate-600">{log.mobileNumber}</td>
                   <td className="px-4 py-3 text-slate-700" title={log.message}>
@@ -261,17 +263,17 @@ export default function SmsLogsPage() {
 
         {/* Pagination */}
         {data && data.total > (filters.pageSize ?? 15) && (
-          <div className="flex items-center justify-between border-t border-slate-200 px-4 py-3">
-            <p className="text-xs text-slate-500">
+          <div className="flex items-center justify-between px-4 py-3" style={{ borderTop: "1px solid #e5d4cc" }}>
+            <p className="text-xs" style={{ color: "#9b6e6e" }}>
               {data.total} total records
             </p>
             <div className="flex gap-2">
               <button type="button" disabled={(filters.page ?? 1) <= 1}
                 onClick={() => setFilters((f) => ({ ...f, page: (f.page ?? 1) - 1 }))}
-                className="min-h-[36px] rounded-lg border border-slate-200 px-3 text-sm hover:bg-slate-50 disabled:opacity-40" aria-label="Previous page">
+                className="min-h-[36px] rounded-lg px-3 text-sm disabled:opacity-40" style={{ border: "1px solid #e5d4cc" }} aria-label="Previous page">
                 Previous
               </button>
-              <span className="flex items-center text-xs text-slate-500">
+              <span className="flex items-center text-xs" style={{ color: "#9b6e6e" }}>
                 Page {filters.page ?? 1} of {totalPages}
               </span>
               <button type="button" disabled={(filters.page ?? 1) >= totalPages}
@@ -392,7 +394,8 @@ export default function SmsLogsPage() {
 
               <div className="flex gap-3">
                 <button type="submit" disabled={sending}
-                  className="flex min-h-[44px] flex-1 items-center justify-center rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-60">
+                  className="flex min-h-[44px] flex-1 items-center justify-center rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                  style={{ background: "linear-gradient(135deg, #b5343e, #c94060)" }}>
                   {sending ? "Sending…" : "Send SMS"}
                 </button>
                 <button type="button" onClick={closeDialog}

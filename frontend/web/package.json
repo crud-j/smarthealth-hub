@@ -9,26 +9,33 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "next": "16.2.10",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
+    "@hookform/resolvers": "^3.3.4",
     "comlink": "^4.4.2",
     "jsqr": "^1.4.0",
-    "qrcode": "^1.5.4"
+    "lucide-react": "^1.27.0",
+    "next": "16.2.10",
+    "qrcode": "^1.5.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-hook-form": "^7.53.0",
+    "recharts": "^3.10.1",
+    "sweetalert2": "^11.26.25",
+    "sweetalert2-react-content": "^5.1.2",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3",
+    "@playwright/test": "^1.49.0",
+    "@tailwindcss/postcss": "^4",
     "@types/node": "^22",
+    "@types/qrcode": "^1.5.5",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@types/qrcode": "^1.5.5",
-    "typescript": "^5",
-    "@eslint/eslintrc": "^3",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
-    "tailwindcss": "^4",
-    "@tailwindcss/postcss": "^4",
     "postcss": "^8",
-    "@playwright/test": "^1.49.0",
+    "tailwindcss": "^4",
+    "typescript": "^5",
     "wait-on": "^8.0.1"
   }
 }

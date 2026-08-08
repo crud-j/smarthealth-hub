@@ -121,12 +121,12 @@ export default function AppointmentDetailPage({ params }: PageProps) {
         </Link>
       </div>
 
-      <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="rounded-xl bg-white shadow-sm" style={{ border: "1px solid #e5d4cc", boxShadow: "0 2px 10px rgba(160,80,80,0.06)" }}>
         {/* Header */}
-        <div className="flex items-start justify-between border-b border-slate-200 p-6">
+        <div className="flex items-start justify-between p-6" style={{ borderBottom: "1px solid #e5d4cc" }}>
           <div>
-            <h1 className="text-xl font-bold text-slate-900">Appointment Detail</h1>
-            <p className="mt-0.5 font-mono text-xs text-slate-400">{appt.id}</p>
+            <h1 className="text-xl font-bold" style={{ fontFamily: "var(--font-dm-serif, Georgia, serif)", fontWeight: 400, color: "#1a0808" }}>Appointment Detail</h1>
+            <p className="mt-0.5 font-mono text-xs" style={{ color: "#b09090" }}>{appt.id}</p>
           </div>
           <span
             className={`rounded-full px-3 py-1 text-xs font-semibold ${STATUS_COLORS[appt.status]}`}
@@ -136,7 +136,7 @@ export default function AppointmentDetailPage({ params }: PageProps) {
         </div>
 
         {/* Details grid */}
-        <dl className="divide-y divide-slate-100 px-6">
+        <dl className="divide-y px-6" style={{ "--tw-divide-opacity": 1 } as React.CSSProperties}>
           <div className="flex py-4">
             <dt className="w-44 shrink-0 text-sm font-medium text-slate-500">Patient</dt>
             <dd className="text-sm text-slate-900">
@@ -177,13 +177,14 @@ export default function AppointmentDetailPage({ params }: PageProps) {
 
         {/* Action buttons — role gating can be added via RoleGuard wrapping */}
         {appt.status !== "cancelled" && appt.status !== "completed" && (
-          <div className="flex flex-wrap gap-3 border-t border-slate-200 p-6">
+          <div className="flex flex-wrap gap-3 p-6" style={{ borderTop: "1px solid #e5d4cc" }}>
             {appt.status === "pending" && (
               <button
                 type="button"
                 onClick={() => void handleStatusChange("confirmed")}
                 disabled={isBusy}
-                className="min-h-[44px] rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-60"
+                className="min-h-[44px] rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+              style={{ background: "linear-gradient(135deg, #b5343e, #c94060)" }}
               >
                 {isBusy ? "Updating…" : "Confirm Appointment"}
               </button>

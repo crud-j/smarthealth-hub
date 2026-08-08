@@ -49,9 +49,25 @@ class Patient(Base):
             "philhealth_member_type IN ('member', 'dependent')",
             name="patients_philhealth_member_type_check",
         ),
+        sa.CheckConstraint(
+            "philhealth_category IN ('indigent', 'sponsored', 'formal_economy', 'informal_economy', 'lifetime_member') OR philhealth_category IS NULL",
+            name="patients_philhealth_category_check",
+        ),
+        sa.CheckConstraint(
+            "registration_source IN ('walk_in', 'referral', 'outreach', 'others') OR registration_source IS NULL",
+            name="patients_registration_source_check",
+        ),
+        sa.CheckConstraint(
+            "blood_type IN ('A+','A-','B+','B-','AB+','AB-','O+','O-','Unknown') OR blood_type IS NULL",
+            name="patients_blood_type_check",
+        ),
         sa.Index("idx_patients_name", "last_name", "first_name"),
         sa.Index("idx_patients_code", "patient_code"),
         sa.Index("idx_patients_mobile", "mobile_number"),
+        sa.Index("idx_patients_philhealth_no", "philhealth_no"),
+        sa.Index("idx_patients_household_number", "household_number"),
+        sa.Index("idx_patients_barangay", "barangay"),
+        sa.Index("idx_patients_municipality", "municipality"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -68,14 +84,57 @@ class Patient(Base):
     birth_date: Mapped[date] = mapped_column(sa.Date, nullable=False)
     sex: Mapped[str] = mapped_column(sa.String(10), nullable=False)
     civil_status: Mapped[str | None] = mapped_column(sa.String(20), nullable=True)
+    household_number: Mapped[str | None] = mapped_column(sa.String(50), nullable=True)
+    sitio_purok: Mapped[str | None] = mapped_column(sa.String(150), nullable=True)
+    barangay: Mapped[str | None] = mapped_column(sa.String(150), nullable=True)
+    municipality: Mapped[str | None] = mapped_column(sa.String(150), nullable=True)
+    province: Mapped[str | None] = mapped_column(sa.String(150), nullable=True)
+    occupation: Mapped[str | None] = mapped_column(sa.String(150), nullable=True)
     mobile_number: Mapped[str | None] = mapped_column(sa.String(20), nullable=True)
     address: Mapped[str] = mapped_column(sa.Text, nullable=False)
     guardian_name: Mapped[str | None] = mapped_column(sa.String(150), nullable=True)
     guardian_contact: Mapped[str | None] = mapped_column(sa.String(20), nullable=True)
+    emergency_contact_name: Mapped[str | None] = mapped_column(
+        sa.String(150), nullable=True
+    )
+    emergency_contact_number: Mapped[str | None] = mapped_column(
+        sa.String(20), nullable=True
+    )
     philhealth_no: Mapped[str | None] = mapped_column(sa.String(20), nullable=True)
     # RHU form: "PHILHEALTH MEMBER / DEPENDENTS" radio — 'member' or 'dependent'
     philhealth_member_type: Mapped[str | None] = mapped_column(
         sa.String(20), nullable=True
+    )
+    philhealth_category: Mapped[str | None] = mapped_column(sa.String(40), nullable=True)
+    is_4ps_beneficiary: Mapped[bool] = mapped_column(
+        sa.Boolean, nullable=False, server_default=sa.text("FALSE")
+    )
+    household_id_4ps: Mapped[str | None] = mapped_column(sa.String(80), nullable=True)
+    is_indigenous: Mapped[bool] = mapped_column(
+        sa.Boolean, nullable=False, server_default=sa.text("FALSE")
+    )
+    place_of_birth: Mapped[str | None] = mapped_column(sa.String(150), nullable=True)
+    mothers_maiden_name: Mapped[str | None] = mapped_column(
+        sa.String(150), nullable=True
+    )
+    senior_id_number: Mapped[str | None] = mapped_column(sa.String(80), nullable=True)
+    pwd_id_number: Mapped[str | None] = mapped_column(sa.String(80), nullable=True)
+    last_menstrual_period: Mapped[date | None] = mapped_column(sa.Date, nullable=True)
+    gravida: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    para: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    estimated_due_date: Mapped[date | None] = mapped_column(sa.Date, nullable=True)
+    height_cm: Mapped[float | None] = mapped_column(sa.Numeric(5, 1), nullable=True)
+    weight_kg: Mapped[float | None] = mapped_column(sa.Numeric(5, 2), nullable=True)
+    allergies: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    known_conditions: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    registration_source: Mapped[str | None] = mapped_column(
+        sa.String(20), nullable=True
+    )
+    data_privacy_consent: Mapped[bool] = mapped_column(
+        sa.Boolean, nullable=False, server_default=sa.text("FALSE")
+    )
+    data_privacy_consent_at: Mapped[datetime | None] = mapped_column(
+        sa.TIMESTAMP(timezone=True), nullable=True
     )
     is_pwd: Mapped[bool] = mapped_column(
         sa.Boolean, nullable=False, server_default=sa.text("FALSE")
@@ -89,10 +148,22 @@ class Patient(Base):
     is_active: Mapped[bool] = mapped_column(
         sa.Boolean, nullable=False, server_default=sa.text("TRUE")
     )
+    # ABO/Rh blood group. NULL when not recorded at registration time.
+    # Allowed values enforced by patients_blood_type_check DB constraint and
+    # by the Pydantic Literal validator in PatientCreate / PatientUpdate.
+    blood_type: Mapped[str | None] = mapped_column(sa.String(10), nullable=True)
     # Profile photo — stores a relative path inside backend/media/ (e.g.
     # "patient_photos/<uuid>.jpg").  NULL means no photo has been uploaded.
     # Access to the photo file is gated behind JWT auth just like other PHI.
     photo_path: Mapped[str | None] = mapped_column(sa.String(512), nullable=True)
+
+    # How the patient record was entered.
+    # Values: 'manual' (default) | 'ocr' (ID scan autofill) | 'pre_visit' (patient self-entry link)
+    registration_data_source: Mapped[str] = mapped_column(
+        sa.String(20),
+        nullable=False,
+        server_default=sa.text("'manual'"),
+    )
 
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
@@ -127,7 +198,7 @@ class Patient(Base):
     immunizations: Mapped[list["Immunization"]] = relationship(
         "Immunization",
         back_populates="patient",
-        lazy="selectin",
+        lazy="noload",
         cascade="all, delete-orphan",
     )
     appointments: Mapped[list["Appointment"]] = relationship(

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import re
 import uuid
 from datetime import date
 from typing import Annotated
@@ -344,8 +345,15 @@ async def sms_delivery_status_webhook(
             _webhook_secret_warned = True
 
     # -------------------------------------------------------------------
-    # Update sms_logs row matching the provider_message_id
+    # Block 1 — Update sms_logs row matching the provider_message_id
     # -------------------------------------------------------------------
+    # This block handles outbound delivery-status callbacks from Semaphore.
+    # It never early-returns so that Block 2 (inbound reply) can also run.
+    # Both blocks are independently wrapped in try/except — a failure in
+    # delivery-status processing must not prevent the CONFIRM reply from
+    # being handled, and vice versa.
+    _delivery_result: dict = {}  # type: ignore[type-arg]
+
     try:
         from sqlalchemy import select
         from app.models.sms_log import SmsLog
@@ -370,34 +378,137 @@ async def sms_delivery_status_webhook(
                 "Semaphore webhook: no sms_log found for message_id",
                 extra={"message_id": body.message_id, "status": body.status},
             )
-            return {"received": True, "processed": False, "reason": "not_found"}
+            _delivery_result = {"delivery_processed": False, "reason": "not_found"}
+        else:
+            if normalised_status:
+                sms_log.status = normalised_status
+            # Always update provider_message_id in case it was missing (e.g. sim mode).
+            sms_log.provider_message_id = body.message_id
+            await db.commit()
 
-        if normalised_status:
-            sms_log.status = normalised_status
-        # Always update provider_message_id in case it was missing (e.g. sim mode).
-        sms_log.provider_message_id = body.message_id
-        await db.commit()
-
-        logger.info(
-            "Semaphore webhook: sms_log status updated",
-            extra={
+            logger.info(
+                "Semaphore webhook: sms_log status updated",
+                extra={
+                    "sms_log_id": str(sms_log.id),
+                    "message_id": body.message_id,
+                    "semaphore_status": body.status,
+                    "normalised_status": normalised_status,
+                },
+            )
+            _delivery_result = {
+                "delivery_processed": True,
                 "sms_log_id": str(sms_log.id),
-                "message_id": body.message_id,
-                "semaphore_status": body.status,
-                "normalised_status": normalised_status,
-            },
-        )
-        return {
-            "received": True,
-            "processed": True,
-            "sms_log_id": str(sms_log.id),
-            "status": normalised_status or sms_log.status,
-        }
+                "status": normalised_status or sms_log.status,
+            }
 
     except Exception as exc:  # noqa: BLE001
-        # Always return 200 — webhook must never trigger Semaphore retries.
+        # Always continue to Block 2 — webhook must never trigger Semaphore retries.
         logger.error(
-            "Semaphore webhook processing error",
+            "Semaphore webhook delivery-status processing error",
             extra={"message_id": body.message_id, "error": str(exc)},
         )
-        return {"received": True, "processed": False, "reason": "internal_error"}
+        _delivery_result = {"delivery_processed": False, "reason": "internal_error"}
+
+    # -------------------------------------------------------------------
+    # Block 2 — Inbound reply handling: SMS confirmation via "CONFIRM <token>"
+    # -------------------------------------------------------------------
+    # Semaphore inbound reply webhooks may include the reply text in extra
+    # fields (e.g. "message", "text", or "body").  Because DeliveryWebhookPayload
+    # uses extra="allow", any additional Semaphore fields land in model_extra.
+    # We also check body.status itself in case Semaphore encodes the reply
+    # text there for inbound-message callbacks (where status is not a known
+    # delivery-status value).
+    try:
+        from sqlalchemy import select as sa_select
+        from app.models.sms_log import SmsLog as SmsLogModel
+        from app.services import appointment_service
+
+        # Extract reply text from known Semaphore inbound reply field names.
+        extra_fields: dict = body.model_extra or {}  # type: ignore[type-arg]
+        reply_text: str | None = (
+            extra_fields.get("message")
+            or extra_fields.get("text")
+            or extra_fields.get("body")
+        )
+
+        # If none of the extra fields carry the reply, check whether the
+        # status field looks like a reply body — it won't be a known
+        # delivery-status string in that case.
+        if not reply_text:
+            _known_statuses = {"sent", "delivered", "failed", "undelivered", "expired"}
+            if body.status.lower() not in _known_statuses:
+                reply_text = body.status
+
+        if reply_text:
+            normalised_reply = reply_text.strip().upper()
+
+            if "CONFIRM" in normalised_reply:
+                # Extract the 4-digit token immediately following CONFIRM.
+                _match = re.search(
+                    r"\bCONFIRM\s+(\d{4})\b", normalised_reply, re.IGNORECASE
+                )
+                if not _match:
+                    logger.debug(
+                        "Semaphore inbound reply contains CONFIRM but no valid "
+                        "4-digit token",
+                        extra={"reply_text": reply_text[:80]},
+                    )
+                else:
+                    token = _match.group(1)
+                    logger.info(
+                        "Semaphore inbound reply: CONFIRM token received",
+                        extra={"token": token},
+                    )
+
+                    # Look up the sms_log row matching this token.
+                    stmt = sa_select(SmsLogModel).where(
+                        SmsLogModel.sms_metadata["confirmation_token"].astext == token,
+                        SmsLogModel.sms_metadata["appointment_id"].astext.is_not(None),
+                        SmsLogModel.status != "replied",
+                    )
+                    confirm_result = await db.execute(stmt)
+                    sms_log_row: SmsLogModel | None = (
+                        confirm_result.scalar_one_or_none()
+                    )
+
+                    if sms_log_row is None:
+                        logger.info(
+                            "Semaphore CONFIRM reply: no matching sms_log found "
+                            "for token",
+                            extra={"token": token},
+                        )
+                    else:
+                        appointment_id = uuid.UUID(
+                            sms_log_row.sms_metadata["appointment_id"]
+                        )
+
+                        # Confirm the appointment — idempotent; already-confirmed
+                        # appointments are silently skipped inside the service.
+                        await appointment_service.confirm_appointment(
+                            db,
+                            appointment_id,
+                            confirmation_source="sms_reply",
+                        )
+
+                        # Mark the sms_log as replied so the token cannot be reused.
+                        sms_log_row.status = "replied"
+                        await db.commit()
+
+                        logger.info(
+                            "Semaphore CONFIRM reply: appointment confirmed via SMS",
+                            extra={
+                                "appointment_id": str(appointment_id),
+                                "sms_log_id": str(sms_log_row.id),
+                                "token": token,
+                            },
+                        )
+
+    except Exception as exc:  # noqa: BLE001
+        # Never let confirmation errors cause a non-200 response — Semaphore
+        # would retry indefinitely, causing duplicate processing attempts.
+        logger.error(
+            "Semaphore CONFIRM reply processing error",
+            extra={"error": str(exc)},
+        )
+
+    return {"received": True, "processed": True}

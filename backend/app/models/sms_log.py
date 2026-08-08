@@ -12,7 +12,7 @@ FK design:
     ON DELETE SET NULL — an SMS log must survive even if the linked entity
     is deleted, so the audit trail is preserved.
 
-Status lifecycle: queued → sent → delivered | failed
+Status lifecycle: queued → sent → delivered | failed | replied
 """
 
 import uuid
@@ -20,7 +20,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -45,7 +45,7 @@ class SmsLog(Base):
     __tablename__ = "sms_logs"
     __table_args__ = (
         sa.CheckConstraint(
-            "status IN ('queued', 'sent', 'failed', 'delivered')",
+            "status IN ('queued', 'sent', 'failed', 'delivered', 'replied')",
             name="sms_logs_status_check",
         ),
         sa.Index("idx_sms_patient", "patient_id"),
@@ -97,6 +97,12 @@ class SmsLog(Base):
     error_detail: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(
         sa.TIMESTAMP(timezone=True), nullable=True
+    )
+    # Stores auxiliary data such as the confirmation token for SMS reply-confirm
+    # flow ({"confirmation_token": "1234", "appointment_id": "<uuid>"}).
+    # Named sms_metadata on the ORM side because SQLAlchemy reserves "metadata".
+    sms_metadata: Mapped[dict | None] = mapped_column(
+        "metadata", JSONB, nullable=True, default=dict, server_default="{}"
     )
     created_at: Mapped[datetime] = mapped_column(
         sa.TIMESTAMP(timezone=True),

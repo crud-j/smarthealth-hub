@@ -34,6 +34,8 @@ celery_app = Celery(
     include=[
         "app.workers.sms_tasks",
         "app.workers.reminder_scheduler",
+        "app.workers.ai_tasks",
+        "app.workers.registration_tasks",
     ],
 )
 
@@ -71,6 +73,16 @@ celery_app.conf.beat_schedule = {
     "dispatch-immunization-reminders": {
         "task": "reminders.dispatch_immunization_reminders",
         "schedule": crontab(hour=8, minute=0),
+    },
+    # Nightly 01:00 Asia/Manila — scores upcoming appointments for no-show risk.
+    "run-ai-risk-scoring": {
+        "task": "ai_tasks.run_risk_scoring",
+        "schedule": crontab(hour=1, minute=0),
+    },
+    # Nightly 01:30 Asia/Manila — detects illness trend anomalies.
+    "run-ai-anomaly-detection": {
+        "task": "ai_tasks.run_anomaly_detection",
+        "schedule": crontab(hour=1, minute=30),
     },
 }
 celery_app.conf.timezone = "Asia/Manila"

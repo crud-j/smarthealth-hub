@@ -39,12 +39,19 @@ if TYPE_CHECKING:
 
 class HealthCard(Base):
     """
-    One health card per patient (enforced by UNIQUE constraint on patient_id).
+    Health card rows for patients.
+
+    A patient may have multiple rows across their card history (one per
+    generation: v1, v2, …).  Only one row has status='active' at a time —
+    enforced by the service layer (generate_card idempotency check), not by
+    a column-level unique constraint.  The composite unique index on
+    (patient_id, card_version) prevents duplicate version numbers for the
+    same patient.
 
     When a card is lost or needs reissue, the old row's status is set to
-    'lost' or 'reissued' and a new row is inserted with an incremented
-    ``card_version``.  The old HMAC signature is therefore invalidated
-    automatically.
+    'reissued' and a new row is inserted with card_version incremented.
+    The old HMAC signature is therefore invalidated automatically because
+    qr_service.verify_qr_payload() checks card_version.
     """
 
     __tablename__ = "health_cards"
@@ -52,6 +59,15 @@ class HealthCard(Base):
         sa.CheckConstraint(
             "status IN ('active', 'lost', 'reissued', 'revoked')",
             name="health_cards_status_check",
+        ),
+        # Composite unique: same patient can have multiple card rows
+        # across reissues (v1, v2, …) but not two rows with the same version.
+        # The business rule "only one active card" is enforced by the service
+        # layer (generate_card idempotency check), not by a DB constraint.
+        sa.UniqueConstraint(
+            "patient_id",
+            "card_version",
+            name="uq_health_cards_patient_version",
         ),
         sa.Index("idx_cards_patient", "patient_id"),
         sa.Index("idx_cards_number", "card_number"),
@@ -62,7 +78,9 @@ class HealthCard(Base):
         primary_key=True,
         server_default=sa.text("gen_random_uuid()"),
     )
-    # UNIQUE ensures one active card record per patient
+    # No column-level UNIQUE — see uq_health_cards_patient_version in __table_args__.
+    # A patient may have multiple card rows across reissues; only one is 'active'
+    # at a time (enforced by the service layer, not a DB constraint).
     patient_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         sa.ForeignKey(
@@ -70,7 +88,6 @@ class HealthCard(Base):
             name="fk_health_cards_patient_id_patients",
             ondelete="CASCADE",
         ),
-        unique=True,
         nullable=False,
     )
     card_number: Mapped[str] = mapped_column(

@@ -1,26 +1,57 @@
-FROM node:20-alpine AS base
+# ─────────────────────────────────────────────────────────────────────────────
+# SmartHealth Hub — Frontend Dockerfile  (infra/docker/Dockerfile.web)
+#
+# This file is used by infra/docker-compose.yml for the existing infra/ setup.
+# For the canonical root-level docker-compose.yml, use frontend/web/Dockerfile.
+#
+# Build context must be the repo root:
+#   docker build -f infra/docker/Dockerfile.web -t smarthealth-web .
+#
+# Requires next.config.ts to include `output: "standalone"`.
+# ─────────────────────────────────────────────────────────────────────────────
 
-# Install pnpm
-RUN npm install -g pnpm
+# ── Stage 1: deps ─────────────────────────────────────────────────────────────
+FROM node:20-alpine AS deps
 
+RUN apk add --no-cache libc6-compat
+WORKDIR /app/frontend/web
+
+COPY frontend/web/package.json frontend/web/package-lock.json* ./
+RUN npm ci
+
+# ── Stage 2: builder ──────────────────────────────────────────────────────────
+FROM node:20-alpine AS builder
+
+RUN apk add --no-cache libc6-compat
+WORKDIR /app/frontend/web
+
+COPY --from=deps /app/frontend/web/node_modules ./node_modules
+COPY frontend/web ./
+
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN npm run build
+
+# ── Stage 3: runner ───────────────────────────────────────────────────────────
+FROM node:20-alpine AS runner
+
+RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
-# Copy workspace manifests first (layer cache)
-COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml ./
-COPY frontend/web/package.json ./frontend/web/
-COPY packages/shared-types/package.json ./packages/shared-types/
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1
 
-# Install all workspace dependencies
-RUN pnpm install --frozen-lockfile
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 --ingroup nodejs nextjs
 
-# Copy source files
-COPY frontend/web ./frontend/web
-COPY packages/shared-types ./packages/shared-types
+COPY --from=builder --chown=nextjs:nodejs /app/frontend/web/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/frontend/web/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/frontend/web/public ./public
 
-# Build the Next.js application
-WORKDIR /app/frontend/web
-RUN pnpm build
+USER nextjs
 
 EXPOSE 3000
 
-CMD ["pnpm", "start"]
+ENV PORT=3000 \
+    HOSTNAME="0.0.0.0"
+
+CMD ["node", "server.js"]

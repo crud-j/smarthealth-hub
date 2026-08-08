@@ -27,6 +27,7 @@ SDP Reference: Section 6.1
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Cookie, Depends, Form, Request, Response
@@ -35,7 +36,7 @@ from app.api.v1.endpoints._cookies import clear_auth_cookies, set_auth_cookies
 from app.core.exceptions import UnauthorizedError
 from app.core.logging import get_logger
 from app.core.rate_limit import limiter
-from app.core.security import CurrentUser, decode_token
+from app.core.security import CurrentUser, decode_token, revoke_token
 from app.db.session import DbDep
 from app.schemas.auth import (
     ChangePasswordRequest,
@@ -77,14 +78,19 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 async def login(
     body: LoginRequest,
     request: Request,
+    response: Response,
     db: DbDep,
 ) -> LoginResponse:
     """
     Validate staff email and password.  On success an OTP is dispatched to
-    the user's registered mobile number (Phase 1: logged to console only).
+    the user's registered email address — UNLESS the request includes a
+    ``device_fingerprint`` that matches an unexpired trusted_devices row,
+    in which case OTP is skipped and tokens are issued immediately.
 
     The ``session_hint`` in the response is the user's UUID — pass it as
-    ``user_id`` to ``POST /auth/verify-otp`` along with the received OTP.
+    ``user_id`` to ``POST /auth/verify-otp`` along with the received OTP,
+    UNLESS ``mfa_required`` is False (trusted device path), in which case
+    auth cookies are already set and the caller should redirect to /dashboard.
     """
     ip = request.client.host if request.client else "unknown"
 
@@ -95,17 +101,32 @@ async def login(
         window_seconds=900,
     )
 
-    user_id = await auth_service.login(
+    user_id, tokens = await auth_service.login(
         db=db,
         email=body.email,
         password=body.password.get_secret_value(),
         ip_address=ip,
+        device_fingerprint=body.device_fingerprint,
     )
     await db.commit()
+
+    if tokens is not None:
+        # Trusted device recognized — issue cookies and skip OTP entirely.
+        access_token, refresh_token = tokens
+        set_auth_cookies(response, access_token=access_token, refresh_token=refresh_token)
+        return LoginResponse(
+            message="Trusted device recognized — logged in without OTP.",
+            session_hint=user_id,
+            mfa_required=False,
+            access_token=access_token,
+            refresh_token=refresh_token,
+            token_type="bearer",
+        )
 
     return LoginResponse(
         message="OTP sent to registered mobile number",
         session_hint=user_id,
+        mfa_required=True,
     )
 
 
@@ -263,22 +284,64 @@ async def swagger_token(
 @router.post(
     "/logout",
     response_model=LogoutResponse,
-    summary="Invalidate refresh token and clear auth cookies",
+    summary="Invalidate refresh token, revoke access token JTI, and clear auth cookies",
 )
 async def logout(
     request: Request,
     response: Response,
     db: DbDep,
     current_user: CurrentUser,
+    access_token_cookie: Annotated[str | None, Cookie(alias="access_token")] = None,
 ) -> LogoutResponse:
     """
-    Clear the httpOnly access and refresh token cookies.
+    Clear the httpOnly access and refresh token cookies and revoke the
+    current access token in the Redis JTI denylist so it cannot be reused
+    even within its remaining TTL.
 
-    Writes a LOGOUT audit entry.  Phase 6 will add server-side token
-    revocation (blocklist); for now the short access-token TTL (15 min)
-    limits the window after a cookie is cleared.
+    Token revocation approach:
+      1. Extract the raw access token from the ``Authorization: Bearer``
+         header (preferred by API clients) or the ``access_token`` httpOnly
+         cookie (browser clients).
+      2. Decode the already-validated JWT (``current_user`` was resolved by
+         ``get_current_user``, so decoding here cannot fail for the same
+         token).
+      3. Write ``revoked:jti:{jti}`` to Redis with a TTL equal to the
+         token's remaining lifetime.  If Redis is unavailable, the
+         ``revoke_token`` helper logs a WARNING and returns gracefully —
+         logout still succeeds (short access-token TTL is the fallback).
+
+    Writes a LOGOUT audit entry.
     """
     ip = request.client.host if request.client else None
+
+    # ── Revoke the current access token in the Redis JTI denylist ────────────
+    # Prefer the Authorization header so API clients (e.g. Swagger) work even
+    # when the httpOnly cookie is not sent by their HTTP client.
+    raw_access_token: str | None = None
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        raw_access_token = auth_header[7:]
+    elif access_token_cookie:
+        raw_access_token = access_token_cookie
+
+    if raw_access_token:
+        try:
+            payload = decode_token(raw_access_token)
+            jti: str | None = payload.get("jti")
+            exp_ts = payload.get("exp")
+            if jti and exp_ts is not None:
+                # Calculate remaining seconds so the Redis key auto-expires
+                # when the token would have naturally expired anyway.
+                remaining = int(exp_ts) - int(datetime.now(tz=UTC).timestamp())
+                await revoke_token(jti=jti, ttl_seconds=remaining)
+        except Exception:
+            # decode_token raises UnauthorizedError if the token is already
+            # invalid; any other unexpected exception must not abort logout.
+            logger.warning(
+                "logout: could not revoke access token JTI — token may be "
+                "malformed or already expired. Logout proceeds regardless.",
+                exc_info=True,
+            )
 
     await auth_service.logout(db=db, user_id=current_user.id, ip_address=ip)
     await db.commit()
@@ -394,11 +457,17 @@ async def forgot_password(
     ip = request.client.host if request.client else None
 
     # Service is intentionally silent on unknown emails (anti-enumeration).
-    await auth_service.initiate_password_reset(db=db, email=body.email, ip_address=ip)
+    # It returns the user's UUID when the email is registered, None otherwise.
+    # Both paths return HTTP 200 with the same message — session_hint is not
+    # a secret (the OTP itself is the authenticating factor).
+    user_id = await auth_service.initiate_password_reset(
+        db=db, email=body.email, ip_address=ip
+    )
     await db.commit()
 
     return ForgotPasswordResponse(
-        message="If the email is registered, a reset OTP has been sent to the linked mobile number."
+        message="If the email is registered, a reset OTP has been sent to the linked mobile number.",
+        session_hint=user_id,
     )
 
 

@@ -34,7 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import NotFoundError
 from app.core.logging import get_logger
 from app.models.visit import Visit
-from app.schemas.visit import VisitCreate, VisitResponse, VisitSummary
+from app.schemas.visit import VisitCreate, VisitResponse, VisitSummary, VisitUpdate
 from app.services.audit_service import write_audit_log
 from app.utils.encryption import decrypt_text, encrypt_text
 
@@ -239,6 +239,101 @@ async def create_visit(
             "case_no": case_no,
             "patient_id": str(patient_id),
             "recorded_by": str(recorded_by_id),
+        },
+    )
+
+    return _build_visit_response(visit)
+
+
+async def update_visit(
+    db: AsyncSession,
+    visit_id: uuid.UUID,
+    data: VisitUpdate,
+    updated_by_id: uuid.UUID,
+    ip_address: str | None = None,
+) -> VisitResponse:
+    """
+    Apply a partial update to an existing visit record.
+
+    Only fields supplied in the request body are modified
+    (``model_dump(exclude_unset=True)`` — PATCH semantics over a PUT route).
+
+    PHI handling:
+    - If ``diagnosis`` or ``treatment_notes`` are present in the update dict,
+      they are re-encrypted with AES-256-GCM before persisting.  A value of
+      ``None`` explicitly clears the stored ciphertext (stores NULL).
+    - Vital signs are supplied as a nested ``VitalSigns`` object and unpacked
+      to the individual flat columns on the Visit ORM model.
+
+    Writes an UPDATE audit log row.
+
+    Caller is responsible for committing the transaction.  This function
+    calls ``db.flush()`` to assign server-side defaults and refresh the ORM
+    object, then returns a fully populated ``VisitResponse``.
+
+    Raises:
+        NotFoundError: If no visit with the given ID exists.
+    """
+    result = await db.execute(select(Visit).where(Visit.id == visit_id))
+    visit: Visit | None = result.scalar_one_or_none()
+    if visit is None:
+        raise NotFoundError(f"Visit with ID {visit_id} was not found.")
+
+    update_data = data.model_dump(exclude_unset=True)
+
+    # Handle vital_signs nested object — unpack to individual ORM columns.
+    if "vital_signs" in update_data:
+        vs = update_data.pop("vital_signs")
+        if vs is not None:
+            # vs is a dict from model_dump; apply only non-sentinel keys
+            for field_name, col_name in {
+                "blood_pressure": "blood_pressure",
+                "temperature": "temperature",
+                "pulse_rate": "pulse_rate",
+                "respiratory_rate": "respiratory_rate",
+                "oxygen_saturation": "oxygen_saturation",
+                "weight_kg": "weight_kg",
+                "height_cm": "height_cm",
+            }.items():
+                if field_name in vs:
+                    setattr(visit, col_name, vs[field_name])
+        # vs is None → leave vitals unchanged (caller explicitly passed null wrapper)
+
+    # Re-encrypt PHI fields if supplied; None → store NULL (clear the field).
+    if "diagnosis" in update_data:
+        raw_diag: str | None = update_data.pop("diagnosis")
+        visit.diagnosis = encrypt_text(raw_diag) if raw_diag is not None else None
+
+    if "treatment_notes" in update_data:
+        raw_tx: str | None = update_data.pop("treatment_notes")
+        visit.treatment_notes = encrypt_text(raw_tx) if raw_tx is not None else None
+
+    # Apply remaining scalar fields directly.
+    for field, value in update_data.items():
+        setattr(visit, field, value)
+
+    await db.flush()
+
+    await write_audit_log(
+        db=db,
+        user_id=updated_by_id,
+        action="UPDATE",
+        entity_type="visit",
+        entity_id=visit_id,
+        metadata={
+            "patient_id": str(visit.patient_id),
+            "case_no": visit.case_no,
+            "updated_fields": list(data.model_dump(exclude_unset=True).keys()),
+        },
+        ip_address=ip_address,
+    )
+
+    logger.info(
+        "Visit updated",
+        extra={
+            "visit_id": str(visit.id),
+            "patient_id": str(visit.patient_id),
+            "updated_by": str(updated_by_id),
         },
     )
 

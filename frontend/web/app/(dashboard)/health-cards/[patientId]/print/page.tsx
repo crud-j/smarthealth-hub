@@ -5,9 +5,13 @@
  *
  * - Fetches patient profile + card metadata from the API.
  * - Renders HealthCardPreview for a visual preview before downloading.
- * - "Download PDF" triggers GET /health-cards/{id}/pdf (streamed file download).
+ * - "Download PDF" triggers GET /health-cards/{patientId}/pdf (streamed file download).
+ *   This endpoint requires an ACTIVE card — non-active cards cannot be PDF'd.
  * - "Print" opens browser print dialog.
  * - 404 (no card generated yet): shows "Generate Card" CTA.
+ * - Non-active card (reissued/revoked/lost): shows "Reissue Card" CTA
+ *   instead of Download/Print buttons, since the PDF endpoint only works
+ *   for active cards.
  *
  * This is a client component so it can use hooks for data fetching and the
  * PDF download (which requires window.location for blob download in the
@@ -18,7 +22,8 @@ import { useCallback, useEffect, useState } from "react";
 import { use } from "react";
 import { apiFetch, ApiError } from "@/lib/api-client";
 import HealthCardPreview from "@/components/cards/HealthCardPreview";
-import type { HealthCardData } from "@/types/healthCard";
+import { mapPatient, type PatientApiResponse } from "@/hooks/usePatients";
+import type { CardGenerateResponse, HealthCardData } from "@/types/healthCard";
 import type { Patient } from "@/types/patient";
 
 // ---------------------------------------------------------------------------
@@ -27,12 +32,9 @@ import type { Patient } from "@/types/patient";
 
 type PageState =
   | { phase: "loading" }
-  | { phase: "no_card" }
+  | { phase: "no_card"; patient: Patient }
   | { phase: "ready"; patient: Patient; card: HealthCardData }
   | { phase: "error"; message: string };
-
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
 
 // ---------------------------------------------------------------------------
 // Component
@@ -47,6 +49,10 @@ export default function HealthCardPrintPage({
 
   const [pageState, setPageState] = useState<PageState>({ phase: "loading" });
   const [downloadInProgress, setDownloadInProgress] = useState(false);
+  const [generateInProgress, setGenerateInProgress] = useState(false);
+  const [generateError, setGenerateError] = useState("");
+  const [reissueInProgress, setReissueInProgress] = useState(false);
+  const [reissueError, setReissueError] = useState("");
 
   // ---------------------------------------------------------------------------
   // Fetch data on mount
@@ -57,7 +63,7 @@ export default function HealthCardPrintPage({
       try {
         // Fetch patient and card in parallel.
         const [patient, card] = await Promise.all([
-          apiFetch<Patient>(`/patients/${patientId}`),
+          apiFetch<PatientApiResponse>(`/patients/${patientId}`).then(mapPatient),
           apiFetch<HealthCardData>(`/health-cards/${patientId}`),
         ]);
         setPageState({ phase: "ready", patient, card });
@@ -67,12 +73,11 @@ export default function HealthCardPrintPage({
             // Could be patient 404 or card 404 — check which.
             // If patient exists but card doesn't, show "Generate Card" CTA.
             try {
-              const patient = await apiFetch<Patient>(`/patients/${patientId}`);
-              // Patient found but no card.
-              setPageState({ phase: "no_card" });
-              // Store patient in a local scope workaround — we stash it via a
-              // second state update to keep the no_card state clean.
-              void patient; // patient is loaded but we stay in no_card phase
+              const patient = await apiFetch<PatientApiResponse>(`/patients/${patientId}`).then(mapPatient);
+              // Patient found but no card — keep the patient in state so the
+              // "Generate Card" action below can transition straight to the
+              // "ready" phase without a second round-trip.
+              setPageState({ phase: "no_card", patient });
             } catch {
               setPageState({
                 phase: "error",
@@ -103,19 +108,44 @@ export default function HealthCardPrintPage({
 
   const handleDownloadPdf = useCallback(async () => {
     if (pageState.phase !== "ready") return;
+
+    // The PDF endpoint only works for active cards.  If the card is
+    // non-active (reissued / revoked / lost), the backend returns 404.
+    // This case is rendered with the reissue CTA instead of the PDF
+    // buttons, so this guard is a safety net.
+    if (pageState.card.status !== "active") {
+      alert(
+        `This card is ${pageState.card.status} and cannot be printed. ` +
+        "Please reissue a new card first."
+      );
+      return;
+    }
+
     setDownloadInProgress(true);
 
     try {
       // Use fetch directly for binary response (apiFetch parses JSON).
+      // Use the relative proxy path so Next.js rewrites the request to the
+      // backend — this ensures cookies are scoped correctly and avoids CORS.
       const response = await fetch(
-        `${API_BASE}/health-cards/${patientId}/pdf`,
+        `/api/v1/health-cards/${patientId}/pdf`,
         {
           credentials: "include",
         }
       );
 
       if (!response.ok) {
-        throw new Error(`PDF generation failed: ${response.status}`);
+        // Parse the backend error envelope if available.
+        let errorMessage = `PDF generation failed (HTTP ${response.status}).`;
+        try {
+          const body = (await response.json()) as {
+            error?: { message?: string };
+          };
+          if (body?.error?.message) errorMessage = body.error.message;
+        } catch {
+          // Non-JSON response — keep the generic message.
+        }
+        throw new Error(errorMessage);
       }
 
       const blob = await response.blob();
@@ -129,8 +159,8 @@ export default function HealthCardPrintPage({
       anchor.click();
       anchor.remove();
       URL.revokeObjectURL(url);
-    } catch {
-      alert("Failed to download PDF. Please try again.");
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to download PDF. Please try again.");
     } finally {
       setDownloadInProgress(false);
     }
@@ -139,6 +169,66 @@ export default function HealthCardPrintPage({
   const handlePrint = useCallback(() => {
     window.print();
   }, []);
+
+  // ---------------------------------------------------------------------------
+  // Generate card (no_card phase CTA)
+  // ---------------------------------------------------------------------------
+
+  const handleGenerateCard = useCallback(async () => {
+    if (pageState.phase !== "no_card") return;
+    setGenerateInProgress(true);
+    setGenerateError("");
+
+    try {
+      const resp = await apiFetch<CardGenerateResponse>(
+        `/health-cards/${patientId}/generate`,
+        { method: "POST" }
+      );
+      setPageState({
+        phase: "ready",
+        patient: pageState.patient,
+        card: { ...resp.card, qr_data_uri: resp.qr_data_uri },
+      });
+    } catch (err) {
+      setGenerateError(
+        err instanceof ApiError
+          ? err.message
+          : "Failed to generate health card. Please try again."
+      );
+    } finally {
+      setGenerateInProgress(false);
+    }
+  }, [pageState, patientId]);
+
+  // ---------------------------------------------------------------------------
+  // Reissue card (ready phase — when current card is non-active)
+  // ---------------------------------------------------------------------------
+
+  const handleReissueCard = useCallback(async () => {
+    if (pageState.phase !== "ready") return;
+    setReissueInProgress(true);
+    setReissueError("");
+
+    try {
+      const resp = await apiFetch<CardGenerateResponse>(
+        `/health-cards/${patientId}/reissue`,
+        { method: "POST" }
+      );
+      setPageState({
+        phase: "ready",
+        patient: pageState.patient,
+        card: { ...resp.card, qr_data_uri: resp.qr_data_uri },
+      });
+    } catch (err) {
+      setReissueError(
+        err instanceof ApiError
+          ? err.message
+          : "Failed to reissue health card. Please try again."
+      );
+    } finally {
+      setReissueInProgress(false);
+    }
+  }, [pageState, patientId]);
 
   // ---------------------------------------------------------------------------
   // Render
@@ -188,26 +278,39 @@ export default function HealthCardPrintPage({
         <p style={{ margin: "0 0 20px", color: "#374151" }}>
           This patient does not have a health card yet. Generate one first.
         </p>
-        <a
-          href={`/health-cards/${patientId}`}
+        {generateError && (
+          <p
+            role="alert"
+            style={{ margin: "0 0 16px", color: "#dc2626", fontSize: "13px" }}
+          >
+            {generateError}
+          </p>
+        )}
+        <button
+          type="button"
+          onClick={() => void handleGenerateCard()}
+          disabled={generateInProgress}
           style={{
             display: "inline-block",
             padding: "10px 24px",
             borderRadius: "8px",
             backgroundColor: "#0d9488",
             color: "#ffffff",
-            textDecoration: "none",
+            border: "none",
             fontWeight: "bold",
             fontSize: "14px",
+            cursor: generateInProgress ? "not-allowed" : "pointer",
+            opacity: generateInProgress ? 0.7 : 1,
           }}
         >
-          Generate Health Card
-        </a>
+          {generateInProgress ? "Generating…" : "Generate Health Card"}
+        </button>
       </div>
     );
   }
 
   const { patient, card } = pageState;
+  const isCardActive = card.status === "active";
 
   return (
     <div style={{ maxWidth: "600px", margin: "0 auto", padding: "24px 16px" }}>
@@ -222,21 +325,49 @@ export default function HealthCardPrintPage({
         </p>
       </div>
 
-      {/* Card status badge */}
-      {card.status !== "active" && (
+      {/* Non-active card warning + reissue CTA */}
+      {!isCardActive && (
         <div
           role="alert"
           style={{
-            padding: "10px 16px",
+            padding: "16px",
             borderRadius: "8px",
             backgroundColor: "#fef9c3",
             border: "1px solid #fde047",
             color: "#713f12",
-            marginBottom: "16px",
-            fontSize: "14px",
+            marginBottom: "20px",
           }}
         >
-          This card is <strong>{card.status}</strong>. Please reissue a new card.
+          <p style={{ margin: "0 0 12px", fontSize: "14px", fontWeight: "bold" }}>
+            This card is <strong>{card.status}</strong> and cannot be printed.
+          </p>
+          <p style={{ margin: "0 0 16px", fontSize: "13px" }}>
+            The PDF endpoint only works for active cards. Reissue a new card to
+            generate a printable PDF with a fresh QR code.
+          </p>
+          {reissueError && (
+            <p role="alert" style={{ margin: "0 0 12px", color: "#dc2626", fontSize: "13px" }}>
+              {reissueError}
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={() => void handleReissueCard()}
+            disabled={reissueInProgress}
+            style={{
+              padding: "10px 20px",
+              borderRadius: "8px",
+              backgroundColor: "#b45309",
+              color: "#ffffff",
+              border: "none",
+              fontWeight: "bold",
+              fontSize: "14px",
+              cursor: reissueInProgress ? "not-allowed" : "pointer",
+              opacity: reissueInProgress ? 0.7 : 1,
+            }}
+          >
+            {reissueInProgress ? "Reissuing..." : "Reissue Health Card"}
+          </button>
         </div>
       )}
 
@@ -283,78 +414,82 @@ export default function HealthCardPrintPage({
         </dl>
       </div>
 
-      {/* Action buttons */}
-      <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
-        <button
-          type="button"
-          onClick={() => void handleDownloadPdf()}
-          disabled={downloadInProgress}
-          style={{
-            flex: 1,
-            padding: "12px 20px",
-            borderRadius: "8px",
-            backgroundColor: "#0d9488",
-            color: "#ffffff",
-            border: "none",
-            fontSize: "14px",
-            fontWeight: "bold",
-            cursor: downloadInProgress ? "not-allowed" : "pointer",
-            opacity: downloadInProgress ? 0.7 : 1,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: "8px",
-            minWidth: "160px",
-          }}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="7 10 12 15 17 10" />
-            <line x1="12" x2="12" y1="15" y2="3" />
-          </svg>
-          {downloadInProgress ? "Generating PDF..." : "Download PDF"}
-        </button>
+      {/* Action buttons — only shown for active cards */}
+      {isCardActive && (
+        <>
+          <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={() => void handleDownloadPdf()}
+              disabled={downloadInProgress}
+              style={{
+                flex: 1,
+                padding: "12px 20px",
+                borderRadius: "8px",
+                backgroundColor: "#0d9488",
+                color: "#ffffff",
+                border: "none",
+                fontSize: "14px",
+                fontWeight: "bold",
+                cursor: downloadInProgress ? "not-allowed" : "pointer",
+                opacity: downloadInProgress ? 0.7 : 1,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "8px",
+                minWidth: "160px",
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" x2="12" y1="15" y2="3" />
+              </svg>
+              {downloadInProgress ? "Generating PDF..." : "Download PDF"}
+            </button>
 
-        <button
-          type="button"
-          onClick={handlePrint}
-          style={{
-            flex: 1,
-            padding: "12px 20px",
-            borderRadius: "8px",
-            backgroundColor: "transparent",
-            color: "#0d9488",
-            border: "2px solid #0d9488",
-            fontSize: "14px",
-            fontWeight: "bold",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: "8px",
-            minWidth: "120px",
-          }}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-            <polyline points="6 9 6 2 18 2 18 9" />
-            <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
-            <rect width="12" height="8" x="6" y="14" />
-          </svg>
-          Print
-        </button>
-      </div>
+            <button
+              type="button"
+              onClick={handlePrint}
+              style={{
+                flex: 1,
+                padding: "12px 20px",
+                borderRadius: "8px",
+                backgroundColor: "transparent",
+                color: "#0d9488",
+                border: "2px solid #0d9488",
+                fontSize: "14px",
+                fontWeight: "bold",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "8px",
+                minWidth: "120px",
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                <polyline points="6 9 6 2 18 2 18 9" />
+                <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+                <rect width="12" height="8" x="6" y="14" />
+              </svg>
+              Print
+            </button>
+          </div>
 
-      <p
-        style={{
-          marginTop: "16px",
-          fontSize: "12px",
-          color: "#94a3b8",
-          textAlign: "center",
-        }}
-      >
-        The PDF will be printed at CR80 card size (85.6mm × 54mm).
-        Use a dedicated card printer for best results.
-      </p>
+          <p
+            style={{
+              marginTop: "16px",
+              fontSize: "12px",
+              color: "#94a3b8",
+              textAlign: "center",
+            }}
+          >
+            The PDF will be printed at CR80 card size (85.6mm x 54mm).
+            Use a dedicated card printer for best results.
+          </p>
+        </>
+      )}
     </div>
   );
 }

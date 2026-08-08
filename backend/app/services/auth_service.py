@@ -512,13 +512,15 @@ async def initiate_password_reset(
     db: AsyncSession,
     email: str,
     ip_address: str | None = None,
-) -> None:
+) -> uuid.UUID | None:
     """
     Look up the user by email and dispatch a password-reset OTP.
 
-    Always returns without raising even when the email is not found — this
-    prevents email enumeration (the route always returns HTTP 200 with the
-    same body regardless of outcome).
+    Returns the user's UUID so the route handler can populate
+    ``session_hint`` in the response (the UUID is not a secret — the OTP
+    itself is the authenticating factor).  Returns None when the email is
+    not registered or the account is inactive; the route always returns
+    HTTP 200 with the same message to prevent email enumeration.
     """
     user = await _get_user_by_email(db, email)
 
@@ -528,7 +530,7 @@ async def initiate_password_reset(
             "Password reset requested for unknown/inactive account",
             extra={"email": email},
         )
-        return  # silent no-op — client always sees success
+        return None  # silent no-op — client always sees success
 
     plain_otp = await mfa_service.generate_and_store_otp(
         db=db,
@@ -556,6 +558,8 @@ async def initiate_password_reset(
         metadata={"method": "email"},
         ip_address=ip_address,
     )
+
+    return user.id
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,153 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# SmartHealth Hub — docker-compose.yml  (canonical entrypoint)
+#
+# Usage:
+#   Full stack:                   docker compose up --build
+#   Infrastructure only (db+redis): docker compose up db redis -d
+#   Logs for one service:         docker compose logs -f backend
+#
+# For development hot-reload overrides, apply docker-compose.override.yml:
+#   docker compose up --build          (override is applied automatically)
+#
+# For production, apply the prod overrides in infra/:
+#   docker compose -f docker-compose.yml -f infra/docker-compose.prod.yml up -d
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── PostgreSQL Database ───────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-smarthealthhub}
+      POSTGRES_USER: ${POSTGRES_USER:-shh_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-SmartHealthHub}
+    ports:
+      - "${DB_HOST_PORT:-5445}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-shh_admin} -d ${POSTGRES_DB:-smarthealthhub}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - smarthealth
+
+  # ── Redis (Celery broker + OTP/token store) ───────────────────────────────────
+  # Host port pinned to 6380 (not 6379) to avoid conflicts with a pre-existing
+  # Redis on the host. Container-to-container traffic uses redis://redis:6379/0
+  # which resolves over the Docker network independently of the host port mapping.
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "${REDIS_HOST_PORT:-6380}:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - smarthealth
+
+  # ── FastAPI Backend ───────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: smarthealth-backend:latest
+    ports:
+      - "${BACKEND_HOST_PORT:-8000}:8000"
+    env_file:
+      - ./backend/.env
+    environment:
+      # Override DATABASE_URL and REDIS_URL so they use service names (not
+      # localhost) when running inside the Docker network.
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-shh_admin}:${POSTGRES_PASSWORD:-SmartHealthHub}@db:5432/${POSTGRES_DB:-smarthealthhub}
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - smarthealth
+
+  # ── Celery Worker ─────────────────────────────────────────────────────────────
+  worker:
+    image: smarthealth-backend:latest
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=2
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-shh_admin}:${POSTGRES_PASSWORD:-SmartHealthHub}@db:5432/${POSTGRES_DB:-smarthealthhub}
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - smarthealth
+
+  # ── Celery Beat Scheduler ─────────────────────────────────────────────────────
+  # Runs the hourly appointment-reminder sweep and daily immunization-reminder
+  # sweep. Only ONE beat instance must run at a time — do not scale this service.
+  beat:
+    image: smarthealth-backend:latest
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A app.workers.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-shh_admin}:${POSTGRES_PASSWORD:-SmartHealthHub}@db:5432/${POSTGRES_DB:-smarthealthhub}
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      worker:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - smarthealth
+
+  # ── Next.js Frontend ──────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend/web
+      dockerfile: Dockerfile
+    image: smarthealth-frontend:latest
+    ports:
+      - "${FRONTEND_HOST_PORT:-3000}:3000"
+    environment:
+      # SERVER_SIDE_API_URL is used by next.config.ts rewrites() — the Next.js
+      # process itself (server-side) uses this URL to proxy /api/v1/* calls to
+      # FastAPI. Must use the Docker service name, not localhost.
+      SERVER_SIDE_API_URL: http://backend:8000
+      # NEXT_PUBLIC_* vars are inlined at build time. If you change these you
+      # must rebuild the frontend image.
+      NEXT_PUBLIC_API_BASE_URL: http://backend:8000/api/v1
+    depends_on:
+      - backend
+    networks:
+      - smarthealth
+
+# ── Volumes ───────────────────────────────────────────────────────────────────
+volumes:
+  pgdata:
+    name: smarthealth_pgdata
+  redisdata:
+    name: smarthealth_redisdata
+
+# ── Networks ──────────────────────────────────────────────────────────────────
+networks:
+  smarthealth:
+    driver: bridge
+    name: smarthealth_network

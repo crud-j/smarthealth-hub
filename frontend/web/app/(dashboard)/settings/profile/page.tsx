@@ -12,6 +12,7 @@
 import { useState } from "react";
 import { useCurrentUser } from "@/hooks/useAuth";
 import { apiFetch, ApiError } from "@/lib/api-client";
+import { swSuccess, swError } from "@/lib/swal";
 
 const ROLE_LABELS: Record<string, string> = {
   admin: "Admin",
@@ -35,20 +36,16 @@ export default function SettingsProfilePage() {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [pwLoading, setPwLoading] = useState(false);
-  const [pwSuccess, setPwSuccess] = useState("");
-  const [pwError, setPwError] = useState("");
 
   async function handleChangePassword(e: React.FormEvent) {
     e.preventDefault();
-    setPwSuccess("");
-    setPwError("");
 
     if (newPassword.length < 8) {
-      setPwError("New password must be at least 8 characters.");
+      void swError("New password must be at least 8 characters.");
       return;
     }
     if (newPassword !== confirmPassword) {
-      setPwError("New password and confirmation do not match.");
+      void swError("New password and confirmation do not match.");
       return;
     }
 
@@ -61,12 +58,12 @@ export default function SettingsProfilePage() {
           new_password: newPassword,
         }),
       });
-      setPwSuccess("Password changed successfully.");
+      void swSuccess("Password changed successfully.");
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
     } catch (err) {
-      setPwError(
+      void swError(
         err instanceof ApiError
           ? err.message
           : "Failed to change password. Please try again."
@@ -79,31 +76,31 @@ export default function SettingsProfilePage() {
   return (
     <div className="mx-auto max-w-xl">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-900">Profile</h1>
-        <p className="mt-0.5 text-sm text-slate-500">Your account information and security settings</p>
+        <h1 className="text-2xl font-bold" style={{ fontFamily: "var(--font-dm-serif, Georgia, serif)", fontWeight: 400, color: "#1a0808" }}>Profile</h1>
+        <p className="mt-0.5 text-sm" style={{ color: "#7a5252" }}>Your account information and security settings</p>
       </div>
 
       {/* User info card */}
-      <div className="mb-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="mb-4 font-semibold text-slate-900">Account Information</h2>
+      <div className="mb-6 rounded-xl bg-white p-6 shadow-sm" style={{ border: "1px solid #e5d4cc", boxShadow: "0 2px 10px rgba(160,80,80,0.06)" }}>
+        <h2 className="mb-4 font-semibold" style={{ color: "#1a0808", borderLeft: "3px solid #b5343e", paddingLeft: "0.75rem" }}>Account Information</h2>
         {isLoading ? (
           <div className="space-y-3">
             {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="h-5 w-full animate-pulse rounded bg-slate-200" />
+              <div key={i} className="h-5 w-full animate-pulse rounded" style={{ background: "#edd9d0" }} />
             ))}
           </div>
         ) : (
           <dl className="space-y-4">
             <div className="flex">
-              <dt className="w-28 shrink-0 text-sm font-medium text-slate-500">Full Name</dt>
+              <dt className="w-28 shrink-0 text-sm font-medium" style={{ color: "#9b6e6e" }}>Full Name</dt>
               <dd className="text-sm text-slate-900">{user?.full_name ?? "—"}</dd>
             </div>
             <div className="flex">
-              <dt className="w-28 shrink-0 text-sm font-medium text-slate-500">Email</dt>
+              <dt className="w-28 shrink-0 text-sm font-medium" style={{ color: "#9b6e6e" }}>Email</dt>
               <dd className="text-sm text-slate-900">{user?.email ?? "—"}</dd>
             </div>
             <div className="flex items-center">
-              <dt className="w-28 shrink-0 text-sm font-medium text-slate-500">Role</dt>
+              <dt className="w-28 shrink-0 text-sm font-medium" style={{ color: "#9b6e6e" }}>Role</dt>
               <dd>
                 <span
                   className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${ROLE_COLORS[user?.role ?? ""] ?? "bg-slate-100 text-slate-600"}`}
@@ -113,7 +110,7 @@ export default function SettingsProfilePage() {
               </dd>
             </div>
             <div className="flex">
-              <dt className="w-28 shrink-0 text-sm font-medium text-slate-500">Status</dt>
+              <dt className="w-28 shrink-0 text-sm font-medium" style={{ color: "#9b6e6e" }}>Status</dt>
               <dd>
                 <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${user?.is_active ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"}`}>
                   {user?.is_active ? "Active" : "Inactive"}
@@ -126,18 +123,7 @@ export default function SettingsProfilePage() {
 
       {/* Change password */}
       <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="mb-4 font-semibold text-slate-900">Change Password</h2>
-
-        {pwSuccess && (
-          <div className="mb-4 rounded-lg bg-green-50 p-3 text-sm text-green-700" role="status">
-            {pwSuccess}
-          </div>
-        )}
-        {pwError && (
-          <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700" role="alert">
-            {pwError}
-          </div>
-        )}
+        <h2 className="mb-4 font-semibold" style={{ color: "#1a0808", borderLeft: "3px solid #b5343e", paddingLeft: "0.75rem" }}>Change Password</h2>
 
         <form onSubmit={(e) => void handleChangePassword(e)} className="space-y-4">
           <div>
@@ -190,7 +176,8 @@ export default function SettingsProfilePage() {
           <button
             type="submit"
             disabled={pwLoading}
-            className="flex min-h-[44px] w-full items-center justify-center rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal-600 disabled:opacity-60"
+            className="flex min-h-[44px] w-full items-center justify-center rounded-lg px-4 py-2 text-sm font-semibold text-white focus-visible:outline focus-visible:outline-2 disabled:opacity-60"
+            style={{ background: "linear-gradient(135deg, #b5343e, #c94060)" }}
           >
             {pwLoading ? "Updating…" : "Update Password"}
           </button>

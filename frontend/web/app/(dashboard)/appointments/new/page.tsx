@@ -15,8 +15,15 @@
 import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import { useCreateAppointment } from "@/hooks/useAppointments";
 import { usePatientList } from "@/hooks/usePatients";
+import { swSuccess, swError } from "@/lib/swal";
+import {
+  appointmentCreateSchema,
+  type AppointmentCreateFormValues,
+} from "@/lib/schemas/appointment";
 import type { AppointmentType } from "@/types/appointment";
 
 const APPT_TYPES: { value: AppointmentType; label: string }[] = [
@@ -28,21 +35,32 @@ const APPT_TYPES: { value: AppointmentType; label: string }[] = [
 
 export default function NewAppointmentPage() {
   const router = useRouter();
-  const { createAppointment, loading, error } = useCreateAppointment();
+  const { createAppointment, loading } = useCreateAppointment();
 
-  // Patient search state
+  // Patient search UI state — display only, not part of the form schema
   const [patientQuery, setPatientQuery] = useState("");
-  const [selectedPatientId, setSelectedPatientId] = useState("");
   const [selectedPatientName, setSelectedPatientName] = useState("");
   const [showPatientDropdown, setShowPatientDropdown] = useState(false);
 
-  // Form state
-  const [appointmentType, setAppointmentType] = useState<AppointmentType>("checkup");
-  const [scheduledDate, setScheduledDate] = useState("");
-  const [scheduledTime, setScheduledTime] = useState("08:00");
-  const [notes, setNotes] = useState("");
-  const [successMsg, setSuccessMsg] = useState("");
-  const [validationError, setValidationError] = useState("");
+  const {
+    register,
+    handleSubmit,
+    setValue,
+    watch,
+    formState: { errors },
+  } = useForm<AppointmentCreateFormValues>({
+    resolver: zodResolver(appointmentCreateSchema),
+    mode: "onBlur",
+    defaultValues: {
+      patientId: "",
+      appointmentType: "checkup",
+      scheduledDate: "",
+      scheduledTime: "08:00",
+      notes: "",
+    },
+  });
+
+  const patientIdValue = watch("patientId");
 
   // Patient autocomplete — search patients list
   const { data: patientData, loading: patientLoading } = usePatientList({
@@ -52,43 +70,31 @@ export default function NewAppointmentPage() {
 
   const handleSelectPatient = useCallback(
     (id: string, name: string) => {
-      setSelectedPatientId(id);
+      setValue("patientId", id, { shouldValidate: true });
       setSelectedPatientName(name);
       setPatientQuery(name);
       setShowPatientDropdown(false);
     },
-    []
+    [setValue]
   );
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setValidationError("");
-    setSuccessMsg("");
-
-    // Client-side validation
-    if (!selectedPatientId) {
-      setValidationError("Please select a patient from the search results.");
-      return;
-    }
-    if (!scheduledDate || !scheduledTime) {
-      setValidationError("Please pick a date and time for the appointment.");
-      return;
-    }
-
-    const scheduledAt = `${scheduledDate}T${scheduledTime}:00`;
+  const onSubmit = async (data: AppointmentCreateFormValues) => {
+    const scheduledAt = `${data.scheduledDate}T${data.scheduledTime}:00`;
 
     const result = await createAppointment({
-      patientId: selectedPatientId,
-      appointmentType,
+      patientId: data.patientId,
+      appointmentType: data.appointmentType as AppointmentType,
       scheduledAt,
-      notes: notes.trim() || undefined,
+      notes: data.notes?.trim() || undefined,
     });
 
     if (result) {
-      setSuccessMsg("Appointment booked successfully!");
-      setTimeout(() => router.push("/appointments"), 1200);
+      void swSuccess("Appointment booked successfully!");
+      router.push("/appointments");
+    } else {
+      void swError("Failed to book appointment. Please try again.");
     }
-  }
+  };
 
   return (
     <div className="mx-auto max-w-xl">
@@ -105,46 +111,31 @@ export default function NewAppointmentPage() {
         </Link>
       </div>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h1 className="mb-1 text-xl font-bold text-slate-900">Schedule Appointment</h1>
-        <p className="mb-6 text-sm text-slate-500">
+      <div className="rounded-xl bg-white p-6 shadow-sm" style={{ border: "1px solid #e5d4cc", boxShadow: "0 2px 10px rgba(160,80,80,0.06)" }}>
+        <h1 className="mb-1 text-xl font-bold" style={{ fontFamily: "var(--font-dm-serif, Georgia, serif)", fontWeight: 400, color: "#1a0808" }}>Schedule Appointment</h1>
+        <p className="mb-6 text-sm" style={{ color: "#7a5252" }}>
           Book a new appointment. An SMS reminder will be sent automatically.
         </p>
 
-        {/* Success message */}
-        {successMsg && (
-          <div className="mb-4 rounded-lg bg-green-50 p-3 text-sm font-medium text-green-700" role="status">
-            {successMsg}
-          </div>
-        )}
-
-        {/* API error */}
-        {error && (
-          <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700" role="alert">
-            {error.message}
-          </div>
-        )}
-
-        {/* Validation error */}
-        {validationError && (
-          <div className="mb-4 rounded-lg bg-amber-50 p-3 text-sm text-amber-700" role="alert">
-            {validationError}
-          </div>
-        )}
-
-        <form onSubmit={(e) => void handleSubmit(e)} noValidate className="space-y-5">
+        <form onSubmit={(e) => void handleSubmit(onSubmit)(e)} noValidate className="space-y-5">
           {/* Patient search */}
           <div className="relative">
             <label htmlFor="patient-search" className="mb-1.5 block text-sm font-medium text-slate-700">
               Patient <span className="text-red-500" aria-hidden="true">*</span>
             </label>
+            {/*
+              patientId is the RHF-controlled hidden field that holds the selected patient UUID.
+              The visible text input drives the autocomplete search UI only — it updates patientId
+              via setValue when the user clicks a result from the dropdown.
+            */}
+            <input type="hidden" {...register("patientId")} />
             <input
               id="patient-search"
               type="text"
               value={patientQuery}
               onChange={(e) => {
                 setPatientQuery(e.target.value);
-                setSelectedPatientId("");
+                setValue("patientId", "", { shouldValidate: false });
                 setSelectedPatientName("");
                 setShowPatientDropdown(true);
               }}
@@ -154,8 +145,13 @@ export default function NewAppointmentPage() {
               aria-required="true"
               aria-autocomplete="list"
               aria-controls="patient-results"
-              className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+              className={`w-full rounded-lg border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 ${
+                errors.patientId ? "border-red-300" : "border-slate-200"
+              }`}
             />
+            {errors.patientId && (
+              <p className="mt-1 text-sm text-red-600" role="alert">{errors.patientId.message}</p>
+            )}
             {showPatientDropdown &&
               patientQuery.length >= 2 &&
               (patientLoading || (patientData?.items ?? []).length > 0) && (
@@ -172,7 +168,7 @@ export default function NewAppointmentPage() {
                     <li
                       key={p.id}
                       role="option"
-                      aria-selected={p.id === selectedPatientId}
+                      aria-selected={p.id === patientIdValue}
                       className="cursor-pointer px-3 py-2.5 text-sm hover:bg-teal-50"
                       onClick={() => handleSelectPatient(p.id, p.fullName)}
                     >
@@ -185,7 +181,7 @@ export default function NewAppointmentPage() {
                   )}
                 </ul>
               )}
-            {selectedPatientId && (
+            {patientIdValue && (
               <p className="mt-1 text-xs text-teal-600">
                 Selected: <span className="font-medium">{selectedPatientName}</span>
               </p>
@@ -199,15 +195,18 @@ export default function NewAppointmentPage() {
             </label>
             <select
               id="appt-type"
-              value={appointmentType}
-              onChange={(e) => setAppointmentType(e.target.value as AppointmentType)}
-              required
-              className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+              {...register("appointmentType")}
+              className={`w-full rounded-lg border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 ${
+                errors.appointmentType ? "border-red-300" : "border-slate-200"
+              }`}
             >
               {APPT_TYPES.map((t) => (
                 <option key={t.value} value={t.value}>{t.label}</option>
               ))}
             </select>
+            {errors.appointmentType && (
+              <p className="mt-1 text-sm text-red-600" role="alert">{errors.appointmentType.message}</p>
+            )}
           </div>
 
           {/* Date + time */}
@@ -219,12 +218,15 @@ export default function NewAppointmentPage() {
               <input
                 id="appt-date"
                 type="date"
-                value={scheduledDate}
-                onChange={(e) => setScheduledDate(e.target.value)}
-                required
+                {...register("scheduledDate")}
                 min={new Date().toISOString().split("T")[0]}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                className={`w-full rounded-lg border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 ${
+                  errors.scheduledDate ? "border-red-300" : "border-slate-200"
+                }`}
               />
+              {errors.scheduledDate && (
+                <p className="mt-1 text-sm text-red-600" role="alert">{errors.scheduledDate.message}</p>
+              )}
             </div>
             <div>
               <label htmlFor="appt-time" className="mb-1.5 block text-sm font-medium text-slate-700">
@@ -233,11 +235,14 @@ export default function NewAppointmentPage() {
               <input
                 id="appt-time"
                 type="time"
-                value={scheduledTime}
-                onChange={(e) => setScheduledTime(e.target.value)}
-                required
-                className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                {...register("scheduledTime")}
+                className={`w-full rounded-lg border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 ${
+                  errors.scheduledTime ? "border-red-300" : "border-slate-200"
+                }`}
               />
+              {errors.scheduledTime && (
+                <p className="mt-1 text-sm text-red-600" role="alert">{errors.scheduledTime.message}</p>
+              )}
             </div>
           </div>
 
@@ -248,8 +253,7 @@ export default function NewAppointmentPage() {
             </label>
             <textarea
               id="appt-notes"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
+              {...register("notes")}
               rows={3}
               maxLength={500}
               placeholder="Any additional notes for this appointment…"
@@ -262,13 +266,15 @@ export default function NewAppointmentPage() {
             <button
               type="submit"
               disabled={loading}
-              className="flex min-h-[44px] flex-1 items-center justify-center rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-teal-600 disabled:opacity-60"
+              className="flex min-h-[44px] flex-1 items-center justify-center rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+              style={{ background: "linear-gradient(135deg, #b5343e, #c94060)" }}
             >
               {loading ? "Booking…" : "Book Appointment"}
             </button>
             <Link
               href="/appointments"
-              className="flex min-h-[44px] items-center rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
+              className="flex min-h-[44px] items-center rounded-lg px-4 py-2 text-sm font-medium"
+              style={{ border: "1px solid #e5d4cc", color: "#3d2222" }}
             >
               Cancel
             </Link>

@@ -16,6 +16,7 @@ SDP Reference: Section 6.6
 
 from __future__ import annotations
 
+import uuid
 from datetime import datetime
 from typing import Literal
 
@@ -65,6 +66,35 @@ class CardVerifyRequest(BaseSchema):
     )
 
 
+class BatchPdfRequest(BaseSchema):
+    """
+    POST /health-cards/batch-pdf
+
+    Body sent by admin or BHW staff to generate a single multi-page PDF
+    containing the health cards for the specified patients.
+
+    Constraints:
+    - min_length=1: at least one patient_id must be supplied.
+    - max_length=50: cap imposed to bound WeasyPrint memory usage per request.
+      Attempting to supply 51+ patient_ids will fail Pydantic validation with
+      HTTP 422 before any DB queries are executed.
+
+    Security note: Only admin and bhw roles may call this endpoint.
+    One audit_log row is written per request (not per patient_id).
+    """
+
+    patient_ids: list[uuid.UUID] = Field(
+        ...,
+        min_length=1,
+        max_length=50,
+        description=(
+            "List of patient UUIDs whose health cards should be included in the "
+            "batch PDF.  Must contain 1–50 entries.  Patients without an active "
+            "health card are silently skipped."
+        ),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Response schemas
 # ---------------------------------------------------------------------------
@@ -94,6 +124,27 @@ class HealthCardResponse(BaseSchema):
     qr_data_uri: str | None = Field(
         None,
         description="data:image/png;base64,... QR code image — only present on card generation/reissue",
+    )
+
+
+class HealthCardMaybeResponse(BaseSchema):
+    """
+    Returned by GET /health-cards/{patient_id}?allow_missing=true.
+
+    When a patient has no health card yet, ``card_found`` is False and
+    ``card`` is None — and the endpoint returns HTTP 200 instead of 404.
+    This prevents the browser console from logging network errors for
+    patients who simply haven't been issued a card yet, which is normal
+    during the card-management list view.
+
+    Callers that need a hard 404 (e.g. the print page) should omit the
+    ``allow_missing`` query parameter — the default behavior is unchanged.
+    """
+
+    card_found: bool = Field(description="True when a card row exists for this patient.")
+    card: HealthCardResponse | None = Field(
+        None,
+        description="Card metadata — None when card_found is False.",
     )
 
 

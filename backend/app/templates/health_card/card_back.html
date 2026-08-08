@@ -1,7 +1,9 @@
 <!DOCTYPE html>
 <!--
   Health Card — Back Face Template (Jinja2 + WeasyPrint)
-  This template shows demographic summaries and emergency clinical snapshots.
+  Shows medical summary, vitals, emergency contact, and patient flags.
+  Security invariant: no encrypted PHI (diagnosis/treatment_notes) is rendered here.
+  Layout: NFC-BACKDESIGN.svg as full-bleed background; data overlaid with targeted panels.
 -->
 <html lang="en">
 <head>
@@ -12,12 +14,23 @@
 <body>
 <div class="card-back">
 
-  <!-- ── Header strip ──────────────────────────────────────────────────── -->
-  <div class="back-header">
-    <div class="back-header-text-col">
-      <span class="org-name">Medical Clinical Summary</span>
-      <span class="back-title">Emergency Information</span>
-    </div>
+  <!-- ── Full-bleed SVG background ─────────────────────────────────────────── -->
+  <img
+    class="card-bg-img"
+    src="../AssetsCardBackground/NFC-BACKDESIGN.svg"
+    alt=""
+  />
+
+  <!-- ── BHC Logo — top-left (small) ──────────────────────────────────────── -->
+  <img
+    class="bhc-logo-back"
+    src="../AssetsCardBackground/BHCFINALLOGO.svg"
+    alt="BHC Seal"
+  />
+
+  <!-- ── Header label ──────────────────────────────────────────────────────── -->
+  <div class="back-title-abs">
+    <span class="back-title-text">Medical Summary &amp; Emergency Information</span>
     {%- if patient.photo_data_uri %}
     <img
       src="{{ patient.photo_data_uri }}"
@@ -27,68 +40,107 @@
     {%- endif %}
   </div>
 
-  <!-- ── Address row ───────────────────────────────────────────────────── -->
-  <div class="address-row">
-    <div class="section-label">Residential Address</div>
-    <div class="address-text">{{ patient.address if patient.address else "—" }}</div>
-  </div>
+  <!-- ── Main data panel ───────────────────────────────────────────────────── -->
+  <div class="back-panel">
 
-  <!-- ── Two-column row: blood type / allergies ─────────────────────────── -->
-  <div class="two-col-row">
-    <div class="two-col-cell blood-cell">
-      <div class="section-label">Blood Type</div>
-      <div class="blood-value">{{ patient.blood_type }}</div>
+    <!-- Address — prefer structured fields, fall back to legacy free-text address -->
+    <div class="bp-row bp-address">
+      <span class="bp-label">Address</span>
+      <span class="bp-value">
+        {%- if patient.barangay or patient.municipality or patient.province -%}
+          {%- if patient.sitio_purok %}{{ patient.sitio_purok }}, {% endif -%}
+          {%- if patient.barangay %}{{ patient.barangay }}{% endif -%}
+          {%- if patient.municipality %}, {{ patient.municipality }}{% endif -%}
+          {%- if patient.province %}, {{ patient.province }}{% endif -%}
+        {%- elif patient.address and patient.address != "—" -%}
+          {{ patient.address }}
+        {%- else -%}
+          —
+        {%- endif -%}
+      </span>
     </div>
-    <!-- Dynamically adds emergency coloring if an allergy exists -->
-    <div class="two-col-cell allergy-cell {% if patient.allergies and patient.allergies != 'None on record' and patient.allergies != 'None' %}has-allergies{% endif %}">
-      <div class="section-label">Allergies / Medical Alerts</div>
-      <div class="allergy-text">{{ patient.allergies }}</div>
-    </div>
-  </div>
 
-  <!-- ── Last recorded vital signs ─────────────────────────────────────── -->
-  <div class="vitals-section">
-    <div class="section-label">Last Recorded Vital Signs</div>
-    <div class="vitals-grid">
-      <div class="vital-item">
-        <span class="vital-label">BP</span>
-        <span class="vital-value">{{ patient.last_bp }}</span>
+    <!-- Blood type + Allergies -->
+    <div class="bp-row bp-two-col">
+      <div class="bp-cell bp-blood">
+        <span class="bp-label">Blood Type</span>
+        <span class="bp-blood-val">{{ patient.blood_type }}</span>
       </div>
-      <div class="vital-item">
-        <span class="vital-label">Weight</span>
-        <span class="vital-value">{{ patient.last_weight }} kg</span>
-      </div>
-      <div class="vital-item">
-        <span class="vital-label">Height</span>
-        <span class="vital-value">{{ patient.last_height }} cm</span>
-      </div>
-      <div class="vital-item">
-        <span class="vital-label">Temp</span>
-        <span class="vital-value">{{ patient.last_temp }}°C</span>
+      <div class="bp-cell bp-allergy {% if patient.allergies and patient.allergies != 'None on record' and patient.allergies != 'None' %}has-allergies{% endif %}">
+        <span class="bp-label">Allergies / Alerts</span>
+        <span class="bp-value">{{ patient.allergies }}</span>
       </div>
     </div>
-  </div>
 
-  <!-- ── Important notes ───────────────────────────────────────────────── -->
-  <div class="notes-section">
-    <div class="section-label">Important Clinical Notes</div>
-    <div class="notes-text">
-      {%- if patient.medical_notes -%}
-        {{ patient.medical_notes }}
-      {%- else -%}
-        No additional clinical diagnostic notes on record.
-      {%- endif -%}
+    <!-- Vitals -->
+    <div class="bp-row bp-vitals">
+      <span class="bp-label">Vital Signs</span>
+      <div class="bp-vitals-grid">
+        <div class="bp-vital">
+          <span class="bpv-label">BP</span>
+          <span class="bpv-val">{{ patient.last_bp }}</span>
+        </div>
+        <div class="bp-vital">
+          <span class="bpv-label">Wt</span>
+          <span class="bpv-val">{{ patient.last_weight }}kg</span>
+        </div>
+        <div class="bp-vital">
+          <span class="bpv-label">Ht</span>
+          <span class="bpv-val">{{ patient.last_height }}cm</span>
+        </div>
+        <div class="bp-vital">
+          <span class="bpv-label">Temp</span>
+          <span class="bpv-val">{{ patient.last_temp }}°C</span>
+        </div>
+      </div>
     </div>
-  </div>
 
-  <!-- ── Footer: disclaimer text + official stamp placeholder ─────────── -->
-  <div class="back-footer">
-    <div class="back-footer-text">
-      Property of {{ patient.barangay_name }}. If found, please return immediately to the nearest public health facility or administration center.
+    <!-- Clinical notes -->
+    <div class="bp-row bp-notes">
+      <span class="bp-label">Clinical Notes</span>
+      <span class="bp-note-text">
+        {%- if patient.medical_notes -%}{{ patient.medical_notes }}{%- else -%}No additional notes.{%- endif -%}
+      </span>
     </div>
-    <div class="stamp-circle">
-      <div class="stamp-circle-text">OFFICIAL<br/>HEALTH<br/>SEAL</div>
+
+    <!-- Emergency contact — prefer dedicated emergency_contact fields, fall back to guardian -->
+    {%- if patient.emergency_contact_name and patient.emergency_contact_name != "—" %}
+    <div class="bp-row bp-guardian">
+      <span class="bp-label">Emergency Contact</span>
+      <span class="bp-value">{{ patient.emergency_contact_name }}
+        {%- if patient.emergency_contact_number and patient.emergency_contact_number != "—" %} &bull; {{ patient.emergency_contact_number }}{%- endif %}
+      </span>
     </div>
+    {%- elif patient.guardian_name and patient.guardian_name != "—" %}
+    <div class="bp-row bp-guardian">
+      <span class="bp-label">Emergency Contact</span>
+      <span class="bp-value">{{ patient.guardian_name }}
+        {%- if patient.guardian_contact and patient.guardian_contact != "—" %} &bull; {{ patient.guardian_contact }}{%- endif %}
+      </span>
+    </div>
+    {%- endif %}
+
+    <!-- Flags -->
+    {%- if patient.is_senior or patient.is_pwd or patient.is_pregnant %}
+    <div class="bp-row bp-flags">
+      {%- if patient.is_senior %}
+      <span class="flag-badge flag-senior">Senior Citizen</span>
+      {%- endif %}
+      {%- if patient.is_pwd %}
+      <span class="flag-badge flag-pwd">PWD</span>
+      {%- endif %}
+      {%- if patient.is_pregnant %}
+      <span class="flag-badge flag-pregnant">Pregnant</span>
+      {%- endif %}
+    </div>
+    {%- endif %}
+
+  </div><!-- /.back-panel -->
+
+  <!-- ── Footer ────────────────────────────────────────────────────────────── -->
+  <div class="back-footer-abs">
+    <span class="back-footer-main">Property of {{ patient.barangay_name }}. If found, please return immediately.</span>
+    <span class="back-footer-sub">SmartHealth Hub — Thesis 2026</span>
   </div>
 
 </div>

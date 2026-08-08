@@ -1,0 +1,350 @@
+/*
+ * Patient Field Summary Styles — WeasyPrint PDF renderer
+ * Page: A4 portrait (210mm x 297mm), 20mm margins.
+ *
+ * WeasyPrint constraints observed:
+ *   - No box-shadow
+ *   - No CSS variables (var(--x))
+ *   - No width: fit-content
+ *   - No filter / backdrop-filter
+ *   - No calc() with mixed units
+ *   - Use mm/pt for layout; pt for font-size
+ *   - No external CDN links — WeasyPrint has no network access
+ *
+ * Font stack uses system fonts guaranteed to be present in WeasyPrint's
+ * bundled environment (DejaVu Sans is always available; Helvetica/Arial are
+ * common fallbacks on Linux-based render hosts).
+ */
+
+/* ── Page rule ──────────────────────────────────────────────────────────── */
+@page {
+  size: A4;
+  margin: 20mm;
+}
+
+/* ── Reset ──────────────────────────────────────────────────────────────── */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* ── Base typography ────────────────────────────────────────────────────── */
+body {
+  font-family: "Helvetica Neue", Arial, Helvetica, "DejaVu Sans", sans-serif;
+  font-size: 11pt;
+  color: #1e293b;
+  background: #ffffff;
+  -webkit-print-color-adjust: exact;
+  line-height: 1.4;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   HEADER BAR
+   Full-width navy bar at the top of the page.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.header-bar {
+  background: #1e3a5f;
+  color: #ffffff;
+  padding: 6mm 8mm;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 7mm;
+}
+
+.header-logo-text {
+  font-size: 13pt;
+  font-weight: 800;
+  letter-spacing: 0.3pt;
+  color: #ffffff;
+}
+
+.header-title {
+  font-size: 11pt;
+  font-weight: 600;
+  color: #bfdbfe;
+  text-align: center;
+  flex: 1;
+  padding: 0 4mm;
+}
+
+.header-code {
+  font-size: 10pt;
+  font-weight: 700;
+  color: #93c5fd;
+  font-family: "Courier New", "DejaVu Sans Mono", monospace;
+  text-align: right;
+  letter-spacing: 0.5pt;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   SECTIONS
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.section {
+  margin-bottom: 5mm;
+  page-break-inside: avoid;
+}
+
+/* Sections displayed inline (blood type — compact) */
+.section-inline {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 5mm;
+  padding: 3mm 0;
+  border-top: 1pt solid #e2e8f0;
+}
+
+.section-heading {
+  font-size: 9pt;
+  font-weight: 800;
+  color: #1e3a5f;
+  text-transform: uppercase;
+  letter-spacing: 0.4pt;
+  padding-bottom: 2mm;
+  border-bottom: 1.5pt solid #1e3a5f;
+  margin-bottom: 3mm;
+}
+
+/* ── Side-by-side pair row (PhilHealth + Flags) ─────────────────────────── */
+.two-col-row {
+  display: flex;
+  flex-direction: row;
+  gap: 5mm;
+  margin-bottom: 5mm;
+}
+
+.section-half {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+/* ── Field grid (label + value pairs) ──────────────────────────────────── */
+.field-grid {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 3mm 6mm;
+}
+
+.field-block {
+  min-width: 40mm;
+}
+
+.field-wide {
+  flex-basis: 100%;
+}
+
+.field-label {
+  font-size: 7pt;
+  font-weight: 700;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.3pt;
+  margin-bottom: 0.5mm;
+}
+
+.field-value {
+  font-size: 11pt;
+  font-weight: 500;
+  color: #0f172a;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   VULNERABILITY FLAGS / PRIORITY BADGES
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.flags-row {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 2mm;
+  margin-top: 1mm;
+}
+
+.flag-badge {
+  display: inline-block;
+  font-size: 8.5pt;
+  font-weight: 700;
+  padding: 1mm 3mm;
+  border-radius: 20pt;
+  text-transform: uppercase;
+  letter-spacing: 0.3pt;
+}
+
+/* PWD — blue */
+.flag-pwd {
+  background: #dbeafe;
+  color: #1e40af;
+  border: 0.5pt solid #93c5fd;
+}
+
+/* Senior — orange/amber */
+.flag-senior {
+  background: #ffedd5;
+  color: #9a3412;
+  border: 0.5pt solid #fdba74;
+}
+
+/* Pregnant — pink */
+.flag-pregnant {
+  background: #fce7f3;
+  color: #9d174d;
+  border: 0.5pt solid #f9a8d4;
+}
+
+.flag-none {
+  font-size: 10pt;
+  color: #94a3b8;
+  font-style: italic;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   BLOOD TYPE
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.blood-type-value {
+  font-size: 18pt;
+  font-weight: 900;
+  color: #1e3a5f;
+  letter-spacing: 0.5pt;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   LATEST VITALS
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.vitals-note {
+  font-size: 8pt;
+  color: #64748b;
+  font-style: italic;
+  margin-bottom: 3mm;
+}
+
+.vitals-grid {
+  display: flex;
+  flex-direction: row;
+  gap: 4mm;
+}
+
+.vital-card {
+  flex: 1;
+  border: 0.5pt solid #e2e8f0;
+  border-radius: 3pt;
+  padding: 3mm 4mm;
+  background: #f8fafc;
+}
+
+.vital-label {
+  font-size: 7pt;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.3pt;
+  margin-bottom: 1mm;
+}
+
+.vital-value {
+  font-size: 12pt;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   IMMUNIZATIONS TABLE
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.immun-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10pt;
+}
+
+.immun-table thead tr {
+  background: #1e3a5f;
+  color: #ffffff;
+}
+
+.immun-table thead th {
+  padding: 2mm 4mm;
+  text-align: left;
+  font-size: 8pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3pt;
+}
+
+.immun-table tbody tr {
+  border-bottom: 0.5pt solid #e2e8f0;
+}
+
+.immun-table tbody tr.row-alt {
+  background: #f8fafc;
+}
+
+.immun-table tbody td {
+  padding: 2.5mm 4mm;
+  font-size: 10pt;
+  color: #1e293b;
+  vertical-align: middle;
+}
+
+/* Status badges inside table */
+.status-badge {
+  display: inline-block;
+  font-size: 7.5pt;
+  font-weight: 700;
+  padding: 0.5mm 2.5mm;
+  border-radius: 10pt;
+  text-transform: capitalize;
+}
+
+.status-scheduled {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.status-completed {
+  background: #dcfce7;
+  color: #14532d;
+}
+
+.status-missed {
+  background: #fef9c3;
+  color: #854d0e;
+}
+
+.status-cancelled {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   EMPTY STATE
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.empty-state {
+  font-size: 10pt;
+  color: #94a3b8;
+  font-style: italic;
+  padding: 3mm 0;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   DOCUMENT FOOTER
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.doc-footer {
+  margin-top: 8mm;
+  padding-top: 4mm;
+  border-top: 0.5pt solid #cbd5e1;
+  font-size: 8pt;
+  color: #94a3b8;
+  font-style: italic;
+  text-align: center;
+  line-height: 1.5;
+}

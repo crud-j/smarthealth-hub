@@ -34,12 +34,13 @@ SDP Reference: Section 8.4 (WeasyPrint Rendering)
 from __future__ import annotations
 
 import pathlib
+from datetime import date
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 
 # ---------------------------------------------------------------------------
-# Jinja2 environment
+# Jinja2 environment — health card templates
 # ---------------------------------------------------------------------------
 
 _TEMPLATE_DIR = pathlib.Path(__file__).parent.parent / "templates" / "health_card"
@@ -201,4 +202,232 @@ def render_health_card_pdf(
     base_url = _TEMPLATE_DIR.as_uri() + "/"
 
     pdf_bytes: bytes = HTML(string=combined_html, base_url=base_url).write_pdf()
+    return pdf_bytes
+
+
+# ---------------------------------------------------------------------------
+# Batch renderer — N cards → 2N-page PDF
+# ---------------------------------------------------------------------------
+
+
+def _build_card_html_pages(
+    patient: dict[str, object],
+    card: dict[str, object],
+    qr_data_uri: str,
+    photo_data_uri: str | None,
+    *,
+    is_first_card: bool,
+) -> tuple[str, str]:
+    """
+    Render front and back HTML body fragments for a single card.
+
+    Returns (front_body_html, back_body_html) — the content inside <body>
+    tags only, ready to be stitched into a combined multi-card document.
+
+    photo_data_uri is resolved using the same priority logic as
+    ``render_health_card_pdf``.  Calling code must have already resolved
+    any async I/O (e.g. reading from disk) before calling this function.
+    """
+    # Resolve photo — mirrors the single-card renderer exactly.
+    resolved_photo: str
+    if photo_data_uri is not None:
+        resolved_photo = photo_data_uri
+    elif isinstance(patient.get("photo_data_uri"), str) and patient["photo_data_uri"]:
+        resolved_photo = str(patient["photo_data_uri"])
+    else:
+        patient_orm = patient.get("_patient_orm")
+        if patient_orm is not None:
+            from app.services.patient_photo_service import get_photo_data_uri  # noqa: PLC0415
+            resolved_photo = get_photo_data_uri(patient_orm)
+        else:
+            from app.services.patient_photo_service import _PLACEHOLDER_DATA_URI  # noqa: PLC0415
+            resolved_photo = _PLACEHOLDER_DATA_URI
+
+    patient_with_photo = {**patient, "photo_data_uri": resolved_photo}
+
+    template_ctx = {
+        "patient": patient_with_photo,
+        "card": card,
+        "qr_code": qr_data_uri,
+    }
+
+    front_html = _jinja_env.get_template("card_front.html").render(**template_ctx)
+    back_html = _jinja_env.get_template("card_back.html").render(**template_ctx)
+
+    front_body = _extract_body_content(front_html)
+    back_body = _extract_body_content(back_html)
+
+    # For cards after the first one, inject a page-break wrapper around the
+    # front face so WeasyPrint starts it on a new page.  The back face already
+    # carries ``.card-back { page-break-before: always; }`` in the stylesheet.
+    if not is_first_card:
+        front_body = (
+            '<div style="page-break-before: always;">'
+            f"{front_body}"
+            "</div>"
+        )
+
+    return front_body, back_body
+
+
+def render_batch_health_card_pdf(
+    cards: list[tuple[dict[str, object], dict[str, object], str, str | None]],
+) -> bytes:
+    """
+    Render multiple health cards as a single multi-page PDF.
+
+    Each card occupies 2 pages (front + back).  Cards are rendered in the
+    order supplied.  An empty ``cards`` list returns an empty PDF.
+
+    Args:
+        cards: List of ``(patient_dict, card_dict, qr_data_uri, photo_data_uri)``
+               tuples.  Each element has the same semantics as the positional
+               arguments to ``render_health_card_pdf``.
+
+               Security invariant: ``qr_data_uri`` must encode ONLY the
+               HMAC-signed URL (patient_id + card_version + sig).  No PHI
+               should be present in the QR image; the caller is responsible
+               for enforcing this constraint.
+
+    Returns:
+        Raw PDF bytes.  For N cards the PDF contains 2N pages.
+
+    This function is synchronous (WeasyPrint does not support async I/O).
+    Call it from an async endpoint via::
+
+        pdf_bytes = await asyncio.to_thread(render_batch_health_card_pdf, cards)
+    """
+    from weasyprint import HTML  # noqa: PLC0415
+
+    if not cards:
+        # Return a minimal blank PDF rather than crashing WeasyPrint with
+        # an empty body — callers should validate min_length=1 before here.
+        return HTML(string="<!DOCTYPE html><html><body></body></html>").write_pdf()
+
+    # Extract the <head> block from the very first card's front template so
+    # the combined document retains the correct stylesheet link and charset.
+    first_patient, first_card, first_qr, first_photo = cards[0]
+    # Resolve photo for first card to get the head block.
+    _first_resolved_photo: str
+    if first_photo is not None:
+        _first_resolved_photo = first_photo
+    elif isinstance(first_patient.get("photo_data_uri"), str) and first_patient["photo_data_uri"]:
+        _first_resolved_photo = str(first_patient["photo_data_uri"])
+    else:
+        from app.services.patient_photo_service import _PLACEHOLDER_DATA_URI  # noqa: PLC0415
+        _first_resolved_photo = _PLACEHOLDER_DATA_URI
+
+    _first_ctx = {
+        "patient": {**first_patient, "photo_data_uri": _first_resolved_photo},
+        "card": first_card,
+        "qr_code": first_qr,
+    }
+    _first_front_html = _jinja_env.get_template("card_front.html").render(**_first_ctx)
+
+    head_start = _first_front_html.find("<head>")
+    head_end = _first_front_html.find("</head>") + len("</head>")
+    head_block = (
+        _first_front_html[head_start:head_end]
+        if head_start != -1
+        else (
+            "<head><meta charset=\"UTF-8\" />"
+            "<link rel=\"stylesheet\" href=\"card_styles.css\" /></head>"
+        )
+    )
+
+    # Build the combined body by concatenating all card front+back fragments.
+    body_fragments: list[str] = []
+    for idx, (patient, card, qr_data_uri, photo_data_uri) in enumerate(cards):
+        front_body, back_body = _build_card_html_pages(
+            patient,
+            card,
+            qr_data_uri,
+            photo_data_uri,
+            is_first_card=(idx == 0),
+        )
+        body_fragments.append(front_body)
+        body_fragments.append(back_body)
+
+    combined_html = (
+        "<!DOCTYPE html>\n"
+        "<html lang=\"en\">\n"
+        f"{head_block}\n"
+        "<body>\n"
+        + "\n".join(body_fragments)
+        + "\n</body>\n</html>"
+    )
+
+    base_url = _TEMPLATE_DIR.as_uri() + "/"
+    pdf_bytes: bytes = HTML(string=combined_html, base_url=base_url).write_pdf()
+    return pdf_bytes
+
+
+# ---------------------------------------------------------------------------
+# Patient field summary renderer — A4 single-page PDF
+# ---------------------------------------------------------------------------
+
+_SUMMARY_TEMPLATE_DIR = pathlib.Path(__file__).parent.parent / "templates" / "patient_summary"
+
+_summary_jinja_env = Environment(
+    loader=FileSystemLoader(str(_SUMMARY_TEMPLATE_DIR)),
+    autoescape=select_autoescape(["html"]),
+)
+
+
+def render_patient_summary_pdf(
+    patient: dict[str, object],
+    latest_vitals: dict[str, object] | None,
+    upcoming_immunizations: list[dict[str, object]],
+) -> bytes:
+    """
+    Render a one-page A4 patient field summary PDF for BHW field use.
+
+    This function is synchronous (WeasyPrint does not support async I/O).
+    Call it from an async endpoint like this::
+
+        pdf_bytes = await asyncio.to_thread(
+            render_patient_summary_pdf, patient_dict, vitals_dict, immunizations_list
+        )
+
+    Security invariants:
+    - ``patient`` must NOT contain diagnosis, treatment_notes, or
+      medical_history.notes.  The caller (endpoint) enforces this by
+      building the dict only from Patient ORM columns and non-encrypted visit
+      fields (blood_pressure, weight_kg, height_cm, temperature, visit_date).
+    - A VIEW_PHI audit log row is written by the caller before streaming the
+      response.  This function performs no audit logging.
+
+    Args:
+        patient:                Dict of patient demographics and flag fields.
+                                Required keys: patient_code, first_name, last_name,
+                                middle_name, sex, age, birth_date_display, address,
+                                mobile_number, philhealth_no, philhealth_member_type,
+                                is_pwd, is_senior, is_pregnant, blood_type.
+        latest_vitals:          Dict with keys blood_pressure, weight_kg, height_cm,
+                                temperature, visit_date (formatted string); or None
+                                if no visit records exist for this patient.
+        upcoming_immunizations: List of dicts, each with keys vaccine_name,
+                                next_due_date (formatted string), status.
+                                Maximum 5 items, ordered by next_due_date ascending.
+
+    Returns:
+        Raw PDF bytes ready for streaming to the client.
+    """
+    from weasyprint import HTML  # noqa: PLC0415
+
+    today_str = date.today().strftime("%B %d, %Y")
+
+    template = _summary_jinja_env.get_template("summary.html")
+    rendered_html = template.render(
+        patient=patient,
+        latest_vitals=latest_vitals,
+        upcoming_immunizations=upcoming_immunizations,
+        today_date=today_str,
+    )
+
+    # base_url must point at the summary templates directory so WeasyPrint
+    # resolves the relative href="summary_styles.css" link correctly.
+    base_url = _SUMMARY_TEMPLATE_DIR.as_uri() + "/"
+
+    pdf_bytes: bytes = HTML(string=rendered_html, base_url=base_url).write_pdf()
     return pdf_bytes

@@ -1,23 +1,69 @@
-FROM python:3.12-slim
+# ─────────────────────────────────────────────────────────────────────────────
+# SmartHealth Hub — Backend Dockerfile  (infra/docker/Dockerfile.api)
+#
+# This file is used by infra/docker-compose.yml for the existing infra/ setup.
+# For the canonical root-level docker-compose.yml, use backend/Dockerfile.
+#
+# Build context must be the repo root:
+#   docker build -f infra/docker/Dockerfile.api -t smarthealth-api .
+# ─────────────────────────────────────────────────────────────────────────────
 
-# Install system dependencies required by WeasyPrint (Pango for PDF rendering)
+# ── Stage 1: builder ──────────────────────────────────────────────────────────
+FROM python:3.12-slim AS builder
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpango-1.0-0 \
     libpangoft2-1.0-0 \
-    libffi-dev \
+    libpangocairo-1.0-0 \
     libcairo2 \
+    libcairo2-dev \
     libgdk-pixbuf2.0-0 \
+    libffi-dev \
+    libssl-dev \
+    fontconfig \
+    fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir uv==0.4.30
 
 WORKDIR /app
 
-# Install Python dependencies before copying source (layer cache optimization)
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir -e ".[dev]"
+RUN uv venv /app/.venv && \
+    uv pip install --python /app/.venv/bin/python --no-cache -e "."
 
-# Copy application source
-COPY . .
+# ── Stage 2: runtime ──────────────────────────────────────────────────────────
+FROM python:3.12-slim AS runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpango-1.0-0 \
+    libpangoft2-1.0-0 \
+    libpangocairo-1.0-0 \
+    libcairo2 \
+    libgdk-pixbuf2.0-0 \
+    fontconfig \
+    fonts-liberation \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd --system appuser && useradd --system --gid appuser --shell /bin/sh appuser
+
+WORKDIR /app
+
+COPY --from=builder /app/.venv /app/.venv
+
+COPY app ./app
+COPY alembic ./alembic
+COPY alembic.ini ./
+COPY pyproject.toml ./
+
+RUN mkdir -p /app/media/patient_photos && chown -R appuser:appuser /app
+
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+USER appuser
 
 EXPOSE 8000
 
