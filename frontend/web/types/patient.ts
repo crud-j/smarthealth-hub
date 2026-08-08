@@ -110,6 +110,36 @@ export interface PatientCreatePayload {
   philhealthMemberType?: "member" | "dependent";
   isPwd: boolean;
   isPregnant: boolean;
+  /**
+   * Set to true to bypass a previously returned duplicate-patient warning
+   * and register anyway. Admin-only override on the frontend (see
+   * app/(dashboard)/patients/new/page.tsx) — the backend does not itself
+   * restrict which authenticated role may set this flag.
+   */
+  confirmDuplicate?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Duplicate-patient warning (mirrors PatientDuplicateMatch / PatientCreateResult)
+// ---------------------------------------------------------------------------
+
+/** A single existing patient that matches the name + birth date of a new registration attempt. */
+export interface PatientDuplicateMatch {
+  id: string;
+  patientCode: string;
+  fullName: string;
+  birthDate: string;
+}
+
+/**
+ * Result of createPatient(). Exactly one of the two is populated:
+ *   - duplicateWarning=true, matches=[...], patient=null
+ *   - duplicateWarning=false, matches=[], patient=<Patient>
+ */
+export interface PatientCreateResult {
+  duplicateWarning: boolean;
+  matches: PatientDuplicateMatch[];
+  patient: Patient | null;
 }
 
 // ---------------------------------------------------------------------------

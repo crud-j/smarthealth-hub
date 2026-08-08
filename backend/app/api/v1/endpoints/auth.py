@@ -31,6 +31,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Cookie, Depends, Form, Request, Response
 
+from app.api.v1.endpoints._cookies import clear_auth_cookies, set_auth_cookies
 from app.core.exceptions import UnauthorizedError
 from app.core.logging import get_logger
 from app.core.rate_limit import limiter
@@ -57,51 +58,6 @@ from app.services import auth_service
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-
-# ---------------------------------------------------------------------------
-# Cookie helpers
-# ---------------------------------------------------------------------------
-
-# In production (HTTPS) set secure=True; in development HTTP set secure=False.
-# A future settings flag (e.g. settings.COOKIE_SECURE) should drive this.
-_COOKIE_HTTPONLY = True
-_COOKIE_SAMESITE = "lax"
-_ACCESS_TOKEN_MAX_AGE = 15 * 60          # 15 minutes in seconds
-_REFRESH_TOKEN_MAX_AGE = 7 * 24 * 60 * 60  # 7 days in seconds
-
-
-def _set_auth_cookies(
-    response: Response,
-    *,
-    access_token: str,
-    refresh_token: str,
-    secure: bool = False,  # flip to True when behind HTTPS in production
-) -> None:
-    """Write httpOnly access and refresh token cookies onto a Response."""
-    response.set_cookie(
-        key="access_token",
-        value=access_token,
-        max_age=_ACCESS_TOKEN_MAX_AGE,
-        httponly=_COOKIE_HTTPONLY,
-        samesite=_COOKIE_SAMESITE,
-        secure=secure,
-        path="/",
-    )
-    response.set_cookie(
-        key="refresh_token",
-        value=refresh_token,
-        max_age=_REFRESH_TOKEN_MAX_AGE,
-        httponly=_COOKIE_HTTPONLY,
-        samesite=_COOKIE_SAMESITE,
-        secure=secure,
-        path="/api/v1/auth/refresh",  # restrict refresh cookie to the refresh endpoint
-    )
-
-
-def _clear_auth_cookies(response: Response) -> None:
-    """Clear both auth cookies by setting them to empty with max_age=0."""
-    response.delete_cookie(key="access_token", path="/")
-    response.delete_cookie(key="refresh_token", path="/api/v1/auth/refresh")
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +154,7 @@ async def verify_otp(
     )
     await db.commit()
 
-    _set_auth_cookies(response, access_token=access_token, refresh_token=refresh_token)
+    set_auth_cookies(response, access_token=access_token, refresh_token=refresh_token)
 
     return TokenResponse(
         access_token=access_token,
@@ -217,12 +173,12 @@ async def verify_otp(
 # How to use in Swagger UI:
 #   1. Call POST /auth/login first to trigger the OTP (watch the server console
 #      for the printed OTP code in the development environment).
-#   2. Click the "Authorize 🔒" button at the top of Swagger UI.
+#   2. Click the "Authorize" button at the top of Swagger UI.
 #   3. Scroll to the "OAuth2 (swaggerOAuth2)" section.
 #   4. Fill in:
-#        Username  → your email address
-#        Password  → your password
-#        client_secret → the 6-digit OTP from the console / SMS
+#        Username  -> your email address
+#        Password  -> your password
+#        client_secret -> the 6-digit OTP from the console / SMS
 #   5. Click "Authorize" — Swagger calls this endpoint, receives the token,
 #      and automatically injects it into every subsequent request.
 #
@@ -236,14 +192,14 @@ async def verify_otp(
 @router.post(
     "/swagger-token",
     response_model=TokenResponse,
-    summary="Swagger UI: combined login + OTP → JWT (OAuth2 password grant)",
+    summary="Swagger UI: combined login + OTP -> JWT (OAuth2 password grant)",
     description=(
         "**For Swagger UI use only.** Combines the two-step MFA login into a "
         "single OAuth2-compatible request so the built-in Authorize dialog can "
         "store the JWT automatically.\n\n"
         "**Workflow:**\n"
         "1. Call `POST /auth/login` to trigger the OTP dispatch.\n"
-        "2. Click the **Authorize 🔒** button → find **OAuth2 (swaggerOAuth2)**.\n"
+        "2. Click the **Authorize** button -> find **OAuth2 (swaggerOAuth2)**.\n"
         "3. Enter `username` (email), `password`, and paste the OTP into "
         "**client_secret**.\n"
         "4. Click Authorize — the token is stored and used for all requests."
@@ -290,7 +246,7 @@ async def swagger_token(
     )
     await db.commit()
 
-    _set_auth_cookies(response, access_token=access_token, refresh_token=refresh_token)
+    set_auth_cookies(response, access_token=access_token, refresh_token=refresh_token)
 
     return TokenResponse(
         access_token=access_token,
@@ -327,7 +283,7 @@ async def logout(
     await auth_service.logout(db=db, user_id=current_user.id, ip_address=ip)
     await db.commit()
 
-    _clear_auth_cookies(response)
+    clear_auth_cookies(response)
 
     return LogoutResponse(message="Logged out successfully")
 
@@ -371,7 +327,7 @@ async def refresh_token(
     )
     # refresh_access_token is read-only (no DB mutations) — no commit needed.
 
-    _set_auth_cookies(response, access_token=new_access, refresh_token=new_refresh)
+    set_auth_cookies(response, access_token=new_access, refresh_token=new_refresh)
 
     return TokenResponse(
         access_token=new_access,

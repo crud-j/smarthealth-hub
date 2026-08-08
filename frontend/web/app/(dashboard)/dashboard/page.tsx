@@ -15,7 +15,128 @@
  */
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { useDashboardOverview } from "@/hooks/useAnalytics";
+import { apiFetch, ApiError } from "@/lib/api-client";
+import type { RecentPatientRow, UpcomingAppointmentRow } from "@/types/analytics";
+
+// ---------------------------------------------------------------------------
+// Extra panel data — fetched directly here (not via useDashboardOverview)
+// because GET /analytics/overview does not include list data. Kept as a
+// page-local concern per the "hooks stay single-purpose" convention; both
+// requests fire in parallel via Promise.all so they don't waterfall behind
+// the overview fetch or each other.
+// ---------------------------------------------------------------------------
+
+interface PatientSummaryApiRow {
+  id: string;
+  patient_code: string;
+  full_name: string;
+  age: number;
+  sex: "male" | "female";
+  created_at: string | null;
+}
+
+interface PaginatedPatientsApiResponse {
+  items: PatientSummaryApiRow[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+interface AppointmentApiRow {
+  id: string;
+  patient_code: string;
+  full_name: string;
+  appointment_type: string;
+  scheduled_at: string;
+  status: string;
+}
+
+interface PaginatedAppointmentsApiResponse {
+  items: AppointmentApiRow[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+function usePanelData() {
+  const [recentPatients, setRecentPatients] = useState<RecentPatientRow[]>([]);
+  const [upcomingAppointments, setUpcomingAppointments] = useState<
+    UpcomingAppointmentRow[]
+  >([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadPanels() {
+      setLoading(true);
+      // Fire both requests concurrently — no waterfall.
+      const [patientsResult, appointmentsResult] = await Promise.allSettled([
+        apiFetch<PaginatedPatientsApiResponse>(
+          "/patients?sort=created_at&page_size=5"
+        ),
+        apiFetch<PaginatedAppointmentsApiResponse>(
+          "/appointments?status=pending&sort=scheduled_at&page_size=5"
+        ),
+      ]);
+
+      if (cancelled) return;
+
+      if (patientsResult.status === "fulfilled") {
+        setRecentPatients(
+          patientsResult.value.items.map((p) => ({
+            id: p.id,
+            patientCode: p.patient_code,
+            fullName: p.full_name,
+            age: p.age,
+            sex: p.sex,
+            createdAt: p.created_at ?? "",
+          }))
+        );
+      } else {
+        // Non-fatal — panel just shows its empty state. The overview error
+        // banner already surfaces backend outages elsewhere on this page.
+        console.error(
+          "[dashboard] failed to load recent patients:",
+          patientsResult.reason instanceof ApiError
+            ? patientsResult.reason.message
+            : patientsResult.reason
+        );
+      }
+
+      if (appointmentsResult.status === "fulfilled") {
+        setUpcomingAppointments(
+          appointmentsResult.value.items.map((a) => ({
+            id: a.id,
+            patientName: a.full_name,
+            patientCode: a.patient_code,
+            appointmentType: a.appointment_type,
+            scheduledAt: a.scheduled_at,
+            status: a.status,
+          }))
+        );
+      } else {
+        console.error(
+          "[dashboard] failed to load upcoming appointments:",
+          appointmentsResult.reason instanceof ApiError
+            ? appointmentsResult.reason.message
+            : appointmentsResult.reason
+        );
+      }
+
+      if (!cancelled) setLoading(false);
+    }
+
+    void loadPanels();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return { recentPatients, upcomingAppointments, loading };
+}
 
 // ---------------------------------------------------------------------------
 // Summary card component
@@ -120,6 +241,8 @@ const APPT_STATUS_COLORS: Record<string, string> = {
 
 export default function DashboardPage() {
   const { data, loading, error } = useDashboardOverview();
+  const { recentPatients, upcomingAppointments, loading: panelsLoading } =
+    usePanelData();
 
   return (
     <div>
@@ -183,7 +306,7 @@ export default function DashboardPage() {
             </Link>
           </div>
           <div className="divide-y divide-slate-100">
-            {loading &&
+            {panelsLoading &&
               Array.from({ length: 5 }).map((_, i) => (
                 <div key={i} className="flex items-center gap-3 px-5 py-3">
                   <div className="h-8 w-8 animate-pulse rounded-full bg-slate-200" />
@@ -193,11 +316,11 @@ export default function DashboardPage() {
                   </div>
                 </div>
               ))}
-            {!loading && (data?.recentPatients ?? []).length === 0 && (
+            {!panelsLoading && recentPatients.length === 0 && (
               <p className="px-5 py-6 text-sm text-slate-400">No patients registered yet.</p>
             )}
-            {!loading &&
-              (data?.recentPatients ?? []).map((p) => (
+            {!panelsLoading &&
+              recentPatients.map((p) => (
                 <Link
                   key={p.id}
                   href={`/patients/${p.id}`}
@@ -228,7 +351,7 @@ export default function DashboardPage() {
             </Link>
           </div>
           <div className="divide-y divide-slate-100">
-            {loading &&
+            {panelsLoading &&
               Array.from({ length: 5 }).map((_, i) => (
                 <div key={i} className="flex items-center gap-3 px-5 py-3">
                   <div className="flex-1 space-y-1.5">
@@ -238,11 +361,11 @@ export default function DashboardPage() {
                   <div className="h-5 w-20 animate-pulse rounded-full bg-slate-200" />
                 </div>
               ))}
-            {!loading && (data?.upcomingAppointmentsList ?? []).length === 0 && (
+            {!panelsLoading && upcomingAppointments.length === 0 && (
               <p className="px-5 py-6 text-sm text-slate-400">No upcoming appointments.</p>
             )}
-            {!loading &&
-              (data?.upcomingAppointmentsList ?? []).map((a) => (
+            {!panelsLoading &&
+              upcomingAppointments.map((a) => (
                 <Link
                   key={a.id}
                   href={`/appointments/${a.id}`}

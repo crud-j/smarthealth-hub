@@ -52,6 +52,25 @@ export default function LoginPage() {
   // Submit handler
   // ---------------------------------------------------------------------------
 
+  /**
+   * Client-side device fingerprint — a simple hash of stable browser/device
+   * signals, NOT a cryptographic device attestation. It lets a browser that
+   * has already completed OTP verification once skip repeat OTP prompts for
+   * 30 days if the user opts in via "Remember this device" on the OTP page.
+   * A motivated attacker who already has the victim's password could forge
+   * this value; the OTP flow remains the authoritative second factor.
+   */
+  function computeDeviceFingerprint(): string {
+    if (typeof window === "undefined") return "";
+    const raw = [
+      navigator.userAgent,
+      String(screen.width),
+      String(screen.colorDepth),
+      navigator.language,
+    ].join("|");
+    return btoa(raw).slice(0, 64);
+  }
+
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     clearError();
@@ -59,13 +78,35 @@ export default function LoginPage() {
     if (!validate()) return;
 
     try {
-      const { sessionHint } = await runStep1(email.trim(), password);
+      const fingerprint = computeDeviceFingerprint();
+      const { sessionHint, mfaRequired } = await runStep1(
+        email.trim(),
+        password,
+        fingerprint
+      );
+
+      // Store the fingerprint regardless of outcome — if OTP is still
+      // required, verify-otp needs it to submit "remember this device".
+      sessionStorage.setItem("device_fingerprint", fingerprint);
+
+      const params = new URLSearchParams(window.location.search);
+      const next = params.get("next");
+      const safeNext = next && next.startsWith("/") && !next.startsWith("//") ? next : null;
+
+      if (!mfaRequired) {
+        // Trusted device recognized — backend already set auth cookies and
+        // issued tokens. Skip /verify-otp entirely.
+        sessionStorage.removeItem("mfa_user_id");
+        window.location.href = safeNext ?? "/dashboard";
+        return;
+      }
+
       // Store the user UUID between the two login steps.
       sessionStorage.setItem("mfa_user_id", sessionHint);
       // Carry the ?next= param through to verify-otp so post-OTP redirect works.
-      const params = new URLSearchParams(window.location.search);
-      const next = params.get("next");
-      window.location.href = next ? `/verify-otp?next=${encodeURIComponent(next)}` : "/verify-otp";
+      window.location.href = safeNext
+        ? `/verify-otp?next=${encodeURIComponent(safeNext)}`
+        : "/verify-otp";
     } catch (err) {
       // ApiError message is surfaced via the `apiError` state from useLogin.
       // Non-ApiError failures (network outage, etc.) get a generic message.

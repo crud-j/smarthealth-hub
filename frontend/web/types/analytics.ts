@@ -45,14 +45,15 @@ export interface UpcomingAppointmentRow {
 
 export interface VaccinationCoverageItem {
   vaccineName: string;
+  ageGroup: string;
+  totalEligible: number;
   completed: number;
-  total: number;
   coveragePct: number;
 }
 
 export interface VaccinationCoverageResponse {
-  items: VaccinationCoverageItem[];
-  asOf: string; // ISO datetime
+  byVaccine: VaccinationCoverageItem[];
+  byAgeGroup: VaccinationCoverageItem[];
 }
 
 // ---------------------------------------------------------------------------

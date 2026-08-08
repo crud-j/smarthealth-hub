@@ -99,6 +99,21 @@ class PatientCreate(BaseSchema):
     is_pregnant: bool = Field(False, description="Currently pregnant")
     # is_senior is auto-computed from birth_date; if supplied it is overridden
 
+    # Duplicate-patient override (L-2). When a prior POST /patients call
+    # returned duplicate_warning=true, the caller may resubmit the identical
+    # payload with confirm_duplicate=True to bypass the warning and register
+    # anyway. Intended to be gated to the Admin role on the frontend — the
+    # backend does not itself restrict which authenticated role may set this
+    # flag, since BHW/physician/admin_staff can all already create patients.
+    confirm_duplicate: bool = Field(
+        False,
+        description=(
+            "Set to True to bypass the duplicate-patient warning returned by "
+            "a prior POST /patients call and register the patient anyway. "
+            "The frontend restricts this override to the Admin role."
+        ),
+    )
+
     @field_validator("birth_date")
     @classmethod
     def birth_date_must_be_past(cls, v: date) -> date:
@@ -267,6 +282,9 @@ class PatientSummary(BaseSchema):
     is_pwd: bool
     is_pregnant: bool
     is_active: bool
+    # Included so the dashboard "Recently Registered Patients" panel can sort
+    # / display registration recency without a second round-trip.
+    created_at: datetime | None = None
 
     # Computed at response time
     age: int = Field(default=0)
@@ -307,6 +325,50 @@ class PaginatedPatients(BaseSchema):
 # ---------------------------------------------------------------------------
 # PatientVerifySummary — returned by GET /patients/{id}/verify
 # ---------------------------------------------------------------------------
+
+
+class PatientDuplicateMatch(BaseSchema):
+    """
+    Minimal identity summary for an existing patient that matches the name +
+    birth date of a new registration attempt.
+
+    Returned inside ``PatientCreateResult.matches`` so the registering staff
+    member (or an Admin reviewing the override) can see who the potential
+    duplicate is without a second lookup round-trip.
+    """
+
+    id: str
+    patient_code: str
+    full_name: str
+    birth_date: date
+
+
+class PatientCreateResult(BaseSchema):
+    """
+    Response body for POST /patients.
+
+    Exactly one of the two outcomes is populated:
+      - Duplicate detected, not confirmed:
+          ``duplicate_warning=True``, ``matches=[...]``, ``patient=None``.
+          No record was created. HTTP status is 200 (not an error) — the
+          caller re-submits the identical payload with
+          ``confirm_duplicate=True`` to bypass the check and register anyway.
+      - Registration succeeded (no duplicate found, or the caller already
+        set ``confirm_duplicate=True``):
+          ``duplicate_warning=False``, ``matches=[]``,
+          ``patient=<PatientResponse>``. HTTP status is 201.
+    """
+
+    duplicate_warning: bool = Field(
+        False, description="True if a duplicate was detected and not confirmed."
+    )
+    matches: list[PatientDuplicateMatch] = Field(
+        default_factory=list,
+        description="Existing patients matching name + birth date, when duplicate_warning is True.",
+    )
+    patient: PatientResponse | None = Field(
+        None, description="The newly created patient, when duplicate_warning is False."
+    )
 
 
 class PatientVerifySummary(BaseSchema):

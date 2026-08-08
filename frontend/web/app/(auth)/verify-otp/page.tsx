@@ -25,6 +25,7 @@ export default function VerifyOtpPage() {
   const [apiError, setApiError] = useState<string | null>(null);
   const [resendMessage, setResendMessage] = useState<string | null>(null);
   const [isResending, setIsResending] = useState(false);
+  const [rememberDevice, setRememberDevice] = useState(false);
   const { runStep2, isLoading: isVerifying } = useLogin();
   const { secondsLeft, isActive: isTimerActive, restart: restartTimer } =
     useOtpTimer(60);
@@ -53,9 +54,11 @@ export default function VerifyOtpPage() {
     setApiError(null);
 
     try {
-      await runStep2(userId, otp);
+      const deviceFingerprint = sessionStorage.getItem("device_fingerprint") ?? undefined;
+      await runStep2(userId, otp, rememberDevice, deviceFingerprint);
       // Clear the session hint — it is no longer needed.
       sessionStorage.removeItem("mfa_user_id");
+      sessionStorage.removeItem("device_fingerprint");
       hasRedirected.current = true;
       // Redirect to ?next= if present and is a safe relative path, else dashboard.
       const params = new URLSearchParams(window.location.search);
@@ -198,12 +201,37 @@ export default function VerifyOtpPage() {
       )}
 
       {/* OTP input */}
-      <div style={{ marginBottom: "1.5rem" }}>
+      <div style={{ marginBottom: "1rem" }}>
         <OtpInput
           onChange={handleOtpComplete}
           disabled={isVerifying}
           hasError={apiError !== null}
         />
+      </div>
+
+      {/* Remember this device (L-1) — UX convenience, not a security guarantee;
+          the OTP just entered remains the authoritative second factor. */}
+      <div style={{ marginBottom: "1.5rem", textAlign: "center" }}>
+        <label
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "0.5rem",
+            fontSize: "0.8125rem",
+            color: "#475569",
+            cursor: isVerifying ? "not-allowed" : "pointer",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={rememberDevice}
+            disabled={isVerifying}
+            onChange={(e) => setRememberDevice(e.target.checked)}
+            suppressHydrationWarning
+            style={{ width: 16, height: 16, cursor: isVerifying ? "not-allowed" : "pointer" }}
+          />
+          Remember this device for 30 days
+        </label>
       </div>
 
       {/* Loading indicator */}

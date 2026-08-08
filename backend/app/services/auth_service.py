@@ -28,6 +28,7 @@ Security invariants enforced here:
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from typing import TYPE_CHECKING
 
@@ -49,6 +50,11 @@ from app.services.email_service import email_service
 
 if TYPE_CHECKING:
     from app.models.user import User
+
+
+def _hash_refresh_token(token: str) -> str:
+    """Return the SHA-256 hex digest of a refresh token string."""
+    return hashlib.sha256(token.encode()).hexdigest()
 
 logger = get_logger(__name__)
 
@@ -108,16 +114,26 @@ async def login(
     email: str,
     password: str,
     ip_address: str | None = None,
-) -> uuid.UUID:
+    device_fingerprint: str | None = None,
+) -> tuple[uuid.UUID, tuple[str, str] | None]:
     """
-    Validate staff credentials and dispatch an SMS OTP.
+    Validate staff credentials and either dispatch an SMS OTP or, if the
+    supplied ``device_fingerprint`` matches an unexpired trusted_devices row
+    for this user, skip OTP entirely and issue JWT tokens directly.
 
-    Returns the user's UUID (``session_hint``) that must be passed to
-    ``verify_otp_and_issue_tokens`` together with the OTP code.
+    Returns:
+        ``(user_id, tokens)`` where ``tokens`` is ``None`` when OTP is
+        required (the normal path — caller proceeds to
+        ``verify_otp_and_issue_tokens``), or an ``(access_token,
+        refresh_token)`` tuple when a trusted device let login skip OTP.
 
     Raises:
         UnauthorizedError: Email not found or password mismatch.
         ForbiddenError:    Account is deactivated.
+
+    Note: the device-fingerprint check is a UX convenience, not a
+    cryptographic device attestation — see trusted_device.py's module
+    docstring. The OTP flow remains the authoritative second factor.
     """
     user = await _get_user_by_email(db, email)
 
@@ -150,6 +166,47 @@ async def login(
         )
         raise ForbiddenError("Account is disabled. Contact your system administrator.")
 
+    # ── Trusted-device check (L-1) ──────────────────────────────────────────
+    if device_fingerprint:
+        from datetime import UTC, datetime
+
+        from app.models.trusted_device import TrustedDevice
+
+        trusted_result = await db.execute(
+            select(TrustedDevice).where(
+                TrustedDevice.user_id == user.id,
+                TrustedDevice.device_fingerprint == device_fingerprint,
+                TrustedDevice.expires_at > datetime.now(tz=UTC),
+            )
+        )
+        trusted_device = trusted_result.scalar_one_or_none()
+
+        if trusted_device is not None:
+            access_token = create_access_token(subject=str(user.id), role=user.role.name)
+            refresh_token = create_refresh_token(subject=str(user.id))
+            user.refresh_token_hash = _hash_refresh_token(refresh_token)
+            user.last_login_at = datetime.now(tz=UTC)
+            trusted_device.last_seen_at = datetime.now(tz=UTC)
+            await db.flush()
+
+            await audit_service.write_audit_log(
+                db=db,
+                user_id=user.id,
+                action="LOGIN_TRUSTED_DEVICE",
+                entity_type="user",
+                entity_id=user.id,
+                metadata={"role": user.role.name},
+                ip_address=ip_address,
+            )
+
+            logger.info(
+                "User authenticated via trusted device (OTP skipped)",
+                extra={"user_id": str(user.id), "role": user.role.name},
+            )
+
+            return user.id, (access_token, refresh_token)
+
+    # ── Normal OTP flow ──────────────────────────────────────────────────────
     # Generate OTP and store its hash.
     plain_otp = await mfa_service.generate_and_store_otp(
         db=db,
@@ -180,7 +237,7 @@ async def login(
         ip_address=ip_address,
     )
 
-    return user.id
+    return user.id, None
 
 
 # ---------------------------------------------------------------------------
@@ -194,11 +251,19 @@ async def verify_otp_and_issue_tokens(
     user_id: uuid.UUID,
     otp_code: str,
     ip_address: str | None = None,
+    remember_device: bool = False,
+    device_fingerprint: str | None = None,
 ) -> tuple[str, str]:
     """
     Verify the submitted OTP and issue a JWT access + refresh token pair.
 
     Also updates ``users.last_login_at`` and writes a LOGIN audit entry.
+
+    If ``remember_device`` is True and ``device_fingerprint`` is supplied,
+    upserts a trusted_devices row (expires_at = now + 30 days) so a
+    subsequent login from the same browser can skip the OTP step (L-1). This
+    is a UX convenience only — see trusted_device.py's module docstring for
+    why it is not a substitute for the OTP factor itself.
 
     Returns:
         A ``(access_token, refresh_token)`` tuple of signed JWT strings.
@@ -207,7 +272,7 @@ async def verify_otp_and_issue_tokens(
         UnauthorizedError: OTP is wrong, expired, or the attempt limit was reached.
         UnauthorizedError: User no longer exists or is deactivated.
     """
-    from datetime import UTC, datetime
+    from datetime import UTC, datetime, timedelta
 
     # Re-fetch the user to confirm they're still active at step 2 of the flow.
     user = await _get_user_by_id(db, user_id)
@@ -229,9 +294,40 @@ async def verify_otp_and_issue_tokens(
     )
     refresh_token = create_refresh_token(subject=str(user.id))
 
+    # Store the SHA-256 hash of the issued refresh token so we can validate
+    # it on rotation and reject superseded tokens (Task 4 — refresh token
+    # rotation tracking).
+    user.refresh_token_hash = _hash_refresh_token(refresh_token)
+
     # Stamp last_login_at.
     user.last_login_at = datetime.now(tz=UTC)
     await db.flush()
+
+    # ── "Remember this device" opt-in (L-1) ─────────────────────────────────
+    if remember_device and device_fingerprint:
+        from app.models.trusted_device import TrustedDevice
+
+        existing_result = await db.execute(
+            select(TrustedDevice).where(
+                TrustedDevice.user_id == user.id,
+                TrustedDevice.device_fingerprint == device_fingerprint,
+            )
+        )
+        existing_device = existing_result.scalar_one_or_none()
+        new_expiry = datetime.now(tz=UTC) + timedelta(days=30)
+
+        if existing_device is not None:
+            existing_device.expires_at = new_expiry
+            existing_device.last_seen_at = datetime.now(tz=UTC)
+        else:
+            db.add(
+                TrustedDevice(
+                    user_id=user.id,
+                    device_fingerprint=device_fingerprint,
+                    expires_at=new_expiry,
+                )
+            )
+        await db.flush()
 
     await audit_service.write_audit_log(
         db=db,
@@ -239,7 +335,7 @@ async def verify_otp_and_issue_tokens(
         action="LOGIN",
         entity_type="user",
         entity_id=user.id,
-        metadata={"role": user.role.name},
+        metadata={"role": user.role.name, "remember_device": bool(remember_device and device_fingerprint)},
         ip_address=ip_address,
     )
 
@@ -263,12 +359,21 @@ async def logout(
     ip_address: str | None = None,
 ) -> None:
     """
-    Write a LOGOUT audit entry.
+    Write a LOGOUT audit entry and clear the refresh token hash.
 
-    Token revocation via a server-side blocklist is a Phase 6 hardening
-    concern; for Phase 1 the client clears the httpOnly cookies and the
-    short access-token TTL (15 min) limits the exposure window.
+    Clearing ``refresh_token_hash`` immediately invalidates the outstanding
+    refresh token so it cannot be used to issue new access tokens after logout,
+    even within its 7-day TTL.
+
+    Access token revocation (JTI blocklist) is handled in the route handler
+    before this service function is called, because it requires the raw token
+    string which is only available in the HTTP layer.
     """
+    user = await _get_user_by_id(db, user_id)
+    if user is not None:
+        user.refresh_token_hash = None
+        await db.flush()
+
     await audit_service.write_audit_log(
         db=db,
         user_id=user_id,
@@ -293,13 +398,18 @@ async def refresh_access_token(
 ) -> tuple[str, str]:
     """
     Validate a refresh token and issue a new access + refresh token pair
-    (rotation: old refresh token is implicitly superseded by the new one).
+    (rotation: old refresh token is superseded by the new one).
+
+    Validates the incoming token's SHA-256 hash against the stored
+    ``users.refresh_token_hash``.  If they don't match the token has been
+    superseded or explicitly revoked — we raise 401 to prevent replay
+    attacks using leaked old refresh tokens.
 
     Returns:
         ``(new_access_token, new_refresh_token)``
 
     Raises:
-        UnauthorizedError: Token is invalid, expired, or wrong type.
+        UnauthorizedError: Token is invalid, expired, wrong type, or superseded.
     """
     payload = decode_token(refresh_token)
 
@@ -319,8 +429,21 @@ async def refresh_access_token(
     if user is None or not user.is_active:
         raise UnauthorizedError("User account not found or deactivated.")
 
+    # Validate refresh token hash — rejects superseded or explicitly revoked tokens.
+    # If refresh_token_hash is NULL (user logged out or hash not yet set on older
+    # tokens), reject the rotation to prevent replay with a pre-logout token.
+    incoming_hash = _hash_refresh_token(refresh_token)
+    if user.refresh_token_hash is None or user.refresh_token_hash != incoming_hash:
+        raise UnauthorizedError(
+            "Refresh token has been superseded or revoked. Please log in again."
+        )
+
     new_access_token = create_access_token(subject=str(user.id), role=user.role.name)
     new_refresh_token = create_refresh_token(subject=str(user.id))
+
+    # Rotate the stored hash to the new refresh token.
+    user.refresh_token_hash = _hash_refresh_token(new_refresh_token)
+    await db.flush()
 
     return new_access_token, new_refresh_token
 

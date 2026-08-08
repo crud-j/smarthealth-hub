@@ -62,13 +62,15 @@ celery_app.config_from_object(
 # ---------------------------------------------------------------------------
 celery_app.conf.beat_schedule = {
     # Run at the top of every hour — finds appointments due for a reminder.
-    "dispatch-appointment-reminders-hourly": {
+    # Task registered in reminder_scheduler.py with @celery_app.task(name=...).
+    "dispatch-appointment-reminders": {
         "task": "reminders.dispatch_appointment_reminders",
         "schedule": crontab(minute=0),
     },
     # Run once per day at 8 AM (Asia/Manila) — finds immunizations due.
-    "dispatch-immunization-reminders-daily": {
+    "dispatch-immunization-reminders": {
         "task": "reminders.dispatch_immunization_reminders",
         "schedule": crontab(hour=8, minute=0),
     },
 }
+celery_app.conf.timezone = "Asia/Manila"

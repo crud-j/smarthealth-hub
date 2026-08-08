@@ -542,6 +542,15 @@ export default function HealthCardVerifyPage(): React.ReactElement {
   const [tab, setTab] = useState<Tab>("qr");
   const [state, setState] = useState<VerifyState>({ phase: "idle" });
 
+  // Web NFC (NDEFReader) is only available in Chrome on Android — check
+  // support up front so we can show a clear, dismissible notice on the NFC
+  // tab rather than letting the user discover it only after tapping the
+  // scan button. The QR scanner path remains accessible regardless.
+  const [nfcSupported] = useState<boolean>(
+    () => typeof window !== "undefined" && "NDEFReader" in window
+  );
+  const [nfcNoticeDismissed, setNfcNoticeDismissed] = useState(false);
+
   // QR camera refs.
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -980,6 +989,43 @@ export default function HealthCardVerifyPage(): React.ReactElement {
           aria-label="NFC card scanner"
           style={{ display: "flex", flexDirection: "column", gap: "16px" }}
         >
+          {!nfcSupported && !nfcNoticeDismissed && (
+            <div
+              role="status"
+              style={{
+                position: "relative",
+                padding: "12px 40px 12px 16px",
+                borderRadius: "8px",
+                backgroundColor: "#fef9c3",
+                border: "1px solid #fde047",
+                color: "#713f12",
+                fontSize: "13px",
+                lineHeight: 1.4,
+              }}
+            >
+              NFC scanning is only supported in Chrome on Android. Use the QR
+              code scanner below instead.
+              <button
+                type="button"
+                onClick={() => setNfcNoticeDismissed(true)}
+                aria-label="Dismiss NFC notice"
+                style={{
+                  position: "absolute",
+                  top: "6px",
+                  right: "8px",
+                  background: "transparent",
+                  border: "none",
+                  color: "#713f12",
+                  fontSize: "16px",
+                  lineHeight: 1,
+                  cursor: "pointer",
+                  padding: "4px",
+                }}
+              >
+                &times;
+              </button>
+            </div>
+          )}
           {state.phase === "loading" ? (
             <div
               style={{

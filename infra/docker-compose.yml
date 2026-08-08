@@ -56,9 +56,31 @@ services:
     volumes:
       - ../backend:/app
 
+  # ── Celery Beat Scheduler (periodic tasks) ────────────────────────────────────
+  # Runs the hourly appointment-reminder sweep and the daily immunization-reminder
+  # sweep defined in app/workers/celery_app.py beat_schedule.
+  # Only ONE beat instance must run at a time — do not scale this service.
+  worker-beat:
+    build:
+      context: ../backend
+      dockerfile: ../infra/docker/Dockerfile.worker
+    command: celery -A app.workers.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+    env_file:
+      - ../backend/.env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://shh_admin:SmartHealthHub@db:5432/smarthealthhub
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+      - api
+    restart: unless-stopped
+    volumes:
+      - ../backend:/app
+
   # ── PostgreSQL Database ───────────────────────────────────────────────────────
   db:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: smarthealthhub
       POSTGRES_USER: shh_admin
@@ -74,10 +96,16 @@ services:
       retries: 10
 
   # ── Redis (Celery broker + backend) ──────────────────────────────────────────
+  # Host port pinned to 6380 (not 6379) — an unrelated project's Redis
+  # container was already squatting on the host's default 6379, causing
+  # intermittent ECONNRESET against the wrong Redis instance. Container-to-
+  # container traffic (api/worker services using redis://redis:6379/0) is
+  # unaffected since that resolves over the Docker network, not this mapping.
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "6380:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s

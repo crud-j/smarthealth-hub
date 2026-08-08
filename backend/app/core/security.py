@@ -32,10 +32,14 @@ Security notes:
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Annotated, Any
 
+import asyncio
+
+import redis.asyncio as aioredis
 from fastapi import Cookie, Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import ExpiredSignatureError, JWTError, jwt
@@ -51,6 +55,123 @@ from app.models.user import User
 
 if TYPE_CHECKING:
     pass  # kept for any future TYPE_CHECKING-only imports
+
+_logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Redis connection pool (lazy singleton) for JTI revocation blocklist
+# ---------------------------------------------------------------------------
+
+_redis_pool: aioredis.Redis | None = None
+
+
+def _get_redis() -> aioredis.Redis:
+    """
+    Return a lazy-initialised async Redis client backed by a connection pool.
+
+    The first call creates the pool; subsequent calls reuse it.  If Redis is
+    unavailable at call time, the caller catches the ConnectionError.
+
+    Explicit socket timeouts are required here: without them a stalled
+    connection (e.g. a Docker Desktop port-forward that accepted the TCP
+    handshake but silently drops the actual read/write) blocks on the OS's
+    default TCP timeout — observed at ~30s locally, long enough to trip
+    downstream proxy timeouts on every authenticated request. The whole
+    point of the try/except graceful-degradation around every caller is
+    defeated if the call itself has no ceiling on how long it can hang.
+    """
+    global _redis_pool
+    if _redis_pool is None:
+        _redis_pool = aioredis.from_url(
+            settings.REDIS_URL,
+            encoding="utf-8",
+            decode_responses=True,
+            socket_connect_timeout=2,
+            socket_timeout=2,
+            max_connections=20,
+        )
+    return _redis_pool
+
+
+def get_shared_redis() -> aioredis.Redis:
+    """
+    Public accessor for the shared async Redis pool.
+
+    Other modules (e.g. mfa_service's dev-OTP helper, the dev-otp endpoint)
+    should use this instead of opening their own one-off Redis connections.
+    A per-call connection that's opened and closed on every request adds up
+    fast under Windows' dynamic port range and was the proximate cause of a
+    transient WSAENOBUFS crash (socket buffer exhaustion) during a heavy
+    dev/test session — see the socket-hang-up incident in the Remediation
+    Plan history. Reusing one pooled connection avoids the churn entirely.
+    """
+    return _get_redis()
+
+
+# ---------------------------------------------------------------------------
+# JTI revocation helpers
+# ---------------------------------------------------------------------------
+
+
+async def revoke_token(jti: str, ttl_seconds: int) -> None:
+    """
+    Mark a JWT JTI as revoked in Redis with the given TTL.
+
+    Redis key: ``revoked:jti:{jti}``
+
+    On Redis error: logs a WARNING and returns — revocation is best-effort
+    during Redis outages (acceptable on an internal BHC LAN).
+
+    Args:
+        jti:         The ``jti`` claim from the JWT payload (UUID string).
+        ttl_seconds: How long to keep the blocklist entry — should match
+                     the token's remaining lifetime so the entry auto-expires.
+    """
+    if ttl_seconds <= 0:
+        return  # token is already expired — nothing to revoke
+    try:
+        r = _get_redis()
+        await r.setex(f"revoked:jti:{jti}", ttl_seconds, "1")
+    except (Exception, asyncio.CancelledError) as exc:  # noqa: BLE001
+        # asyncio.CancelledError is BaseException in Python 3.8+ — catch explicitly
+        # so a Windows-side TCP reset (error 10054) on the Redis connection never
+        # propagates out of this function and causes a 500 on the caller's request.
+        _logger.warning(
+            "revoke_token: Redis unavailable — token JTI %s not revoked. "
+            "Short access-token TTL remains the defence. Error: %s",
+            jti,
+            exc,
+        )
+
+
+async def is_token_revoked(jti: str) -> bool:
+    """
+    Check whether a JWT JTI has been revoked (i.e. is in the Redis blocklist).
+
+    On Redis error: logs a WARNING and returns ``False`` (allow the token) —
+    graceful degradation during Redis outages.
+
+    Args:
+        jti: The ``jti`` claim from the JWT payload.
+
+    Returns:
+        ``True`` if the token has been revoked, ``False`` otherwise.
+    """
+    try:
+        r = _get_redis()
+        result = await r.get(f"revoked:jti:{jti}")
+        return result is not None
+    except (Exception, asyncio.CancelledError) as exc:  # noqa: BLE001
+        # asyncio.CancelledError is BaseException in Python 3.8+ — catch explicitly
+        # so a Windows-side TCP reset (error 10054) on the Redis connection never
+        # turns into a 500 on the caller's request. Fail open: allow the token.
+        _logger.warning(
+            "is_token_revoked: Redis unavailable — allowing token (JTI %s). "
+            "Error: %s",
+            jti,
+            exc,
+        )
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +233,7 @@ def create_access_token(subject: str, role: str) -> str:
       sub  — user UUID as string
       role — role name (e.g. "bhw", "admin")
       type — "access"
+      jti  — unique token ID (UUID4) for revocation blocklist lookups
       exp  — expiry timestamp (UTC)
       iat  — issued-at timestamp (UTC)
 
@@ -128,6 +250,7 @@ def create_access_token(subject: str, role: str) -> str:
         "sub": subject,
         "role": role,
         "type": _TOKEN_TYPE_ACCESS,
+        "jti": str(uuid.uuid4()),
         "iat": now,
         "exp": expire,
     }
@@ -277,6 +400,13 @@ async def get_current_user(
         user_id = uuid.UUID(subject)
     except ValueError:
         raise UnauthorizedError("Token contains an invalid user identifier.")
+
+    # Check JTI revocation blocklist (Redis-backed).
+    # If the JTI claim is missing (tokens issued before this feature was added),
+    # we allow them to pass until they naturally expire.
+    jti: str | None = payload.get("jti")
+    if jti and await is_token_revoked(jti):
+        raise UnauthorizedError("Token has been revoked. Please log in again.")
 
     # Load user with role relationship in one query (avoids lazy-load error in async).
     result = await db.execute(

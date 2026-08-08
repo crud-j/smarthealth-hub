@@ -80,6 +80,16 @@ class Settings(BaseSettings):
     EMAIL_FROM_NAME: str = "BHC-Verify"
     EMAIL_USE_TLS: bool = True
 
+    # ── WebAuthn / Passkey ────────────────────────────────────────────────────
+    # WEBAUTHN_RP_ID must match the domain the app is served from (no port).
+    # Use "localhost" for local dev, "bhc.local" for LAN deployment.
+    WEBAUTHN_RP_ID: str = "localhost"
+    # Human-readable name shown in biometric prompts (e.g. Windows Hello dialog).
+    WEBAUTHN_RP_NAME: str = "SmartHealth Hub"
+    # Full origin (scheme + host + port) the browser sees.
+    # Must match exactly — wrong value causes all passkey assertions to fail.
+    WEBAUTHN_ORIGIN: str = "http://localhost:3000"
+
     # ── CORS ──────────────────────────────────────────────────────────────────
     # Must be a JSON array in .env:
     #   CORS_ORIGINS=["http://localhost:3000","http://localhost:8000"]

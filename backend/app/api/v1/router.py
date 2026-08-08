@@ -26,6 +26,7 @@ from app.api.v1.endpoints import (
     immunizations,
     medical_history,
     mfa,
+    passkey,
     patient_photos,
     patients,
     sms,
@@ -37,6 +38,9 @@ api_router = APIRouter()
 # ── Auth & MFA ───────────────────────────────────────────────────────────────
 # auth.router already carries prefix="/auth"
 api_router.include_router(auth.router)
+
+# passkey.router carries prefix="/auth/passkey" (FIDO2/WebAuthn passkey routes)
+api_router.include_router(passkey.router)
 
 # mfa.router already carries prefix="/mfa"
 api_router.include_router(mfa.router)

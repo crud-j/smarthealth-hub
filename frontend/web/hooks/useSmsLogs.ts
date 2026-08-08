@@ -19,6 +19,7 @@ import type {
   SmsLogListParams,
   PaginatedSmsLogs,
   SendManualSmsPayload,
+  SendManualSmsResult,
 } from "@/types/sms";
 
 // ---------------------------------------------------------------------------
@@ -134,23 +135,35 @@ export function useSmsLogList(params: SmsLogListParams = {}) {
 // useSendManualSms — mutation
 // ---------------------------------------------------------------------------
 
+interface ManualSmsSentApiResponse {
+  sms_log_id: string;
+  status: string;
+  error_detail?: string | null;
+}
+
 export function useSendManualSms() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
 
   const sendSms = useCallback(
-    async (payload: SendManualSmsPayload): Promise<SmsLog | null> => {
+    async (payload: SendManualSmsPayload): Promise<SendManualSmsResult | null> => {
       setLoading(true);
       setError(null);
       try {
-        const raw = await apiFetch<SmsLogApiResponse>("/sms/send-manual", {
+        const raw = await apiFetch<ManualSmsSentApiResponse>("/sms/send-manual", {
           method: "POST",
           body: JSON.stringify({
             patient_id: payload.patientId,
             message: payload.message,
+            send_now: payload.sendNow ?? false,
           }),
         });
-        return mapSmsLog(raw);
+        return {
+          smsLogId: raw.sms_log_id,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          status: raw.status as any,
+          errorDetail: raw.error_detail,
+        };
       } catch (err) {
         const apiErr =
           err instanceof ApiError

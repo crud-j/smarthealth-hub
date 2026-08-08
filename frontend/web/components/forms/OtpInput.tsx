@@ -173,6 +173,7 @@ export default function OtpInput({
             e.target.style.borderColor = hasError ? "#ef4444" : "#e2e8f0";
           }}
           style={baseInputStyle}
+          suppressHydrationWarning
         />
       ))}
     </div>

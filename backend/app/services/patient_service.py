@@ -32,7 +32,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import ConflictError, NotFoundError
+from app.core.exceptions import NotFoundError
 from app.core.logging import get_logger
 from app.models.patient import Patient
 from app.schemas.patient import (
@@ -106,6 +106,7 @@ async def list_patients(
     is_senior: bool | None = None,
     is_pwd: bool | None = None,
     is_pregnant: bool | None = None,
+    sort: str | None = None,
 ) -> tuple[list[Patient], int]:
     """
     Return a paginated list of active patients with optional text search and
@@ -125,6 +126,11 @@ async def list_patients(
         is_senior:   If not None, filter by is_senior flag.
         is_pwd:      If not None, filter by is_pwd flag.
         is_pregnant: If not None, filter by is_pregnant flag.
+        sort:        Optional sort key. ``"created_at"`` orders newest-first
+                     (used by the dashboard "Recently Registered Patients"
+                     panel). Any other value (or None) preserves the default
+                     alphabetical (last_name, first_name) ordering used by
+                     the patient list/search UI.
 
     Returns:
         Tuple of (list of Patient ORM objects, total_count).
@@ -152,11 +158,17 @@ async def list_patients(
     )
     total: int = count_result.scalar_one()
 
-    # Paginated fetch ordered by last_name, first_name
+    # Paginated fetch — default ordering is alphabetical (last_name, first_name);
+    # sort="created_at" orders newest-registered-first for the dashboard panel.
     offset = (page - 1) * page_size
+    order_by_clause = (
+        (Patient.created_at.desc(),)
+        if sort == "created_at"
+        else (Patient.last_name, Patient.first_name)
+    )
     paginated_query = (
         base_query
-        .order_by(Patient.last_name, Patient.first_name)
+        .order_by(*order_by_clause)
         .offset(offset)
         .limit(page_size)
     )
@@ -187,20 +199,37 @@ async def create_patient(
     data: PatientCreate,
     created_by_id: uuid.UUID,
     ip_address: str | None = None,
-) -> Patient:
+    confirm_duplicate: bool = False,
+) -> tuple[Patient | None, list[Patient]]:
     """
     Register a new patient.
 
-    Steps:
+    Duplicate detection matches same last_name + first_name + birth_date
+    (case-insensitive) against active patients.
+
+    Behaviour:
+      - No duplicate found: registers normally. Returns ``(patient, [])``.
+      - Duplicate found, ``confirm_duplicate=False`` (default): the record is
+        NOT created. Returns ``(None, matches)`` so the caller (endpoint) can
+        surface the match(es) to the registering user as a warning. The
+        frontend re-submits the identical payload with
+        ``confirm_duplicate=True`` to bypass — gated to the Admin role.
+      - Duplicate found, ``confirm_duplicate=True``: the check is bypassed
+        and registration proceeds, with an additional
+        ``{"confirmed_duplicate": true}`` note in the CREATE audit log
+        metadata so the override is traceable in the audit trail.
+
+    Steps (on successful registration):
     1. Auto-generate a unique patient_code (BHC-YYYY-NNNNNN).
     2. Compute is_senior from birth_date (True if age >= 60).
     3. Persist the Patient row.
     4. Write a CREATE audit log entry.
     5. Flush and return the ORM instance.
 
-    Raises:
-        ConflictError: If a patient with the same name + birth_date already
-                       exists (duplicate detection — soft safeguard).
+    Returns:
+        A ``(patient, matches)`` tuple where exactly one side is populated:
+        ``(Patient, [])`` on success, or ``(None, [Patient, ...])`` when a
+        duplicate warning was returned instead of creating a record.
     """
     # Duplicate detection: same last_name + first_name + birth_date (case-insensitive)
     dup_check = await db.execute(
@@ -211,13 +240,18 @@ async def create_patient(
             Patient.is_active.is_(True),
         )
     )
-    existing: Patient | None = dup_check.scalar_one_or_none()
-    if existing is not None:
-        raise ConflictError(
-            f"A patient named '{data.first_name} {data.last_name}' with birth date "
-            f"{data.birth_date} already exists (code: {existing.patient_code}). "
-            "If this is a different person, please verify the details."
+    matches: list[Patient] = list(dup_check.scalars().all())
+
+    if matches and not confirm_duplicate:
+        logger.info(
+            "Duplicate patient warning returned (not confirmed)",
+            extra={
+                "name": f"{data.last_name}, {data.first_name}",
+                "birth_date": str(data.birth_date),
+                "match_count": len(matches),
+            },
         )
+        return None, matches
 
     patient_code = await _next_patient_code(db)
     age = _compute_age(data.birth_date)
@@ -247,13 +281,21 @@ async def create_patient(
     db.add(patient)
     await db.flush()  # assigns patient.id before audit log
 
+    audit_metadata: dict[str, Any] = {
+        "patient_code": patient_code,
+        "name": f"{data.last_name}, {data.first_name}",
+    }
+    if matches and confirm_duplicate:
+        audit_metadata["confirmed_duplicate"] = True
+        audit_metadata["duplicate_of"] = [str(m.id) for m in matches]
+
     await write_audit_log(
         db=db,
         user_id=created_by_id,
         action="CREATE",
         entity_type="patient",
         entity_id=patient.id,
-        metadata={"patient_code": patient_code, "name": f"{data.last_name}, {data.first_name}"},
+        metadata=audit_metadata,
         ip_address=ip_address,
     )
 
@@ -265,9 +307,10 @@ async def create_patient(
         extra={
             "patient_code": patient_code,
             "created_by": str(created_by_id),
+            "confirmed_duplicate": bool(matches and confirm_duplicate),
         },
     )
-    return patient
+    return patient, []
 
 
 async def update_patient(

@@ -529,3 +529,128 @@ async def test_sms_webhook_unknown_message_id(client):
     assert data["received"] is True
     assert data["processed"] is False
     assert data["reason"] == "not_found"
+
+
+# ---------------------------------------------------------------------------
+# HTTP: SMS webhook HMAC signature verification (Prompt 14, item 1 / L-3)
+#
+# app.api.v1.endpoints.sms.settings is the module-level `settings` object
+# imported into the endpoint file — patching its SEMAPHORE_WEBHOOK_SECRET
+# attribute (rather than app.core.config.settings) is what the endpoint
+# actually reads at request time.
+# ---------------------------------------------------------------------------
+
+
+def _hmac_signature(secret: str, body: bytes) -> str:
+    """Compute the X-Semaphore-Signature the webhook handler expects."""
+    import hashlib
+    import hmac as hmac_lib
+
+    return hmac_lib.new(secret.encode(), body, hashlib.sha256).hexdigest()
+
+
+@pytest.mark.asyncio
+async def test_sms_webhook_hmac_correct_signature_updates_log(client, db_session, queued_sms_log):
+    """
+    With SEMAPHORE_WEBHOOK_SECRET set, a request bearing a correctly computed
+    X-Semaphore-Signature header is accepted (200) and the sms_log row is
+    updated.
+    """
+    import json
+
+    from app.api.v1.endpoints import sms as sms_endpoint
+
+    queued_sms_log.status = "sent"
+    queued_sms_log.provider_message_id = "hmac-correct-001"
+    await db_session.commit()
+
+    secret = "test-semaphore-webhook-secret"
+    payload = {"message_id": "hmac-correct-001", "status": "Delivered"}
+    body = json.dumps(payload).encode()
+    signature = _hmac_signature(secret, body)
+
+    with patch.object(sms_endpoint.settings, "SEMAPHORE_WEBHOOK_SECRET", secret):
+        resp = await client.post(
+            "/api/v1/sms/webhook/delivery-status",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Semaphore-Signature": signature,
+            },
+        )
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["received"] is True
+    assert data["processed"] is True
+
+    await db_session.refresh(queued_sms_log)
+    assert queued_sms_log.status == "delivered"
+
+
+@pytest.mark.asyncio
+async def test_sms_webhook_hmac_wrong_signature_returns_403(client, db_session, queued_sms_log):
+    """
+    With SEMAPHORE_WEBHOOK_SECRET set, a request bearing an incorrect
+    X-Semaphore-Signature header is rejected with 403 and the sms_log row is
+    left untouched (possible forgery — never trust an unverified callback).
+    """
+    import json
+
+    from app.api.v1.endpoints import sms as sms_endpoint
+
+    queued_sms_log.status = "sent"
+    queued_sms_log.provider_message_id = "hmac-wrong-001"
+    await db_session.commit()
+
+    secret = "test-semaphore-webhook-secret"
+    payload = {"message_id": "hmac-wrong-001", "status": "Delivered"}
+    body = json.dumps(payload).encode()
+    wrong_signature = _hmac_signature("a-completely-different-secret", body)
+
+    with patch.object(sms_endpoint.settings, "SEMAPHORE_WEBHOOK_SECRET", secret):
+        resp = await client.post(
+            "/api/v1/sms/webhook/delivery-status",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                "X-Semaphore-Signature": wrong_signature,
+            },
+        )
+
+    assert resp.status_code == 403, resp.text
+
+    await db_session.refresh(queued_sms_log)
+    assert queued_sms_log.status == "sent"  # unchanged — request was rejected
+
+
+@pytest.mark.asyncio
+async def test_sms_webhook_no_signature_when_secret_empty_returns_200(
+    client, db_session, queued_sms_log
+):
+    """
+    With SEMAPHORE_WEBHOOK_SECRET left empty (the default — Semaphore has not
+    issued a webhook secret), a request with no X-Semaphore-Signature header
+    is accepted (200) and processed normally.  Verification is skipped and a
+    WARNING is logged once per process startup, not per request.
+    """
+    from app.api.v1.endpoints import sms as sms_endpoint
+
+    queued_sms_log.status = "sent"
+    queued_sms_log.provider_message_id = "hmac-no-secret-001"
+    await db_session.commit()
+
+    with patch.object(sms_endpoint.settings, "SEMAPHORE_WEBHOOK_SECRET", ""):
+        resp = await client.post(
+            "/api/v1/sms/webhook/delivery-status",
+            json={"message_id": "hmac-no-secret-001", "status": "Delivered"},
+            # Intentionally no X-Semaphore-Signature header.
+        )
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["received"] is True
+    assert data["processed"] is True
+
+    await db_session.refresh(queued_sms_log)
+    assert queued_sms_log.status == "delivered"

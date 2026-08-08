@@ -70,13 +70,13 @@ async def _load_sms_log_and_send(sms_log_id: str) -> dict:  # type: ignore[type-
 
     from sqlalchemy import select
 
-    from app.db.session import AsyncSessionLocal
     from app.models.sms_log import SmsLog
     from app.services.sms_service import SMSService
+    from app.workers.db import CelerySessionLocal
 
     sms_log_uuid = uuid.UUID(sms_log_id)
 
-    async with AsyncSessionLocal() as db:
+    async with CelerySessionLocal() as db:
         # Load the sms_log row.
         result = await db.execute(
             select(SmsLog).where(SmsLog.id == sms_log_uuid)

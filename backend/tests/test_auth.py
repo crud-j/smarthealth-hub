@@ -307,13 +307,21 @@ async def test_refresh_token_returns_new_access_token(
     """
     POST /auth/refresh with a valid refresh token (in JSON body) should return
     HTTP 200 with a fresh access_token.
+
+    Since refresh token rotation tracking is now enforced, the user row must
+    have refresh_token_hash pre-populated with the SHA-256 hash of the token
+    we intend to use.
     """
+    import hashlib
+
     from app.core.security import create_refresh_token
 
     user = await _create_staff_user(db_session, email="refresh@test.example.com")
-    await db_session.commit()
 
     refresh_tok = create_refresh_token(subject=str(user.id))
+    # Store the hash so the rotation check passes.
+    user.refresh_token_hash = hashlib.sha256(refresh_tok.encode()).hexdigest()
+    await db_session.commit()
 
     resp = await client.post(
         REFRESH_URL,
@@ -378,4 +386,147 @@ async def test_logout_returns_200_and_clears_cookies(
     # FastAPI's delete_cookie sets max-age=0 to expire the cookie.
     assert access_cookie_cleared, (
         f"Expected access_token cookie to be cleared. Set-Cookie headers: {set_cookie_headers}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task 3 — JWT revocation blocklist tests
+# ---------------------------------------------------------------------------
+
+
+async def test_revoked_access_token_returns_401(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """
+    After POST /auth/logout, the same access token should be rejected with 401
+    on any subsequent protected request (JTI is in Redis blocklist).
+
+    Mocks the Redis revocation calls so this test runs without a real Redis
+    instance.  If a real Redis is available (via conftest), the mock is not
+    strictly necessary but won't interfere.
+    """
+    from unittest.mock import AsyncMock, patch
+
+    from app.core.security import create_access_token
+
+    user = await _create_staff_user(db_session, email="revoke_test@test.example.com")
+    await db_session.commit()
+
+    token = create_access_token(subject=str(user.id), role="bhw")
+
+    # Track which JTI gets revoked so we can simulate is_token_revoked returning True.
+    revoked_jtis: set[str] = set()
+
+    async def fake_revoke(jti: str, ttl_seconds: int) -> None:
+        revoked_jtis.add(jti)
+
+    async def fake_is_revoked(jti: str) -> bool:
+        return jti in revoked_jtis
+
+    with (
+        patch("app.api.v1.endpoints.auth.revoke_token", side_effect=fake_revoke),
+        patch("app.core.security.is_token_revoked", side_effect=fake_is_revoked),
+    ):
+        # Logout — should revoke the JTI.
+        logout_resp = await client.post(
+            LOGOUT_URL,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert logout_resp.status_code == 200
+
+        # Using the same token on a protected endpoint should now return 401.
+        # We use POST /auth/change-password as a convenient protected endpoint
+        # (it requires authentication but we don't need it to succeed — 401 is
+        # the expected outcome because the token is revoked).
+        protected_resp = await client.post(
+            "/api/v1/auth/change-password",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "current_password": "TestPass1!",
+                "new_password": "NewPass2@",
+            },
+        )
+        assert protected_resp.status_code == 401
+        assert "revoked" in protected_resp.json()["error"]["message"].lower()
+
+
+async def test_rotated_refresh_token_returns_401(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """
+    After a successful POST /auth/refresh (which rotates the refresh token),
+    the OLD refresh token should be rejected with 401 on a second rotation
+    attempt — the stored hash now points to the new token.
+    """
+    import hashlib
+
+    from app.core.security import create_refresh_token
+
+    user = await _create_staff_user(db_session, email="rotation_test@test.example.com")
+
+    original_refresh = create_refresh_token(subject=str(user.id))
+    user.refresh_token_hash = hashlib.sha256(original_refresh.encode()).hexdigest()
+    await db_session.commit()
+
+    # First rotation — should succeed and return a new refresh token.
+    resp1 = await client.post(
+        REFRESH_URL,
+        json={"refresh_token": original_refresh},
+    )
+    assert resp1.status_code == 200
+
+    # Second rotation attempt using the original (now superseded) token.
+    # The stored hash now points to the new token issued in the first rotation.
+    resp2 = await client.post(
+        REFRESH_URL,
+        json={"refresh_token": original_refresh},
+    )
+    assert resp2.status_code == 401
+    error_msg = resp2.json()["error"]["message"].lower()
+    assert any(
+        phrase in error_msg
+        for phrase in ("superseded", "revoked", "log in again")
+    )
+
+
+async def test_logout_then_refresh_returns_401(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """
+    After POST /auth/logout clears refresh_token_hash, a POST /auth/refresh
+    with the captured refresh token should return 401 — the hash is NULL so
+    the rotation check fails.
+    """
+    import hashlib
+
+    from app.core.security import create_access_token, create_refresh_token
+
+    user = await _create_staff_user(db_session, email="logout_refresh_test@test.example.com")
+
+    refresh_tok = create_refresh_token(subject=str(user.id))
+    user.refresh_token_hash = hashlib.sha256(refresh_tok.encode()).hexdigest()
+    await db_session.commit()
+
+    # Logout using the access token.
+    access_tok = create_access_token(subject=str(user.id), role="bhw")
+    logout_resp = await client.post(
+        LOGOUT_URL,
+        headers={"Authorization": f"Bearer {access_tok}"},
+    )
+    assert logout_resp.status_code == 200
+
+    # Attempt to refresh using the pre-logout refresh token.
+    # refresh_token_hash is now NULL → should be rejected.
+    refresh_resp = await client.post(
+        REFRESH_URL,
+        json={"refresh_token": refresh_tok},
+    )
+    assert refresh_resp.status_code == 401
+    error_msg = refresh_resp.json()["error"]["message"].lower()
+    assert any(
+        phrase in error_msg
+        for phrase in ("superseded", "revoked", "log in again")
     )

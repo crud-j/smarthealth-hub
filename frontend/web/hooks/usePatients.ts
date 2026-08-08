@@ -16,6 +16,7 @@
  *  usePatient(id)           — single patient by ID
  *  useCreatePatient()       — mutation: POST /patients
  *  useUpdatePatient(id)     — mutation: PUT  /patients/{id}
+ *  useDeactivatePatient()   — mutation: DELETE /patients/{id} (soft-deactivate, Admin only)
  *  usePatientVisits(id)     — list of visit summaries for a patient
  */
 
@@ -24,6 +25,8 @@ import { apiFetch, ApiError } from "@/lib/api-client";
 import type {
   Patient,
   PatientCreatePayload,
+  PatientCreateResult,
+  PatientDuplicateMatch,
   PaginatedPatients,
   PatientSummary,
   PatientUpdatePayload,
@@ -87,6 +90,19 @@ interface PaginatedPatientsApiResponse {
   page_size: number;
 }
 
+interface PatientDuplicateMatchApiResponse {
+  id: string;
+  patient_code: string;
+  full_name: string;
+  birth_date: string;
+}
+
+interface PatientCreateResultApiResponse {
+  duplicate_warning: boolean;
+  matches: PatientDuplicateMatchApiResponse[];
+  patient: PatientApiResponse | null;
+}
+
 interface VisitSummaryApiResponse {
   id: string;
   patient_id: string;
@@ -142,6 +158,15 @@ function mapPatient(r: PatientApiResponse): Patient {
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     photoPath: r.photo_path ?? null,
+  };
+}
+
+function mapDuplicateMatch(r: PatientDuplicateMatchApiResponse): PatientDuplicateMatch {
+  return {
+    id: r.id,
+    patientCode: r.patient_code,
+    fullName: r.full_name,
+    birthDate: r.birth_date,
   };
 }
 
@@ -212,6 +237,7 @@ function toApiPayload(data: PatientCreatePayload): Record<string, unknown> {
     philhealth_member_type: data.philhealthMemberType,
     is_pwd: data.isPwd,
     is_pregnant: data.isPregnant,
+    confirm_duplicate: data.confirmDuplicate ?? false,
   };
 }
 
@@ -329,6 +355,11 @@ export function usePatient(id: string | null) {
 
 // ---------------------------------------------------------------------------
 // useCreatePatient — mutation
+//
+// POST /patients returns a PatientCreateResult wrapper rather than a bare
+// Patient: either duplicateWarning=true with the matched existing patient(s)
+// (no record created), or duplicateWarning=false with the newly created
+// patient. Re-submitting with confirmDuplicate=true bypasses the warning.
 // ---------------------------------------------------------------------------
 
 export function useCreatePatient() {
@@ -336,15 +367,19 @@ export function useCreatePatient() {
   const [error, setError] = useState<ApiError | null>(null);
 
   const createPatient = useCallback(
-    async (payload: PatientCreatePayload): Promise<Patient | null> => {
+    async (payload: PatientCreatePayload): Promise<PatientCreateResult | null> => {
       setLoading(true);
       setError(null);
       try {
-        const raw = await apiFetch<PatientApiResponse>("/patients", {
+        const raw = await apiFetch<PatientCreateResultApiResponse>("/patients", {
           method: "POST",
           body: JSON.stringify(toApiPayload(payload)),
         });
-        return mapPatient(raw);
+        return {
+          duplicateWarning: raw.duplicate_warning,
+          matches: raw.matches.map(mapDuplicateMatch),
+          patient: raw.patient ? mapPatient(raw.patient) : null,
+        };
       } catch (err) {
         const apiErr =
           err instanceof ApiError ? err : new ApiError(String(err), 0, "unknown");
@@ -391,6 +426,33 @@ export function useUpdatePatient(id: string) {
   );
 
   return { updatePatient, loading, error };
+}
+
+// ---------------------------------------------------------------------------
+// useDeactivatePatient — mutation (soft-delete, Admin only)
+// ---------------------------------------------------------------------------
+
+export function useDeactivatePatient() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<ApiError | null>(null);
+
+  const deactivatePatient = useCallback(async (id: string): Promise<boolean> => {
+    setLoading(true);
+    setError(null);
+    try {
+      await apiFetch<void>(`/patients/${id}`, { method: "DELETE" });
+      return true;
+    } catch (err) {
+      const apiErr =
+        err instanceof ApiError ? err : new ApiError(String(err), 0, "unknown");
+      setError(apiErr);
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  return { deactivatePatient, loading, error };
 }
 
 // ---------------------------------------------------------------------------

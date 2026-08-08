@@ -135,9 +135,20 @@ export function useCurrentUser(): {
 export function useLogin(): {
   runStep1: (
     email: string,
-    password: string
-  ) => Promise<{ sessionHint: string }>;
-  runStep2: (userId: string, otpCode: string) => Promise<TokenResponse>;
+    password: string,
+    deviceFingerprint?: string
+  ) => Promise<{
+    sessionHint: string;
+    mfaRequired: boolean;
+    accessToken?: string | null;
+    refreshToken?: string | null;
+  }>;
+  runStep2: (
+    userId: string,
+    otpCode: string,
+    rememberDevice?: boolean,
+    deviceFingerprint?: string
+  ) => Promise<TokenResponse>;
   isLoading: boolean;
   error: string | null;
   clearError: () => void;
@@ -156,14 +167,34 @@ export function useLogin(): {
   const clearError = useCallback(() => setError(null), []);
 
   const runStep1 = useCallback(
-    async (email: string, password: string): Promise<{ sessionHint: string }> => {
+    async (
+      email: string,
+      password: string,
+      deviceFingerprint?: string
+    ): Promise<{
+      sessionHint: string;
+      mfaRequired: boolean;
+      accessToken?: string | null;
+      refreshToken?: string | null;
+    }> => {
       if (mountedRef.current) {
         setIsLoading(true);
         setError(null);
       }
       try {
-        const resp = await loginStep1(email, password);
-        return { sessionHint: resp.session_hint };
+        const resp = await loginStep1(email, password, deviceFingerprint);
+        if (!resp.mfa_required) {
+          // Trusted device recognized — cookies are already set by the
+          // backend and login is effectively complete.
+          _cacheValid = false;
+          _cachedUser = null;
+        }
+        return {
+          sessionHint: resp.session_hint,
+          mfaRequired: resp.mfa_required,
+          accessToken: resp.access_token,
+          refreshToken: resp.refresh_token,
+        };
       } catch (err) {
         const message =
           err instanceof ApiError
@@ -179,13 +210,18 @@ export function useLogin(): {
   );
 
   const runStep2 = useCallback(
-    async (userId: string, otpCode: string): Promise<TokenResponse> => {
+    async (
+      userId: string,
+      otpCode: string,
+      rememberDevice?: boolean,
+      deviceFingerprint?: string
+    ): Promise<TokenResponse> => {
       if (mountedRef.current) {
         setIsLoading(true);
         setError(null);
       }
       try {
-        const resp = await loginStep2(userId, otpCode);
+        const resp = await loginStep2(userId, otpCode, rememberDevice, deviceFingerprint);
         // Invalidate user cache so useCurrentUser re-fetches after login.
         _cacheValid = false;
         _cachedUser = null;

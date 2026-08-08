@@ -5,6 +5,14 @@ const nextConfig: NextConfig = {
   // when testing from a mobile device on the same Wi-Fi network.
   allowedDevOrigins: ["192.168.100.6"],
 
+  // Next's rewrite proxy defaults to a 30s timeout (proxy-request.js).
+  // /auth/login can take longer than that under slow Gmail SMTP conditions
+  // (see email_service.py's 10s SMTP timeout + connection/TLS overhead),
+  // so give the proxy enough headroom to not kill the connection early.
+  experimental: {
+    proxyTimeout: 45000,
+  },
+
   // Proxy all /api/v1/* calls through Next.js so that the FastAPI
   // Set-Cookie response lands on the Next.js origin (port 3000).
   // Without this the cookie is scoped to port 8000 and the Next.js

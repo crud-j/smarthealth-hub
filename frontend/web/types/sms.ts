@@ -46,6 +46,20 @@ export interface PaginatedSmsLogs {
 export interface SendManualSmsPayload {
   patientId: string;
   message: string;
+  /**
+   * false (default): queue via Celery — fast response, but delivery stalls
+   * silently if no worker is running to consume the queue.
+   * true: send synchronously — the request waits for the real Semaphore
+   * result instead of just confirming the row was queued.
+   */
+  sendNow?: boolean;
+}
+
+/** Result of POST /sms/send-manual — mirrors ManualSMSSentResponse. */
+export interface SendManualSmsResult {
+  smsLogId: string;
+  status: SmsStatus;
+  errorDetail?: string | null;
 }
 
 // ---------------------------------------------------------------------------

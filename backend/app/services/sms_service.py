@@ -215,6 +215,19 @@ class SMSService:
                     "body": resp.text[:500],
                 },
             )
+            # Semaphore reports an unapproved/invalid sender name as an HTTP 500,
+            # which would otherwise look "transient" and get retried 3x per
+            # send — pointless, since no amount of retrying fixes an account
+            # still pending sender-name approval. Treat it as permanent so a
+            # bad SEMAPHORE_SENDER_NAME fails fast instead of burning retries.
+            if "sendername" in resp.text.lower():
+                raise SMSPermanentError(
+                    f"Semaphore rejected the configured sender name (HTTP {resp.status_code}). "
+                    "Check SEMAPHORE_SENDER_NAME in .env — it must be an approved sender name "
+                    "on your Semaphore account (approval can take several business days).",
+                    status_code=resp.status_code,
+                    body=resp.text,
+                )
             if resp.status_code >= 500:
                 raise SMSTransientError(
                     f"Semaphore server error (HTTP {resp.status_code})",

@@ -132,7 +132,7 @@ def _send_email_sync(to_address: str, subject: str, html_body: str) -> None:
 
     msg.attach(MIMEText(html_body, "html", "utf-8"))
 
-    with smtplib.SMTP(settings.EMAIL_HOST, settings.EMAIL_PORT) as smtp:
+    with smtplib.SMTP(settings.EMAIL_HOST, settings.EMAIL_PORT, timeout=10) as smtp:
         smtp.ehlo()
         if settings.EMAIL_USE_TLS:
             smtp.starttls()

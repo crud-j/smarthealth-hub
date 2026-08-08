@@ -113,7 +113,44 @@ async def generate_and_store_otp(
         },
     )
 
+    # In non-production environments, store the plain-text OTP in Redis so
+    # the GET /auth/dev-otp/{user_id} endpoint can serve it to E2E tests.
+    # This block is a no-op if Redis is unavailable or ENVIRONMENT=production.
+    await _store_dev_otp(str(user_id), plain_code)
+
     return plain_code
+
+
+async def _store_dev_otp(user_id: str, plain_code: str) -> None:
+    """
+    Write the OTP plaintext to Redis under key ``dev:otp:{user_id}`` with a
+    5-minute TTL.  Called only in development/test environments.
+
+    Silently swallowed on any error — never blocks the auth flow.
+
+    Uses the shared pooled Redis client (app.core.security.get_shared_redis)
+    rather than opening a one-off connection per call — a per-call sync
+    connection here was the proximate cause of a transient Windows socket
+    exhaustion crash (WSAENOBUFS) under sustained request volume.
+    """
+    from app.core.config import settings  # noqa: PLC0415
+
+    if settings.ENVIRONMENT == "production":
+        return
+
+    try:
+        from app.core.security import get_shared_redis  # noqa: PLC0415
+
+        r = get_shared_redis()
+        await r.setex(f"dev:otp:{user_id}", 300, plain_code)  # 5-minute TTL
+    except Exception as exc:  # noqa: BLE001
+        # Redis unavailable in dev — log the OTP to console as fallback
+        logger.debug(
+            "[DEV] OTP for user %s: %s (Redis unavailable: %s)",
+            user_id,
+            plain_code,
+            exc,
+        )
 
 
 async def verify_otp(

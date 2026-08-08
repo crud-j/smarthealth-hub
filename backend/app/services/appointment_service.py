@@ -280,6 +280,7 @@ async def list_appointments(
     to_date: date | None = None,
     page: int = 1,
     page_size: int = 20,
+    sort: str | None = None,
 ) -> tuple[list[AppointmentResponse], int]:
     """
     Return a paginated list of appointments with optional filters.
@@ -292,6 +293,11 @@ async def list_appointments(
         to_date:    Upper bound on scheduled_at (date, inclusive, end-of-day).
         page:       1-based page number.
         page_size:  Records per page (max 100 enforced here).
+        sort:       Optional sort key. ``"scheduled_at"`` orders soonest-first
+                     (ascending) — used by the dashboard "Upcoming Appointments"
+                     panel. Any other value (or None) preserves the default
+                     newest-scheduled-first (descending) ordering used by the
+                     appointments list page.
 
     Returns:
         Tuple of (list of AppointmentResponse, total count matching filters).
@@ -323,9 +329,15 @@ async def list_appointments(
     )
     total: int = count_result.scalar_one()
 
-    # Fetch the page.
+    # Fetch the page. Default: newest-scheduled-first. sort="scheduled_at"
+    # flips to soonest-first (ascending) for the dashboard upcoming panel.
+    order_clause = (
+        Appointment.scheduled_at.asc()
+        if sort == "scheduled_at"
+        else Appointment.scheduled_at.desc()
+    )
     rows_result = await db.execute(
-        base_query.order_by(Appointment.scheduled_at.desc())
+        base_query.order_by(order_clause)
         .offset(offset)
         .limit(page_size)
     )

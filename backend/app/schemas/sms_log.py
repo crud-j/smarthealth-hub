@@ -14,7 +14,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, Field
 
 from app.schemas._base import BaseSchema
 
@@ -62,18 +62,30 @@ class ManualSMSRequest(BaseSchema):
 
     patient_id: uuid.UUID
     message: str
+    send_now: bool = Field(
+        default=False,
+        description=(
+            "False (default): queue via Celery — fast response, actual "
+            "delivery depends on a worker being up and processing the "
+            "queue. True: send synchronously within this request — the "
+            "response waits for the real Semaphore result instead of just "
+            "confirming the row was queued."
+        ),
+    )
 
 
 class ManualSMSSentResponse(BaseSchema):
     """
-    202 Accepted response for POST /sms/send-manual.
+    Response for POST /sms/send-manual.
 
-    Returns the newly created sms_logs row ID so the caller can poll
-    GET /sms/logs to observe delivery status.
+    ``status`` reflects the real outcome for ``send_now=True`` requests
+    ('sent' or 'failed'), or the initial 'queued' state for the default
+    fire-and-forget path.
     """
 
     sms_log_id: uuid.UUID
-    status: str  # always 'queued' at accept time
+    status: str  # 'queued' | 'sent' | 'failed'
+    error_detail: str | None = None
 
 
 class DeliveryWebhookPayload(BaseSchema):

@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     # Avoid circular imports at runtime; only needed for type checkers.
     from app.models.audit_log import AuditLog
     from app.models.mfa_otp import MfaOtp
+    from app.models.passkey_credential import PasskeyCredential
     from app.models.patient import Patient
     from app.models.visit import Visit
 
@@ -156,6 +157,12 @@ class User(Base):
         back_populates="created_by_user",
         foreign_keys="Patient.created_by",
         lazy="noload",
+    )
+    passkey_credentials: Mapped[list["PasskeyCredential"]] = relationship(
+        "PasskeyCredential",
+        back_populates="user",
+        lazy="noload",
+        cascade="all, delete-orphan",
     )
 
     def __repr__(self) -> str:

@@ -25,7 +25,8 @@
 import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useCreatePatient } from "@/hooks/usePatients";
-import type { PatientCreatePayload } from "@/types/patient";
+import { useCurrentUser } from "@/hooks/useAuth";
+import type { PatientCreatePayload, PatientDuplicateMatch } from "@/types/patient";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -175,6 +176,8 @@ function validate(data: Partial<PatientCreatePayload>): FormErrors {
 export default function NewPatientPage() {
   const router = useRouter();
   const { createPatient, loading, error: apiError } = useCreatePatient();
+  const { user: currentUser } = useCurrentUser();
+  const isAdmin = currentUser?.role === "admin";
 
   // Form state
   const [form, setForm] = useState<Partial<PatientCreatePayload>>({
@@ -185,6 +188,16 @@ export default function NewPatientPage() {
   });
   const [errors, setErrors] = useState<FormErrors>({});
   const [submitted, setSubmitted] = useState(false);
+
+  // Duplicate-patient warning (L-2). When POST /patients returns
+  // duplicate_warning=true, we stash the matches here and the last-submitted
+  // payload so "Register Anyway" can resubmit with confirmDuplicate: true
+  // without the user re-typing the form.
+  const [duplicateMatches, setDuplicateMatches] = useState<PatientDuplicateMatch[] | null>(
+    null
+  );
+  const [pendingPayload, setPendingPayload] = useState<PatientCreatePayload | null>(null);
+  const [registerAnywayLoading, setRegisterAnywayLoading] = useState(false);
 
   const set = useCallback(
     (field: keyof PatientCreatePayload, value: unknown) => {
@@ -207,6 +220,7 @@ export default function NewPatientPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitted(true);
+    setDuplicateMatches(null);
 
     const validationErrors = validate(form);
     if (Object.keys(validationErrors).length > 0) {
@@ -233,11 +247,43 @@ export default function NewPatientPage() {
       isPregnant: form.isPregnant ?? false,
     };
 
-    const patient = await createPatient(payload);
-    if (patient) {
-      router.push(`/patients/${patient.id}`);
+    const result = await createPatient(payload);
+    if (!result) return; // apiError already surfaced by the hook
+
+    if (result.duplicateWarning) {
+      // Stash the payload so "Register Anyway" can resubmit without the
+      // Admin re-typing the form.
+      setPendingPayload(payload);
+      setDuplicateMatches(result.matches);
+      return;
+    }
+
+    if (result.patient) {
+      router.push(`/patients/${result.patient.id}`);
     }
   };
+
+  async function handleRegisterAnyway() {
+    if (!pendingPayload || !isAdmin) return;
+    setRegisterAnywayLoading(true);
+    try {
+      const result = await createPatient({
+        ...pendingPayload,
+        confirmDuplicate: true,
+      });
+      if (result?.patient) {
+        setDuplicateMatches(null);
+        router.push(`/patients/${result.patient.id}`);
+      }
+    } finally {
+      setRegisterAnywayLoading(false);
+    }
+  }
+
+  function handleCancelDuplicate() {
+    setDuplicateMatches(null);
+    setPendingPayload(null);
+  }
 
   return (
     <div style={{ maxWidth: 860, margin: "0 auto" }}>
@@ -265,6 +311,84 @@ export default function NewPatientPage() {
           }}
         >
           {apiError.message}
+        </div>
+      )}
+
+      {/* Duplicate-patient warning banner (L-2) */}
+      {duplicateMatches && duplicateMatches.length > 0 && (
+        <div
+          role="alert"
+          style={{
+            padding: "1rem 1.25rem",
+            background: "#fffbeb",
+            border: "1px solid #fcd34d",
+            borderRadius: "0.5rem",
+            marginBottom: "1.25rem",
+          }}
+        >
+          <p style={{ margin: 0, fontSize: "0.9375rem", fontWeight: 700, color: "#92400e" }}>
+            A patient with a similar name and date of birth already exists. Do you
+            want to register anyway?
+          </p>
+          <ul style={{ margin: "0.75rem 0 0", paddingLeft: "1.25rem" }}>
+            {duplicateMatches.map((m) => (
+              <li
+                key={m.id}
+                style={{ fontSize: "0.8125rem", color: "#78350f", marginBottom: "0.25rem" }}
+              >
+                <strong>{m.fullName}</strong> — DOB{" "}
+                {new Date(m.birthDate).toLocaleDateString("en-PH", {
+                  year: "numeric",
+                  month: "long",
+                  day: "numeric",
+                })}{" "}
+                <span style={{ fontFamily: "monospace" }}>({m.patientCode})</span>
+              </li>
+            ))}
+          </ul>
+          <div style={{ display: "flex", gap: "0.625rem", marginTop: "1rem" }}>
+            <button
+              type="button"
+              onClick={handleCancelDuplicate}
+              style={{
+                padding: "0.5rem 1rem",
+                background: "white",
+                border: "1px solid #fcd34d",
+                borderRadius: "0.375rem",
+                fontSize: "0.8125rem",
+                fontWeight: 600,
+                color: "#92400e",
+                cursor: "pointer",
+              }}
+            >
+              Cancel
+            </button>
+            {isAdmin ? (
+              <button
+                type="button"
+                onClick={() => void handleRegisterAnyway()}
+                disabled={registerAnywayLoading}
+                style={{
+                  padding: "0.5rem 1rem",
+                  background: registerAnywayLoading ? "#fbbf24" : "#d97706",
+                  border: "none",
+                  borderRadius: "0.375rem",
+                  fontSize: "0.8125rem",
+                  fontWeight: 600,
+                  color: "white",
+                  cursor: registerAnywayLoading ? "not-allowed" : "pointer",
+                }}
+              >
+                {registerAnywayLoading ? "Registering..." : "Register Anyway"}
+              </button>
+            ) : (
+              <span style={{ fontSize: "0.75rem", color: "#92400e", alignSelf: "center" }}>
+                Only an Admin can bypass this warning. Ask an administrator to
+                review and register this patient if you believe this is a
+                different person.
+              </span>
+            )}
+          </div>
         </div>
       )}
 

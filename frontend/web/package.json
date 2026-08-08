@@ -27,6 +27,8 @@
     "eslint-config-next": "16.2.10",
     "tailwindcss": "^4",
     "@tailwindcss/postcss": "^4",
-    "postcss": "^8"
+    "postcss": "^8",
+    "@playwright/test": "^1.49.0",
+    "wait-on": "^8.0.1"
   }
 }

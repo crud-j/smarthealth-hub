@@ -22,12 +22,15 @@ import uuid
 
 from fastapi import APIRouter, Query, Request, Response, status
 
+from app.core.rate_limit import limiter
 from app.core.security import CurrentUser, require_role
 from app.db.session import DbDep
 from app.models.patient import Patient
 from app.schemas.patient import (
     PaginatedPatients,
     PatientCreate,
+    PatientCreateResult,
+    PatientDuplicateMatch,
     PatientResponse,
     PatientSummary,
     PatientUpdate,
@@ -108,6 +111,7 @@ def _build_patient_response(patient: Patient) -> PatientResponse:
     summary="List / search patients (paginated)",
 )
 async def list_patients(
+    request: Request,
     db: DbDep,
     current_user: CurrentUser,
     q: str | None = Query(None, description="Search by name, patient code, or mobile"),
@@ -116,6 +120,11 @@ async def list_patients(
     is_senior: bool | None = Query(None, description="Filter senior citizens"),
     is_pwd: bool | None = Query(None, description="Filter PWD patients"),
     is_pregnant: bool | None = Query(None, description="Filter pregnant patients"),
+    sort: str | None = Query(
+        None,
+        description="Sort order: 'created_at' for newest-first (dashboard panel); "
+        "omitted defaults to alphabetical by name",
+    ),
 ) -> PaginatedPatients:
     """
     Return a paginated, searchable list of active patients.
@@ -125,7 +134,16 @@ async def list_patients(
 
     Response items are ``PatientSummary`` — no address, guardian, or PhilHealth
     details — safe for all authenticated staff roles.
+
+    Rate limit: 60 requests / minute per IP.
     """
+    ip = _get_client_ip(request) or "unknown"
+    await limiter.check_rate_limit(
+        key=f"patients_list:{ip}",
+        max_attempts=60,
+        window_seconds=60,
+    )
+
     patients, total = await patient_service.list_patients(
         db,
         q=q,
@@ -134,6 +152,7 @@ async def list_patients(
         is_senior=is_senior,
         is_pwd=is_pwd,
         is_pregnant=is_pregnant,
+        sort=sort,
     )
 
     items = [
@@ -150,6 +169,7 @@ async def list_patients(
             is_pwd=p.is_pwd,
             is_pregnant=p.is_pregnant,
             is_active=p.is_active,
+            created_at=p.created_at,
         )
         for p in patients
     ]
@@ -164,30 +184,76 @@ async def list_patients(
 
 @router.post(
     "",
-    response_model=PatientResponse,
+    response_model=PatientCreateResult,
     status_code=status.HTTP_201_CREATED,
-    summary="Register a new patient",
+    summary="Register a new patient (or return a duplicate-patient warning)",
     dependencies=[_BHW_PLUS],
 )
 async def create_patient(
     request: Request,
+    response: Response,
     db: DbDep,
     current_user: CurrentUser,
     payload: PatientCreate,
-) -> PatientResponse:
+) -> PatientCreateResult:
     """
     Register a new patient.
 
     Auto-generates a ``patient_code`` (BHC-YYYY-NNNNNN) and sets ``is_senior``
     based on age at registration.  Writes a CREATE audit log entry.
 
+    **Duplicate detection (L-2):** if an active patient already exists with
+    the same first name, last name, and birth date, no record is created.
+    Instead the response returns ``duplicate_warning=true`` with the matched
+    patient(s) under ``matches`` — HTTP status is overridden to 200 since
+    this is not an error, just a decision point for the caller.  Re-submit
+    the identical payload with ``confirm_duplicate: true`` in the body to
+    bypass the check and register anyway (the frontend restricts this
+    override to the Admin role).
+
     Auth: BHW, Physician/Nurse/Midwife, Admin Staff, Admin.
+
+    Rate limit: 30 requests / minute per authenticated user.
     """
     ip = _get_client_ip(request)
-    patient = await patient_service.create_patient(
-        db, data=payload, created_by_id=current_user.id, ip_address=ip
+    await limiter.check_rate_limit(
+        key=f"patients_create:{current_user.id}",
+        max_attempts=30,
+        window_seconds=60,
     )
-    return _build_patient_response(patient)
+    patient, matches = await patient_service.create_patient(
+        db,
+        data=payload,
+        created_by_id=current_user.id,
+        ip_address=ip,
+        confirm_duplicate=payload.confirm_duplicate,
+    )
+
+    if patient is None:
+        # Duplicate detected and not confirmed — not an error, so override
+        # the default 201 down to 200.
+        response.status_code = status.HTTP_200_OK
+        return PatientCreateResult(
+            duplicate_warning=True,
+            matches=[
+                PatientDuplicateMatch(
+                    id=str(m.id),
+                    patient_code=m.patient_code,
+                    full_name=" ".join(
+                        p for p in (m.first_name, m.middle_name, m.last_name) if p
+                    ),
+                    birth_date=m.birth_date,
+                )
+                for m in matches
+            ],
+            patient=None,
+        )
+
+    return PatientCreateResult(
+        duplicate_warning=False,
+        matches=[],
+        patient=_build_patient_response(patient),
+    )
 
 
 # ---------------------------------------------------------------------------

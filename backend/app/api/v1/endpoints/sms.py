@@ -27,10 +27,11 @@ import uuid
 from datetime import date
 from typing import Annotated
 
-from fastapi import APIRouter, Header, Query, Request
+from fastapi import APIRouter, Header, Query, Request, Response
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.rate_limit import limiter
 from app.core.security import CurrentUser, require_role
 from app.db.session import DbDep
 from app.schemas.sms_log import (
@@ -44,6 +45,10 @@ from app.schemas.sms_log import (
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/sms", tags=["sms"])
+
+# Module-level flag so the "webhook secret not set" warning is logged once
+# per process startup, not on every incoming request.
+_webhook_secret_warned: bool = False
 
 # ---------------------------------------------------------------------------
 # Role shorthands
@@ -120,29 +125,44 @@ async def list_sms_logs(
 @router.post(
     "/send-manual",
     summary="Send an ad-hoc SMS to a patient",
-    status_code=202,
     response_model=ManualSMSSentResponse,
     dependencies=[_send_role],
 )
 async def send_manual_sms(
     body: ManualSMSRequest,
+    request: Request,
+    response: Response,
     db: DbDep,
     current_user: CurrentUser,
 ) -> ManualSMSSentResponse:
     """
-    Enqueue an ad-hoc SMS (announcement, custom reminder) to a patient's
+    Send an ad-hoc SMS (announcement, custom reminder) to a patient's
     registered mobile number.
 
-    Returns HTTP 202 Accepted immediately.  Actual delivery is asynchronous —
-    poll ``GET /sms/logs`` using the returned ``sms_log_id`` to track status.
+    Two delivery modes, selected by ``send_now`` in the request body:
+
+    - ``send_now=False`` (default) — Returns HTTP 202 immediately with
+      ``status="queued"``. Actual delivery happens asynchronously via
+      Celery — poll ``GET /sms/logs`` using the returned ``sms_log_id`` to
+      track status. Fast response, but delivery stalls silently if no
+      Celery worker is running to consume the queue.
+    - ``send_now=True`` — Sends synchronously within this request and
+      returns HTTP 200 once Semaphore has actually responded, with
+      ``status`` set to the real outcome (``"sent"`` or ``"failed"`` —
+      see ``error_detail`` when failed). Slower (~1-3s), no Celery
+      dependency, and the caller gets a definitive result immediately
+      instead of having to poll.
 
     **Required roles:** admin, bhw, physician, admin_staff
+
+    Rate limit: 10 requests / minute per authenticated user.
 
     **Request body:**
     ```json
     {
       "patient_id": "<uuid>",
-      "message": "Your prescription is ready for pickup at the BHC."
+      "message": "Your prescription is ready for pickup at the BHC.",
+      "send_now": false
     }
     ```
 
@@ -150,6 +170,13 @@ async def send_manual_sms(
     - 404 if patient not found or inactive.
     - 422 if patient has no registered mobile number.
     """
+    await limiter.check_rate_limit(
+        key=f"sms_manual:{current_user.id}",
+        max_attempts=10,
+        window_seconds=60,
+    )
+    from datetime import UTC, datetime
+
     from sqlalchemy import select
     from app.core.exceptions import NotFoundError, ValidationError
     from app.models.patient import Patient
@@ -172,7 +199,7 @@ async def send_manual_sms(
             detail={"patient_id": str(body.patient_id)},
         )
 
-    # Create sms_log row (status='queued').
+    # Create sms_log row (status='queued' until we know otherwise).
     sms_log = SmsLog(
         id=uuid.uuid4(),
         patient_id=patient.id,
@@ -185,7 +212,38 @@ async def send_manual_sms(
     sms_log_id = sms_log.id
     await db.commit()
 
-    # Enqueue Celery task (fire-and-forget).
+    if body.send_now:
+        # Send synchronously — no Celery/Redis in the path at all. 200 either
+        # way: the API call itself succeeded in getting a definitive answer
+        # from Semaphore, even if that answer was a rejection — the caller
+        # reads the real outcome from `status`/`error_detail`, not the HTTP
+        # status code.
+        response.status_code = 200
+        from app.services.sms_service import SMSPermanentError, SMSService, SMSTransientError
+
+        try:
+            api_result = await SMSService().send_sms(
+                mobile_number=patient.mobile_number,
+                message=body.message,
+            )
+            sms_log.status = "sent"
+            sms_log.provider_message_id = api_result.get("message_id", "")
+            sms_log.sent_at = datetime.now(tz=UTC)
+            await db.commit()
+            return ManualSMSSentResponse(sms_log_id=sms_log_id, status="sent")
+
+        except (SMSPermanentError, SMSTransientError) as exc:
+            sms_log.status = "failed"
+            sms_log.error_detail = f"{exc} (HTTP {exc.status_code}): {exc.body[:300]}"
+            await db.commit()
+            return ManualSMSSentResponse(
+                sms_log_id=sms_log_id,
+                status="failed",
+                error_detail=str(exc),
+            )
+
+    # Default path — enqueue Celery task (fire-and-forget).
+    response.status_code = 202
     try:
         from app.workers.sms_tasks import send_reminder_task
         send_reminder_task.delay(str(sms_log_id))
@@ -248,6 +306,8 @@ async def sms_delivery_status_webhook(
     # -------------------------------------------------------------------
     # Optional HMAC-SHA256 signature validation
     # -------------------------------------------------------------------
+    global _webhook_secret_warned
+
     if settings.SEMAPHORE_WEBHOOK_SECRET:
         if x_semaphore_signature is None:
             logger.warning(
@@ -268,8 +328,20 @@ async def sms_delivery_status_webhook(
                     "Semaphore webhook signature mismatch — possible forgery",
                     extra={"remote": str(request.client)},
                 )
-                # Return 200 to prevent Semaphore retries, but do not process.
-                return {"received": True, "processed": False, "reason": "invalid_signature"}
+                from fastapi.responses import JSONResponse
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "Invalid webhook signature"},
+                )
+    else:
+        # Secret not configured — skip verification but warn once at startup.
+        if not _webhook_secret_warned:
+            logger.warning(
+                "SEMAPHORE_WEBHOOK_SECRET is not set — webhook delivery callbacks "
+                "are not verified. Set this in backend/.env if Semaphore provides "
+                "a signing secret under Webhooks / Delivery Reports in their dashboard."
+            )
+            _webhook_secret_warned = True
 
     # -------------------------------------------------------------------
     # Update sms_logs row matching the provider_message_id

@@ -46,10 +46,34 @@ class LoginRequest(BaseModel):
         min_length=8,
         description="Account password (never logged or stored in this form).",
     )
+    device_fingerprint: str | None = Field(
+        default=None,
+        max_length=64,
+        description=(
+            "Optional client-generated device fingerprint (see "
+            "frontend/web/app/(auth)/login/page.tsx). If it matches an "
+            "unexpired row in trusted_devices for this user, the OTP step is "
+            "skipped and tokens are issued directly. This is a UX "
+            "convenience only, NOT a cryptographic device attestation — the "
+            "OTP flow remains the authoritative second factor."
+        ),
+    )
 
 
 class LoginResponse(BaseModel):
-    """Returned after successful credential validation; OTP has been dispatched."""
+    """
+    Returned after credential validation.
+
+    Two outcomes, distinguished by ``mfa_required``:
+      - ``mfa_required=True`` (default): an OTP has been dispatched; the
+        caller proceeds to POST /auth/verify-otp with ``session_hint``.
+      - ``mfa_required=False``: a trusted device was recognized
+        (``device_fingerprint`` matched an unexpired trusted_devices row).
+        OTP was skipped and ``access_token`` / ``refresh_token`` are
+        populated directly — the caller should redirect straight to the
+        dashboard instead of navigating to /verify-otp. Cookies are also set
+        on this response.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -63,6 +87,19 @@ class LoginResponse(BaseModel):
             "User's UUID — pass this as ``user_id`` to /auth/verify-otp. "
             "This is not a secret; the OTP itself is the second factor."
         ),
+    )
+    mfa_required: bool = Field(
+        default=True,
+        description="False when a trusted device let login skip the OTP step.",
+    )
+    access_token: str | None = Field(
+        default=None, description="Populated only when mfa_required is False."
+    )
+    refresh_token: str | None = Field(
+        default=None, description="Populated only when mfa_required is False."
+    )
+    token_type: str | None = Field(
+        default=None, description="Populated only when mfa_required is False."
     )
 
 
@@ -87,6 +124,20 @@ class VerifyOtpRequest(BaseModel):
         pattern=r"^\d{6}$",
         description="6-digit numeric OTP sent via SMS.",
         examples=["123456"],
+    )
+    remember_device: bool = Field(
+        default=False,
+        description=(
+            "If True and the OTP verifies successfully, the supplied "
+            "device_fingerprint is stored in trusted_devices for 30 days so "
+            "future logins from the same browser can skip the OTP step. "
+            "UX convenience only — see LoginRequest.device_fingerprint docs."
+        ),
+    )
+    device_fingerprint: str | None = Field(
+        default=None,
+        max_length=64,
+        description="Same client-generated fingerprint sent to /auth/login. Required for remember_device to take effect.",
     )
 
 

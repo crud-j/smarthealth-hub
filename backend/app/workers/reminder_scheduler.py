@@ -81,10 +81,10 @@ async def _dispatch_appointment_reminders_async() -> int:
     Returns the number of sms_log rows newly created (for logging).
     """
     from sqlalchemy import select, not_, exists, text
-    from app.db.session import AsyncSessionLocal
     from app.models.appointment import Appointment
     from app.models.patient import Patient
     from app.models.sms_log import SmsLog
+    from app.workers.db import CelerySessionLocal
 
     lead_hours = settings.SMS_REMINDER_LEAD_HOURS
     now = datetime.now(tz=UTC)
@@ -93,7 +93,7 @@ async def _dispatch_appointment_reminders_async() -> int:
 
     queued_count = 0
 
-    async with AsyncSessionLocal() as db:
+    async with CelerySessionLocal() as db:
         # Find appointments in the reminder window that have not yet had
         # an sms_log created for them (status queued / sent / delivered).
         existing_sms_subq = (
@@ -176,10 +176,10 @@ async def _dispatch_immunization_reminders_async() -> int:
     Returns the number of sms_log rows newly created.
     """
     from sqlalchemy import and_, func, not_, exists, select
-    from app.db.session import AsyncSessionLocal
     from app.models.immunization import Immunization
     from app.models.patient import Patient
     from app.models.sms_log import SmsLog
+    from app.workers.db import CelerySessionLocal
 
     lead_days = settings.SMS_IMMUNIZATION_LEAD_DAYS
     target_date: date = (datetime.now(tz=UTC) + timedelta(days=lead_days)).date()
@@ -187,7 +187,7 @@ async def _dispatch_immunization_reminders_async() -> int:
 
     queued_count = 0
 
-    async with AsyncSessionLocal() as db:
+    async with CelerySessionLocal() as db:
         # Idempotency: skip if there's already an sms_log for this patient
         # today whose message contains the word "immunization".
         existing_today_subq = (

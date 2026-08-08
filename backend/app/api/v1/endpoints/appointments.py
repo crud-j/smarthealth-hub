@@ -25,6 +25,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
 
+from app.core.rate_limit import limiter
 from app.core.security import CurrentUser, require_role
 from app.db.session import DbDep
 from app.schemas.appointment import (
@@ -68,6 +69,8 @@ async def create_appointment(
 
     **Required roles:** admin, bhw, physician
 
+    Rate limit: 30 requests / minute per authenticated user.
+
     **Request body:**
     ```json
     {
@@ -84,6 +87,11 @@ async def create_appointment(
     - 404 if patient_id does not exist or patient is inactive.
     - 422 if scheduled_at is in the past.
     """
+    await limiter.check_rate_limit(
+        key=f"appointments_create:{current_user.id}",
+        max_attempts=30,
+        window_seconds=60,
+    )
     return await appointment_service.create_appointment(
         db=db,
         data=body,
@@ -109,10 +117,15 @@ async def list_appointments(
     to_date: Annotated[date | None, Query(description="Upper bound on scheduled_at (YYYY-MM-DD)")] = None,
     page: Annotated[int, Query(ge=1, description="Page number (1-based)")] = 1,
     page_size: Annotated[int, Query(ge=1, le=100, description="Records per page (max 100)")] = 20,
+    sort: Annotated[
+        str | None,
+        Query(description="'scheduled_at' sorts soonest-first (ascending); omitted defaults to newest-first"),
+    ] = None,
 ) -> PaginatedAppointments:
     """
     Return a paginated, filterable list of appointments sorted by
-    ``scheduled_at`` descending.
+    ``scheduled_at`` descending by default (pass ``sort=scheduled_at`` for
+    ascending / soonest-first order, used by the dashboard upcoming panel).
 
     All query parameters are optional — omitting all filters returns all
     appointments (paginated).
@@ -127,6 +140,7 @@ async def list_appointments(
         to_date=to_date,
         page=page,
         page_size=page_size,
+        sort=sort,
     )
     return PaginatedAppointments(
         items=items,

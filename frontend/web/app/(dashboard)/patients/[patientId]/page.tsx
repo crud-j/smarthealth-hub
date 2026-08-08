@@ -18,10 +18,52 @@
  */
 
 import Link from "next/link";
-import { usePatient, usePatientVisits } from "@/hooks/usePatients";
+import { useRouter } from "next/navigation";
+import { usePatient, usePatientVisits, useDeactivatePatient } from "@/hooks/usePatients";
+import { useCurrentUser } from "@/hooks/useAuth";
 import type { VisitSummary } from "@/types/patient";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import ProfilePhotoUploader from "@/app/(dashboard)/patients/_components/ProfilePhotoUploader";
+
+// ---------------------------------------------------------------------------
+// Inline toast (matches the pattern used by ProfilePhotoUploader — avoids
+// pulling in an external toast dependency)
+// ---------------------------------------------------------------------------
+
+interface ToastState {
+  message: string;
+  kind: "success" | "error";
+}
+
+function Toast({ toast, onDismiss }: { toast: ToastState; onDismiss: () => void }) {
+  useEffect(() => {
+    const timer = window.setTimeout(onDismiss, 4000);
+    return () => window.clearTimeout(timer);
+  }, [onDismiss]);
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      style={{
+        position: "fixed",
+        bottom: 24,
+        right: 24,
+        zIndex: 50,
+        padding: "0.75rem 1.25rem",
+        borderRadius: "0.5rem",
+        fontSize: "0.875rem",
+        fontWeight: 500,
+        color: "white",
+        background: toast.kind === "success" ? "#16a34a" : "#dc2626",
+        boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+        maxWidth: 320,
+      }}
+    >
+      {toast.message}
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Helper: format date strings
@@ -162,12 +204,37 @@ export default function PatientProfilePage({
 }) {
   // Next.js 15: params is a Promise — use React.use() to unwrap
   const { patientId } = React.use(params);
+  const router = useRouter();
   const { data: patient, loading, error } = usePatient(patientId);
   const {
     data: visits,
     loading: visitsLoading,
     error: visitsError,
   } = usePatientVisits(patientId);
+  const { user: currentUser } = useCurrentUser();
+  const { deactivatePatient, loading: deactivating } = useDeactivatePatient();
+  const [toast, setToast] = useState<ToastState | null>(null);
+
+  const isAdmin = currentUser?.role === "admin";
+
+  async function handleDeactivate() {
+    if (
+      !confirm(
+        "This will mark the patient as inactive. They will no longer appear in search results. Continue?"
+      )
+    ) {
+      return;
+    }
+    const ok = await deactivatePatient(patientId);
+    if (ok) {
+      router.push("/patients");
+    } else {
+      setToast({
+        message: "Could not deactivate patient. Please try again.",
+        kind: "error",
+      });
+    }
+  }
 
   // Track the current patient photo URL so the profile header updates after upload.
   const apiBase =
@@ -307,8 +374,29 @@ export default function PatientProfilePage({
           >
             Verify
           </Link>
+          {isAdmin && patient.isActive && (
+            <button
+              type="button"
+              onClick={() => void handleDeactivate()}
+              disabled={deactivating}
+              style={{
+                padding: "0.5rem 1rem",
+                background: deactivating ? "#fca5a5" : "#fef2f2",
+                border: "1px solid #fca5a5",
+                borderRadius: "0.375rem",
+                fontSize: "0.875rem",
+                fontWeight: 600,
+                color: "#dc2626",
+                cursor: deactivating ? "not-allowed" : "pointer",
+              }}
+            >
+              {deactivating ? "Deactivating..." : "Deactivate Patient"}
+            </button>
+          )}
         </div>
       </div>
+
+      {toast && <Toast toast={toast} onDismiss={() => setToast(null)} />}
 
       {/* Demographics card */}
       <div

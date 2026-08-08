@@ -14,39 +14,8 @@
  */
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
 import { useVaccinationCoverage, useDashboardOverview } from "@/hooks/useAnalytics";
-import { useWebWorker } from "@/hooks/useWebWorker";
 import VaccinationCoverageChart from "@/components/charts/VaccinationCoverageChart";
-import PatientVisitsChart from "@/components/charts/PatientVisitsChart";
-import type {
-  AnalyticsAggregatorApi,
-  TimeSeriesPoint,
-} from "@/workers/analyticsAggregator.worker";
-
-// ---------------------------------------------------------------------------
-// Synchronous fallback for groupByWeek (used when Worker is unavailable)
-// ---------------------------------------------------------------------------
-
-function groupByWeekSync(records: { date: string }[]): TimeSeriesPoint[] {
-  const counts: Record<string, number> = {};
-  for (const r of records) {
-    const d = new Date(r.date);
-    const year = d.getUTCFullYear();
-    const startOfYear = new Date(Date.UTC(year, 0, 1));
-    const week = Math.ceil(
-      ((d.getTime() - startOfYear.getTime()) / 86_400_000 +
-        startOfYear.getUTCDay() +
-        1) /
-        7
-    );
-    const key = `${year}-W${String(week).padStart(2, "0")}`;
-    counts[key] = (counts[key] ?? 0) + 1;
-  }
-  return Object.entries(counts)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([label, value]) => ({ label, value }));
-}
 
 // ---------------------------------------------------------------------------
 // Sub-page navigation cards
@@ -78,41 +47,7 @@ function SubPageCard({
 
 export default function AnalyticsPage() {
   const { data: coverageData, loading: coverageLoading } = useVaccinationCoverage();
-  const { data: overviewData } = useDashboardOverview();
-
-  // analyticsAggregator worker for visit grouping
-  const aggregator = useWebWorker<AnalyticsAggregatorApi>(
-    new URL("../../../workers/analyticsAggregator.worker.ts", import.meta.url)
-  );
-
-  const [visitPoints, setVisitPoints] = useState<TimeSeriesPoint[]>([]);
-  const [aggregating, setAggregating] = useState(false);
-
-  // When overview data arrives, aggregate visits into weekly series
-  useEffect(() => {
-    if (!overviewData) return;
-
-    // Build date records from recent patients (as a proxy for visit activity)
-    // In a real impl this would come from a dedicated visits-over-time endpoint.
-    // Here we use recentPatients.createdAt as a demonstration.
-    const records = overviewData.recentPatients.map((p) => ({
-      date: p.createdAt,
-    }));
-
-    setAggregating(true);
-
-    if (aggregator) {
-      aggregator
-        .groupByWeek(records)
-        .then(setVisitPoints)
-        .catch(() => setVisitPoints(groupByWeekSync(records)))
-        .finally(() => setAggregating(false));
-    } else {
-      // Synchronous fallback
-      setVisitPoints(groupByWeekSync(records));
-      setAggregating(false);
-    }
-  }, [overviewData, aggregator]);
+  const { data: overviewData, loading: overviewLoading } = useDashboardOverview();
 
   return (
     <div>
@@ -144,25 +79,57 @@ export default function AnalyticsPage() {
           <h2 className="mb-1 font-semibold text-slate-900">Vaccination Coverage</h2>
           <p className="mb-4 text-xs text-slate-500">Completion rate by vaccine</p>
           <VaccinationCoverageChart
-            items={coverageData?.items ?? []}
+            items={coverageData?.byVaccine ?? []}
             loading={coverageLoading}
           />
-          {coverageData?.asOf && (
-            <p className="mt-2 text-right text-xs text-slate-400">
-              As of {new Date(coverageData.asOf).toLocaleDateString("en-PH")}
-            </p>
-          )}
         </div>
 
-        {/* Patient Visits */}
+        {/* Quick Stats */}
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="mb-1 font-semibold text-slate-900">Recent Activity</h2>
-          <p className="mb-4 text-xs text-slate-500">Patient registrations grouped by week</p>
-          <PatientVisitsChart
-            points={visitPoints}
-            loading={aggregating}
-            title="Patient Registrations by Week"
-          />
+          <h2 className="mb-1 font-semibold text-slate-900">This Week</h2>
+          <p className="mb-4 text-xs text-slate-500">Key activity metrics for the current week</p>
+          <div className="space-y-4">
+            {overviewLoading ? (
+              Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="flex items-center justify-between">
+                  <div className="h-4 w-32 animate-pulse rounded bg-slate-200" />
+                  <div className="h-7 w-12 animate-pulse rounded bg-slate-200" />
+                </div>
+              ))
+            ) : (
+              <>
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <span className="text-sm text-slate-600">Visits this week</span>
+                  <span className="text-2xl font-bold text-blue-600">
+                    {overviewData?.visitsThisWeek ?? 0}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <span className="text-sm text-slate-600">Upcoming appointments</span>
+                  <span className="text-2xl font-bold text-amber-600">
+                    {overviewData?.upcomingAppointments ?? 0}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <span className="text-sm text-slate-600">Immunizations due this week</span>
+                  <span className="text-2xl font-bold text-green-600">
+                    {overviewData?.immunizationsDue ?? 0}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-slate-600">Total active patients</span>
+                  <span className="text-2xl font-bold text-teal-600">
+                    {overviewData?.totalActivePatients ?? 0}
+                  </span>
+                </div>
+              </>
+            )}
+          </div>
+          <div className="mt-4">
+            <Link href="/analytics/illness-trends" className="text-xs text-teal-600 hover:underline">
+              View illness trends →
+            </Link>
+          </div>
         </div>
       </div>
     </div>
