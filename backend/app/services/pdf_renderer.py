@@ -35,12 +35,8 @@ from __future__ import annotations
 
 import pathlib
 from datetime import date
-from typing import TYPE_CHECKING
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
-
-if TYPE_CHECKING:
-    from app.models.patient import Patient
 
 # ---------------------------------------------------------------------------
 # Jinja2 environment — health card templates
