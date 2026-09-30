@@ -252,7 +252,7 @@ async def _send_via_itexmo(mobile_number: str, message: str) -> dict:  # type: i
         "email": settings.ITEXMO_EMAIL,
         "recipients": number,
         "message": message,
-        "sending_method": "0",   # 0 = standard; 1 = priority
+        "sending_method": "0",  # 0 = standard; 1 = priority
     }
 
     logger.info(
@@ -394,7 +394,9 @@ async def _send_via_philsms(mobile_number: str, message: str) -> dict:  # type: 
         # error — do not retry.  Try to extract the JSON message for a clearer log.
         try:
             err_body = resp.json()
-            err_msg: str = err_body.get("message", resp.text) if isinstance(err_body, dict) else resp.text
+            err_msg: str = (
+                err_body.get("message", resp.text) if isinstance(err_body, dict) else resp.text
+            )
         except Exception:
             err_msg = resp.text
 
@@ -409,7 +411,9 @@ async def _send_via_philsms(mobile_number: str, message: str) -> dict:  # type: 
                 f"(HTTP {resp.status_code}): {err_msg}. "
                 "Register the sender ID in the PhilSMS dashboard under "
                 "Settings -> Sender IDs, or set PHILSMS_SENDER_ID=PhilSMS."
-            ) if sender_id_error else "",
+            )
+            if sender_id_error
+            else "",
         )
 
     raw = resp.json()
@@ -418,7 +422,14 @@ async def _send_via_philsms(mobile_number: str, message: str) -> dict:  # type: 
         if raw.get("status") == "error":
             err_msg = raw.get("message", str(raw))
             # Treat sender-ID, invalid number, and authentication failures as permanent.
-            permanent_keywords = ("invalid", "unauthorized", "forbidden", "blocked", "not authorized", "sender id")
+            permanent_keywords = (
+                "invalid",
+                "unauthorized",
+                "forbidden",
+                "blocked",
+                "not authorized",
+                "sender id",
+            )
             is_permanent = any(kw in err_msg.lower() for kw in permanent_keywords)
             if is_permanent:
                 raise SMSPermanentError(
@@ -432,11 +443,7 @@ async def _send_via_philsms(mobile_number: str, message: str) -> dict:  # type: 
                 body=resp.text,
             )
         data = raw.get("data", {})
-        msg_id = (
-            data.get("messageId")
-            or data.get("message_id")
-            or f"phs-{uuid.uuid4().hex[:12]}"
-        )
+        msg_id = data.get("messageId") or data.get("message_id") or f"phs-{uuid.uuid4().hex[:12]}"
         return {"message_id": str(msg_id), "status": "queued"}
 
     logger.warning(
@@ -542,10 +549,10 @@ async def _send_via_textbee(mobile_number: str, message: str) -> dict:  # type: 
         try:
             err_body = resp.json()
             err_msg: str = (
-                err_body.get("error", "")
-                or err_body.get("message", "")
-                or resp.text
-            ) if isinstance(err_body, dict) else resp.text
+                (err_body.get("error", "") or err_body.get("message", "") or resp.text)
+                if isinstance(err_body, dict)
+                else resp.text
+            )
         except Exception:
             err_msg = resp.text
 
@@ -561,7 +568,9 @@ async def _send_via_textbee(mobile_number: str, message: str) -> dict:  # type: 
             permanent_hint_message=(
                 f"textbee rejected the request (HTTP {resp.status_code}): {err_msg}. "
                 "Check TEXTBEE_API_KEY and TEXTBEE_DEVICE_ID in .env."
-            ) if permanent else "",
+            )
+            if permanent
+            else "",
         )
 
     raw = resp.json()
@@ -758,7 +767,7 @@ def _normalize_ph_number_intl(number: str) -> str:
     Handles all common input variants by delegating to _normalize_ph_number
     first (→ 09XXXXXXXXX), then converting to 639XXXXXXXXX.
     """
-    n = _normalize_ph_number(number)   # → 09XXXXXXXXX
+    n = _normalize_ph_number(number)  # → 09XXXXXXXXX
     if n.startswith("0"):
         n = "63" + n[1:]
     return n
@@ -850,7 +859,6 @@ class SMSService:
                 body="",
             )
 
-        from collections.abc import Awaitable
         import inspect
 
         # All dispatch functions are async — call them directly.

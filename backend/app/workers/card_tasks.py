@@ -172,6 +172,4 @@ def generate_card_task(
             "batch_id": batch_id,
         },
     )
-    _run_async(
-        _generate_card_task_async(patient_id, issued_by_id, batch_id)
-    )
+    _run_async(_generate_card_task_async(patient_id, issued_by_id, batch_id))

@@ -30,7 +30,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Cookie, Depends, Form, Request, Response
+from fastapi import APIRouter, Cookie, Form, Request, Response
 
 from app.api.v1.endpoints._cookies import clear_auth_cookies, set_auth_cookies
 from app.core.exceptions import UnauthorizedError
@@ -377,10 +377,7 @@ async def refresh_token(
     The old refresh token is not explicitly revoked in Phase 1; Phase 6
     will introduce server-side token rotation tracking.
     """
-    raw_refresh = (
-        (body.refresh_token if body else None)
-        or refresh_token_cookie
-    )
+    raw_refresh = (body.refresh_token if body else None) or refresh_token_cookie
     if not raw_refresh:
         raise UnauthorizedError("No refresh token provided.")
 
@@ -460,9 +457,7 @@ async def forgot_password(
     # It returns the user's UUID when the email is registered, None otherwise.
     # Both paths return HTTP 200 with the same message — session_hint is not
     # a secret (the OTP itself is the authenticating factor).
-    user_id = await auth_service.initiate_password_reset(
-        db=db, email=body.email, ip_address=ip
-    )
+    user_id = await auth_service.initiate_password_reset(db=db, email=body.email, ip_address=ip)
     await db.commit()
 
     return ForgotPasswordResponse(
@@ -504,7 +499,9 @@ async def reset_password(
     )
     await db.commit()
 
-    return ResetPasswordResponse(message="Password has been reset successfully. Please log in again.")
+    return ResetPasswordResponse(
+        message="Password has been reset successfully. Please log in again."
+    )
 
 
 # ---------------------------------------------------------------------------

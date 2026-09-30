@@ -22,7 +22,6 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
-
 # ---------------------------------------------------------------------------
 # Login (step 1 of MFA flow)
 # ---------------------------------------------------------------------------

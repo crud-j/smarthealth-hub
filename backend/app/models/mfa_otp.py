@@ -66,9 +66,7 @@ class MfaOtp(Base):
         nullable=False,
         server_default=sa.text("'login'"),
     )
-    expires_at: Mapped[datetime] = mapped_column(
-        sa.TIMESTAMP(timezone=True), nullable=False
-    )
+    expires_at: Mapped[datetime] = mapped_column(sa.TIMESTAMP(timezone=True), nullable=False)
     is_used: Mapped[bool] = mapped_column(
         sa.Boolean, nullable=False, server_default=sa.text("FALSE")
     )
@@ -90,7 +88,4 @@ class MfaOtp(Base):
     )
 
     def __repr__(self) -> str:
-        return (
-            f"<MfaOtp user_id={self.user_id} "
-            f"purpose={self.purpose!r} is_used={self.is_used}>"
-        )
+        return f"<MfaOtp user_id={self.user_id} purpose={self.purpose!r} is_used={self.is_used}>"

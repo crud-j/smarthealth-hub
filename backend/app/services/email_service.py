@@ -36,6 +36,7 @@ logger = get_logger(__name__)
 # Templates (Plain Text & HTML)
 # ---------------------------------------------------------------------------
 
+
 def _build_otp_text(otp_code: str, purpose: str) -> str:
     """Return a plain text fallback email body for non-HTML clients."""
     action = "Password Reset" if purpose == "password_reset" else "Account Login"
@@ -55,8 +56,12 @@ This is an automated system message. Please do not reply to this email.
 
 def _build_otp_html(otp_code: str, purpose: str) -> str:
     """Return a responsive, professionally styled HTML email body containing the OTP."""
-    action_title = "Password Reset Request" if purpose == "password_reset" else "Identity Verification"
-    action_desc = "reset your account password" if purpose == "password_reset" else "sign in to your account"
+    action_title = (
+        "Password Reset Request" if purpose == "password_reset" else "Identity Verification"
+    )
+    action_desc = (
+        "reset your account password" if purpose == "password_reset" else "sign in to your account"
+    )
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -73,7 +78,7 @@ def _build_otp_html(otp_code: str, purpose: str) -> str:
       <td align="center">
         <!-- Main Email Card -->
         <table role="presentation" width="100%" style="max-width: 520px; background-color: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; border-collapse: separate; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
-          
+
           <!-- Header Banner -->
           <tr>
             <td style="background-color: #0f766e; background: linear-gradient(135deg, #0d9488 0%, #0f766e 100%); padding: 32px 32px 28px; text-align: center;">
@@ -160,6 +165,7 @@ def _build_otp_html(otp_code: str, purpose: str) -> str:
 # Internal Sync Sender (Runs in Thread Pool)
 # ---------------------------------------------------------------------------
 
+
 def _send_email_sync(to_address: str, subject: str, text_body: str, html_body: str) -> None:
     """
     Send dual-part (plain text + HTML) email via Gmail SMTP (STARTTLS on port 587).
@@ -185,7 +191,7 @@ def _send_email_sync(to_address: str, subject: str, text_body: str, html_body: s
         if settings.EMAIL_USE_TLS:
             smtp.starttls()
             smtp.ehlo()
-            
+
         app_password = settings.EMAIL_HOST_PASSWORD.replace(" ", "")
         smtp.login(settings.EMAIL_HOST_USER, app_password)
         smtp.sendmail(settings.EMAIL_HOST_USER, to_address, msg.as_string())
@@ -194,6 +200,7 @@ def _send_email_sync(to_address: str, subject: str, text_body: str, html_body: s
 # ---------------------------------------------------------------------------
 # Public Async Interface
 # ---------------------------------------------------------------------------
+
 
 class EmailService:
     """Async email sender backed by Gmail SMTP."""
@@ -228,14 +235,12 @@ class EmailService:
             if purpose == "password_reset"
             else "SmartHealth Hub — Your Verification Code"
         )
-        
+
         text_body = _build_otp_text(otp_code, purpose)
         html_body = _build_otp_html(otp_code, purpose)
 
         try:
-            await asyncio.to_thread(
-                _send_email_sync, to_address, subject, text_body, html_body
-            )
+            await asyncio.to_thread(_send_email_sync, to_address, subject, text_body, html_body)
             logger.info(
                 "OTP email sent successfully",
                 extra={"to_address": to_address, "purpose": purpose},

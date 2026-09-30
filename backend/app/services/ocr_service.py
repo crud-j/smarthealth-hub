@@ -51,8 +51,8 @@ class OcrResult:
     given_names: str | None = None
     middle_name: str | None = None
     family_name: str | None = None
-    date_of_birth: str | None = None    # ISO 8601 YYYY-MM-DD or None
-    sex: str | None = None              # "male" | "female" | None
+    date_of_birth: str | None = None  # ISO 8601 YYYY-MM-DD or None
+    sex: str | None = None  # "male" | "female" | None
     address_line: str | None = None
     philhealth_number: str | None = None
     blood_type: str | None = None
@@ -107,8 +107,18 @@ _NON_NAME_CAPS = re.compile(
 )
 
 _MONTH_MAP = {
-    "JAN": 1, "FEB": 2, "MAR": 3, "APR": 4, "MAY": 5, "JUN": 6,
-    "JUL": 7, "AUG": 8, "SEP": 9, "OCT": 10, "NOV": 11, "DEC": 12,
+    "JAN": 1,
+    "FEB": 2,
+    "MAR": 3,
+    "APR": 4,
+    "MAY": 5,
+    "JUN": 6,
+    "JUL": 7,
+    "AUG": 8,
+    "SEP": 9,
+    "OCT": 10,
+    "NOV": 11,
+    "DEC": 12,
 }
 
 _BLOOD_TYPE_RE = re.compile(
@@ -236,7 +246,9 @@ def _extract_philhealth(text: str) -> str | None:
     return None
 
 
-def _extract_name_from_member_name_block(raw_text: str) -> tuple[str | None, str | None, str | None]:
+def _extract_name_from_member_name_block(
+    raw_text: str,
+) -> tuple[str | None, str | None, str | None]:
     """Parse the 'MEMBER NAME' block found on some PhilHealth cards."""
     pattern = re.compile(
         r"MEMBER\s*NAME\s*[:\|]?\s*\n?\s*([A-Z][A-Z\s,'.'-]{2,80})",
@@ -310,7 +322,7 @@ def _extract_address(raw_text: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def _preprocess_for_ocr(image: "PIL.Image.Image") -> "PIL.Image.Image":  # type: ignore[name-defined]
+def _preprocess_for_ocr(image: PIL.Image.Image) -> PIL.Image.Image:  # type: ignore[name-defined]  # noqa: F821
     """
     Apply pre-processing steps to improve Tesseract accuracy on ID card photos.
 
@@ -322,7 +334,7 @@ def _preprocess_for_ocr(image: "PIL.Image.Image") -> "PIL.Image.Image":  # type:
       5. Autocontrast
       6. Light median denoise
     """
-    from PIL import Image, ImageFilter, ImageOps, ImageEnhance  # noqa: PLC0415
+    from PIL import Image, ImageEnhance, ImageFilter, ImageOps  # noqa: PLC0415
 
     if image.mode not in ("RGB", "L"):
         image = image.convert("RGB")
@@ -331,19 +343,19 @@ def _preprocess_for_ocr(image: "PIL.Image.Image") -> "PIL.Image.Image":  # type:
 
     # Central crop — removes most of the lace/tablecloth that bleeds through plastic
     w, h = gray.size
-    left   = int(w * 0.06)
-    right  = int(w * 0.94)
-    top    = int(h * 0.12)
+    left = int(w * 0.06)
+    right = int(w * 0.94)
+    top = int(h * 0.12)
     bottom = int(h * 0.88)
     if right > left and bottom > top:
         gray = gray.crop((left, top, right, bottom))
 
     # Upscale — higher target helps with the soft green gradient on PhilHealth cards
-    TARGET_MIN_DIM = 2200
+    target_min_dim = 2200
     w, h = gray.size
     longest = max(w, h)
-    if longest < TARGET_MIN_DIM:
-        scale = TARGET_MIN_DIM / longest
+    if longest < target_min_dim:
+        scale = target_min_dim / longest
         new_w = int(round(w * scale))
         new_h = int(round(h * scale))
         gray = gray.resize((new_w, new_h), Image.LANCZOS)
@@ -382,9 +394,10 @@ class TesseractOcrProvider:
 
     def extract(self, image_bytes: bytes) -> OcrResult:
         try:
+            import io  # noqa: PLC0415
+
             import pytesseract  # noqa: PLC0415
             from PIL import Image  # noqa: PLC0415
-            import io  # noqa: PLC0415
         except ImportError as exc:
             raise ImportError(
                 "pytesseract and Pillow are required for OCR. "
@@ -452,10 +465,10 @@ class TesseractOcrProvider:
         # Per-word confidence
         mean_conf: float = 0.5
         try:
-            import pandas as pd  # noqa: PLC0415
             _conf_lang = "eng+fil" if raw_text_psm6 else "eng"
             data = pytesseract.image_to_data(
-                processed, lang=_conf_lang,
+                processed,
+                lang=_conf_lang,
                 config=custom_config_psm6,
                 output_type=pytesseract.Output.DATAFRAME,
             )
@@ -487,21 +500,24 @@ class TesseractOcrProvider:
             # SURNAME / LAST NAME / GIVEN NAME labels (other ID types)
             surname_match = re.search(
                 r"(?:SURNAME|LAST\s*NAME|APELLIDO)\s*[:\|]?\s*\n?\s*([A-Z][A-Z\s,'-]{1,40})",
-                raw_text, re.IGNORECASE
+                raw_text,
+                re.IGNORECASE,
             )
             if surname_match:
                 family_name = surname_match.group(1).strip().split("\n")[0].strip().title()
 
             given_match = re.search(
                 r"(?:GIVEN\s*NAME|FIRST\s*NAME|PANGALAN)\s*[:\|]?\s*\n?\s*([A-Z][A-Z\s,'-]{1,60})",
-                raw_text, re.IGNORECASE
+                raw_text,
+                re.IGNORECASE,
             )
             if given_match:
                 given_names = given_match.group(1).strip().split("\n")[0].strip().title()
 
             middle_match = re.search(
                 r"(?:MIDDLE\s*NAME|GITNANG\s*PANGALAN)\s*[:\|]?\s*\n?\s*([A-Z][A-Z\s.'-]{1,40})",
-                raw_text, re.IGNORECASE
+                raw_text,
+                re.IGNORECASE,
             )
             if middle_match:
                 middle_name = middle_match.group(1).strip().split("\n")[0].strip().title()
@@ -582,14 +598,17 @@ class TesseractOcrProvider:
         dob_from_label = False
         dob_label_match = re.search(
             r"(?:DATE\s*OF\s*BIRTH|BIRTHDATE|DOB|PETSA\s*NG\s*KAPANGANAKAN)\s*[:\|]?\s*\n?\s*([\d/\-\.A-Za-z\s,]{5,30})",
-            raw_text, re.IGNORECASE
+            raw_text,
+            re.IGNORECASE,
         )
         if dob_label_match:
             dob_candidate = dob_label_match.group(1).strip().split("\n")[0].strip()
             dob = _normalize_date(dob_candidate)
             if not dob:
                 dob = _normalize_date(
-                    dob_candidate + " " + raw_text[dob_label_match.start():dob_label_match.start() + 60]
+                    dob_candidate
+                    + " "
+                    + raw_text[dob_label_match.start() : dob_label_match.start() + 60]
                 )
             if dob:
                 dob_from_label = True
@@ -668,9 +687,10 @@ class AzureDocumentIntelligenceProvider:
 
     def extract(self, image_bytes: bytes) -> OcrResult:
         try:
+            import io  # noqa: PLC0415
+
             from azure.ai.documentintelligence import DocumentIntelligenceClient  # noqa: PLC0415
             from azure.core.credentials import AzureKeyCredential  # noqa: PLC0415
-            import io  # noqa: PLC0415
         except ImportError as exc:
             raise ImportError(
                 "azure-ai-documentintelligence is required for Azure OCR. "

@@ -45,15 +45,15 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any
 
 from celery import Task
 
-from app.workers.celery_app import celery_app
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.sms_service import SMSPermanentError, SMSTransientError
+from app.workers.celery_app import celery_app
 
 logger = get_logger(__name__)
 
@@ -215,9 +215,7 @@ async def _queue_health_card_async(patient_id: str) -> dict:  # type: ignore[typ
     placeholder_card_number = f"PENDING-{patient_uuid.hex[:20].upper()}"
 
     async with CelerySessionLocal() as db:
-        existing = await db.execute(
-            select(HealthCard).where(HealthCard.patient_id == patient_uuid)
-        )
+        existing = await db.execute(select(HealthCard).where(HealthCard.patient_id == patient_uuid))
         if existing.scalar_one_or_none() is not None:
             logger.info(
                 "queue_health_card_generation_task: health card already exists — skipping",
@@ -225,9 +223,7 @@ async def _queue_health_card_async(patient_id: str) -> dict:  # type: ignore[typ
             )
             return {"patient_id": patient_id, "status": "already_exists"}
 
-        patient_result = await db.execute(
-            select(Patient).where(Patient.id == patient_uuid)
-        )
+        patient_result = await db.execute(select(Patient).where(Patient.id == patient_uuid))
         patient: Patient | None = patient_result.scalar_one_or_none()
         if patient is None:
             logger.error(
@@ -251,7 +247,7 @@ async def _queue_health_card_async(patient_id: str) -> dict:  # type: ignore[typ
             id=uuid.uuid4(),
             patient_id=patient_uuid,
             card_number=placeholder_card_number,
-            qr_payload_hash="",   # empty until staff generates the real card
+            qr_payload_hash="",  # empty until staff generates the real card
             card_version=1,
             status="active",
         )
@@ -314,9 +310,7 @@ async def _send_photo_reminder_async(patient_id: str, staff_user_id: str) -> dic
     staff_uuid = uuid.UUID(staff_user_id)
 
     async with CelerySessionLocal() as db:
-        patient_result = await db.execute(
-            select(Patient).where(Patient.id == patient_uuid)
-        )
+        patient_result = await db.execute(select(Patient).where(Patient.id == patient_uuid))
         patient: Patient | None = patient_result.scalar_one_or_none()
 
         if patient is None:
@@ -333,9 +327,7 @@ async def _send_photo_reminder_async(patient_id: str, staff_user_id: str) -> dic
             )
             return {"patient_id": patient_id, "status": "noop", "reason": "photo_already_uploaded"}
 
-        user_result = await db.execute(
-            select(User).where(User.id == staff_uuid)
-        )
+        user_result = await db.execute(select(User).where(User.id == staff_uuid))
         staff_user: User | None = user_result.scalar_one_or_none()
 
         if staff_user is None:

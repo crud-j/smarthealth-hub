@@ -38,7 +38,6 @@ from datetime import date
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-
 # ---------------------------------------------------------------------------
 # Jinja2 environment — health card templates
 # ---------------------------------------------------------------------------
@@ -71,7 +70,7 @@ def _extract_body_content(html: str) -> str:
         # Fallback: return the full string if markers not found.
         return html
     # Return only the content *inside* <body>…</body>, preserving whitespace.
-    return html[body_start + len("<body>"):body_end]
+    return html[body_start + len("<body>") : body_end]
 
 
 # ---------------------------------------------------------------------------
@@ -149,9 +148,11 @@ def render_health_card_pdf(
         patient_orm = patient.get("_patient_orm")
         if patient_orm is not None:
             from app.services.patient_photo_service import get_photo_data_uri  # noqa: PLC0415
+
             resolved_photo = get_photo_data_uri(patient_orm)
         else:
             from app.services.patient_photo_service import _PLACEHOLDER_DATA_URI  # noqa: PLC0415
+
             resolved_photo = _PLACEHOLDER_DATA_URI
 
     # Inject photo into the patient context dict (copy to avoid mutating caller's dict).
@@ -175,9 +176,12 @@ def render_health_card_pdf(
     # combined document (stylesheet link, charset meta, title).
     head_start = front_html.find("<head>")
     head_end = front_html.find("</head>") + len("</head>")
-    head_block = front_html[head_start:head_end] if head_start != -1 else (
-        "<head><meta charset=\"UTF-8\" />"
-        "<link rel=\"stylesheet\" href=\"card_styles.css\" /></head>"
+    head_block = (
+        front_html[head_start:head_end]
+        if head_start != -1
+        else (
+            '<head><meta charset="UTF-8" /><link rel="stylesheet" href="card_styles.css" /></head>'
+        )
     )
 
     # Assemble the combined single-document HTML.
@@ -185,7 +189,7 @@ def render_health_card_pdf(
     # in card_styles.css, which instructs WeasyPrint to start it on page 2.
     combined_html = (
         "<!DOCTYPE html>\n"
-        "<html lang=\"en\">\n"
+        '<html lang="en">\n'
         f"{head_block}\n"
         "<body>\n"
         f"{front_body}\n"
@@ -238,9 +242,11 @@ def _build_card_html_pages(
         patient_orm = patient.get("_patient_orm")
         if patient_orm is not None:
             from app.services.patient_photo_service import get_photo_data_uri  # noqa: PLC0415
+
             resolved_photo = get_photo_data_uri(patient_orm)
         else:
             from app.services.patient_photo_service import _PLACEHOLDER_DATA_URI  # noqa: PLC0415
+
             resolved_photo = _PLACEHOLDER_DATA_URI
 
     patient_with_photo = {**patient, "photo_data_uri": resolved_photo}
@@ -261,11 +267,7 @@ def _build_card_html_pages(
     # front face so WeasyPrint starts it on a new page.  The back face already
     # carries ``.card-back { page-break-before: always; }`` in the stylesheet.
     if not is_first_card:
-        front_body = (
-            '<div style="page-break-before: always;">'
-            f"{front_body}"
-            "</div>"
-        )
+        front_body = f'<div style="page-break-before: always;">{front_body}</div>'
 
     return front_body, back_body
 
@@ -315,6 +317,7 @@ def render_batch_health_card_pdf(
         _first_resolved_photo = str(first_patient["photo_data_uri"])
     else:
         from app.services.patient_photo_service import _PLACEHOLDER_DATA_URI  # noqa: PLC0415
+
         _first_resolved_photo = _PLACEHOLDER_DATA_URI
 
     _first_ctx = {
@@ -330,8 +333,7 @@ def render_batch_health_card_pdf(
         _first_front_html[head_start:head_end]
         if head_start != -1
         else (
-            "<head><meta charset=\"UTF-8\" />"
-            "<link rel=\"stylesheet\" href=\"card_styles.css\" /></head>"
+            '<head><meta charset="UTF-8" /><link rel="stylesheet" href="card_styles.css" /></head>'
         )
     )
 
@@ -350,11 +352,9 @@ def render_batch_health_card_pdf(
 
     combined_html = (
         "<!DOCTYPE html>\n"
-        "<html lang=\"en\">\n"
+        '<html lang="en">\n'
         f"{head_block}\n"
-        "<body>\n"
-        + "\n".join(body_fragments)
-        + "\n</body>\n</html>"
+        "<body>\n" + "\n".join(body_fragments) + "\n</body>\n</html>"
     )
 
     base_url = _TEMPLATE_DIR.as_uri() + "/"

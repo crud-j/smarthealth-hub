@@ -22,10 +22,10 @@ from app.core.rate_limit import limiter
 from app.core.security import CurrentUser, require_role
 from app.db.session import DbDep
 from app.schemas.intake import (
+    IntakeDetailResponse,
     IntakeDraftPayload,
     IntakeDraftResponse,
     IntakeFinalizeResponse,
-    IntakeDetailResponse,
     IntakeLinkResponse,
     PendingIntakeSummary,
 )
@@ -369,7 +369,9 @@ async def finalize_intake(
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
-        status_code = 410 if "expired" in str(exc).lower() or "already been used" in str(exc).lower() else 422
+        status_code = (
+            410 if "expired" in str(exc).lower() or "already been used" in str(exc).lower() else 422
+        )
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
     # Enqueue the same post-registration background tasks
@@ -379,6 +381,7 @@ async def finalize_intake(
             send_photo_reminder_task,
             send_welcome_sms_task,
         )
+
         patient_id_str = str(patient.id)
         staff_id_str = str(current_user.id)
 

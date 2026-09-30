@@ -156,8 +156,7 @@ async def illness_trends(
         date | None,
         Query(
             description=(
-                "End of the date range (inclusive).  "
-                "Defaults to today.  Format: YYYY-MM-DD."
+                "End of the date range (inclusive).  Defaults to today.  Format: YYYY-MM-DD."
             )
         ),
     ] = None,
@@ -311,8 +310,7 @@ async def visit_type_breakdown(
         date | None,
         Query(
             description=(
-                "End of the date range (inclusive).  "
-                "Defaults to today.  Format: YYYY-MM-DD."
+                "End of the date range (inclusive).  Defaults to today.  Format: YYYY-MM-DD."
             )
         ),
     ] = None,
@@ -372,8 +370,7 @@ async def export_report(
         date | None,
         Query(
             description=(
-                "End of the date range (inclusive).  "
-                "Defaults to today.  Format: YYYY-MM-DD."
+                "End of the date range (inclusive).  Defaults to today.  Format: YYYY-MM-DD."
             )
         ),
     ] = None,
@@ -419,8 +416,7 @@ async def export_report(
     csv_content = analytics_service.rows_to_csv(rows)
 
     filename = (
-        f"smarthealthhub_{report_type}_"
-        f"{resolved_from.isoformat()}_to_{resolved_to.isoformat()}.csv"
+        f"smarthealthhub_{report_type}_{resolved_from.isoformat()}_to_{resolved_to.isoformat()}.csv"
     )
 
     return Response(

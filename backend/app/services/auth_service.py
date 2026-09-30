@@ -56,6 +56,7 @@ def _hash_refresh_token(token: str) -> str:
     """Return the SHA-256 hex digest of a refresh token string."""
     return hashlib.sha256(token.encode()).hexdigest()
 
+
 logger = get_logger(__name__)
 
 
@@ -64,26 +65,22 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 
-async def _get_user_by_email(db: AsyncSession, email: str) -> "User | None":
+async def _get_user_by_email(db: AsyncSession, email: str) -> User | None:
     """Return the User with ``role`` loaded, or None."""
     from app.models.user import User
 
     result = await db.execute(
-        select(User)
-        .where(User.email == email)
-        .options(selectinload(User.role))
+        select(User).where(User.email == email).options(selectinload(User.role))
     )
     return result.scalar_one_or_none()
 
 
-async def _get_user_by_id(db: AsyncSession, user_id: uuid.UUID) -> "User | None":
+async def _get_user_by_id(db: AsyncSession, user_id: uuid.UUID) -> User | None:
     """Return the User with ``role`` loaded, or None."""
     from app.models.user import User
 
     result = await db.execute(
-        select(User)
-        .where(User.id == user_id)
-        .options(selectinload(User.role))
+        select(User).where(User.id == user_id).options(selectinload(User.role))
     )
     return result.scalar_one_or_none()
 
@@ -152,11 +149,7 @@ async def login(
         # Only log the attempt when a user record exists to avoid log spam
         # from random probes.
         if user is not None:
-            reason = (
-                "passkey_only_account"
-                if user.password_hash is None
-                else "wrong_password"
-            )
+            reason = "passkey_only_account" if user.password_hash is None else "wrong_password"
             await audit_service.write_audit_log(
                 db=db,
                 user_id=user.id,
@@ -349,7 +342,10 @@ async def verify_otp_and_issue_tokens(
         action="LOGIN",
         entity_type="user",
         entity_id=user.id,
-        metadata={"role": user.role.name, "remember_device": bool(remember_device and device_fingerprint)},
+        metadata={
+            "role": user.role.name,
+            "remember_device": bool(remember_device and device_fingerprint),
+        },
         ip_address=ip_address,
     )
 

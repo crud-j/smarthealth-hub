@@ -90,15 +90,11 @@ class HealthCard(Base):
         ),
         nullable=False,
     )
-    card_number: Mapped[str] = mapped_column(
-        sa.String(30), unique=True, nullable=False
-    )
+    card_number: Mapped[str] = mapped_column(sa.String(30), unique=True, nullable=False)
     # HMAC-SHA256 hex digest of canonical QR payload (patient_id + card_version)
     qr_payload_hash: Mapped[str] = mapped_column(sa.Text, nullable=False)
     # UID written to the physical NFC chip; nullable until the chip is provisioned
-    nfc_uid: Mapped[str | None] = mapped_column(
-        sa.String(64), unique=True, nullable=True
-    )
+    nfc_uid: Mapped[str | None] = mapped_column(sa.String(64), unique=True, nullable=True)
     card_version: Mapped[int] = mapped_column(
         sa.Integer, nullable=False, server_default=sa.text("1")
     )
@@ -112,9 +108,7 @@ class HealthCard(Base):
         nullable=False,
         server_default=sa.text("now()"),
     )
-    expires_at: Mapped[datetime | None] = mapped_column(
-        sa.TIMESTAMP(timezone=True), nullable=True
-    )
+    expires_at: Mapped[datetime | None] = mapped_column(sa.TIMESTAMP(timezone=True), nullable=True)
     issued_by: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         sa.ForeignKey(

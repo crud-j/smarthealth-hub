@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, File, Request, UploadFile
+from fastapi import APIRouter, File, Request, UploadFile
 from fastapi.responses import FileResponse
 
 from app.core.exceptions import NotFoundError
@@ -175,9 +175,7 @@ async def get_patient_photo(
 
     photo_path = patient_photo_service.get_photo_path(patient)
     if photo_path is None or not photo_path.exists():
-        raise NotFoundError(
-            f"No profile photo found for patient {patient_id}."
-        )
+        raise NotFoundError(f"No profile photo found for patient {patient_id}.")
 
     return FileResponse(
         path=str(photo_path),

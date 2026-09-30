@@ -23,8 +23,8 @@ Or via Turborepo:
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -67,6 +67,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # causing a spurious CancelledError in the lifespan teardown path.
     try:
         import asyncio as _asyncio
+
         from alembic.runtime.migration import MigrationContext
         from sqlalchemy import create_engine as _create_engine
 
@@ -443,6 +444,8 @@ from fastapi import Request as _Request  # noqa: E402
 
 from app.api.v1.endpoints.health_cards import (  # noqa: E402
     ViewByIdentifierResponse as _ViewByIdentifierResponse,
+)
+from app.api.v1.endpoints.health_cards import (  # noqa: E402
     view_health_card_by_identifier as _view_health_card_by_identifier,
 )
 from app.db.session import DbDep as _DbDep  # noqa: E402
@@ -468,9 +471,7 @@ async def nfc_tap_view(
     db: _DbDep,
 ) -> _ViewByIdentifierResponse:
     """Thin shim — delegates to the health-cards view handler."""
-    return await _view_health_card_by_identifier(
-        identifier=identifier, request=request, db=db
-    )
+    return await _view_health_card_by_identifier(identifier=identifier, request=request, db=db)
 
 
 # ---------------------------------------------------------------------------

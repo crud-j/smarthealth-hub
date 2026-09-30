@@ -28,7 +28,7 @@ from app.workers.celery_app import celery_app
 logger = logging.getLogger(__name__)
 
 _FAILURE_COUNT_KEY: str = "sms:failed_tasks:count"
-_FAILURE_THRESHOLD: int = 5   # alert when this many failures accumulate in 24 h
+_FAILURE_THRESHOLD: int = 5  # alert when this many failures accumulate in 24 h
 
 
 @celery_app.task(name="monitoring.check_sms_failure_rate", bind=False)

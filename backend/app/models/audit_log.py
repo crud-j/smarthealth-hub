@@ -28,12 +28,12 @@ from typing import TYPE_CHECKING
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 
 if TYPE_CHECKING:
-    from app.models.user import User
+    pass
 
 
 class AuditLog(Base):
@@ -73,9 +73,7 @@ class AuditLog(Base):
     )
     action: Mapped[str] = mapped_column(sa.String(50), nullable=False)
     entity_type: Mapped[str] = mapped_column(sa.String(50), nullable=False)
-    entity_id: Mapped[uuid.UUID | None] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=True
-    )
+    entity_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
     metadata_: Mapped[dict] = mapped_column(
         "metadata",  # DB column name stays "metadata"
         JSONB,

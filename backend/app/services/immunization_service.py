@@ -71,15 +71,14 @@ async def list_immunizations(
     base_query = select(Immunization).where(Immunization.patient_id == patient_id)
 
     # Total count
-    count_result = await db.execute(
-        select(func.count()).select_from(base_query.subquery())
-    )
+    count_result = await db.execute(select(func.count()).select_from(base_query.subquery()))
     total: int = count_result.scalar_one()
 
     offset = (page - 1) * page_size
     rows = await db.execute(
-        base_query
-        .order_by(Immunization.date_administered.asc().nullslast(), Immunization.created_at.asc())
+        base_query.order_by(
+            Immunization.date_administered.asc().nullslast(), Immunization.created_at.asc()
+        )
         .offset(offset)
         .limit(page_size)
     )
@@ -106,9 +105,7 @@ async def get_immunization(
     )
     record: Immunization | None = result.scalar_one_or_none()
     if record is None:
-        raise NotFoundError(
-            f"Immunization {immunization_id} not found for patient {patient_id}."
-        )
+        raise NotFoundError(f"Immunization {immunization_id} not found for patient {patient_id}.")
     return record
 
 
@@ -297,13 +294,14 @@ async def get_due_summary(db: AsyncSession) -> dict[str, int]:
     )
 
     month_result = await db.execute(
-        select(func.count()).select_from(Immunization)
-        .where(*base_filter)
+        select(func.count()).select_from(Immunization).where(*base_filter)
     )
     due_this_month: int = month_result.scalar_one()
 
     week_result = await db.execute(
-        select(func.count()).select_from(Immunization).where(
+        select(func.count())
+        .select_from(Immunization)
+        .where(
             Immunization.status == "scheduled",
             Immunization.next_due_date.isnot(None),
             Immunization.next_due_date <= week_cutoff,
@@ -339,51 +337,53 @@ async def list_all_immunizations(
 
     today = date.today()
 
-    base_query = (
-        select(
-            Immunization,
-            func.concat(Patient.first_name, sa.literal(" "), Patient.last_name).label(
-                "patient_full_name"
-            ),
-        )
-        .join(Patient, Immunization.patient_id == Patient.id)
-    )
+    base_query = select(
+        Immunization,
+        func.concat(Patient.first_name, sa.literal(" "), Patient.last_name).label(
+            "patient_full_name"
+        ),
+    ).join(Patient, Immunization.patient_id == Patient.id)
 
     filters = []
     if vaccine_name:
         filters.append(Immunization.vaccine_name == vaccine_name)
 
     if due_filter == "due_this_week":
-        filters.extend([
-            Immunization.status == "scheduled",
-            Immunization.next_due_date.isnot(None),
-            Immunization.next_due_date <= today + timedelta(days=7),
-        ])
+        filters.extend(
+            [
+                Immunization.status == "scheduled",
+                Immunization.next_due_date.isnot(None),
+                Immunization.next_due_date <= today + timedelta(days=7),
+            ]
+        )
     elif due_filter == "due_this_month":
-        filters.extend([
-            Immunization.status == "scheduled",
-            Immunization.next_due_date.isnot(None),
-            Immunization.next_due_date <= today + timedelta(days=30),
-        ])
+        filters.extend(
+            [
+                Immunization.status == "scheduled",
+                Immunization.next_due_date.isnot(None),
+                Immunization.next_due_date <= today + timedelta(days=30),
+            ]
+        )
     elif due_filter == "overdue":
-        filters.extend([
-            Immunization.status == "scheduled",
-            Immunization.next_due_date.isnot(None),
-            Immunization.next_due_date < today,
-        ])
+        filters.extend(
+            [
+                Immunization.status == "scheduled",
+                Immunization.next_due_date.isnot(None),
+                Immunization.next_due_date < today,
+            ]
+        )
 
     if filters:
         base_query = base_query.where(*filters)
 
-    count_result = await db.execute(
-        select(func.count()).select_from(base_query.subquery())
-    )
+    count_result = await db.execute(select(func.count()).select_from(base_query.subquery()))
     total: int = count_result.scalar_one()
 
     offset = (page - 1) * page_size
     rows_result = await db.execute(
-        base_query
-        .order_by(Immunization.next_due_date.asc().nullslast(), Immunization.created_at.desc())
+        base_query.order_by(
+            Immunization.next_due_date.asc().nullslast(), Immunization.created_at.desc()
+        )
         .offset(offset)
         .limit(page_size)
     )
@@ -393,9 +393,7 @@ async def list_all_immunizations(
 
 async def count_distinct_vaccines(db: AsyncSession) -> int:
     """Return the count of distinct vaccine_name values across all immunization records."""
-    result = await db.execute(
-        select(func.count(func.distinct(Immunization.vaccine_name)))
-    )
+    result = await db.execute(select(func.count(func.distinct(Immunization.vaccine_name))))
     return result.scalar_one()
 
 

@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
@@ -64,7 +64,6 @@ from app.schemas.health_card import (
     BulkCardStatusRequest,
     BulkCardStatusResponse,
     CardGenerateResponse,
-    CardGenerationAccepted,
     CardGenerationStatus,
     CardStatusItem,
     CardVerifyRequest,
@@ -77,8 +76,8 @@ from app.schemas.health_card import (
     PatientVerifySummaryFull,
 )
 from app.services import card_generation_service, nfc_payload_service, qr_service
-from app.services.card_generation_service import get_bulk_card_status
 from app.services.audit_service import write_audit_log
+from app.services.card_generation_service import get_bulk_card_status
 from app.services.patient_service import get_patient
 
 logger = get_logger(__name__)
@@ -106,7 +105,9 @@ _last_scan_cache: dict[str, Any] = {
 class NfcScanUidRequest(BaseModel):
     """Body for POST /health-cards/scan-uid (sent by the relay server)."""
 
-    uid: str = Field(..., min_length=1, max_length=64, description="Raw hardware NFC UID hex string")
+    uid: str = Field(
+        ..., min_length=1, max_length=64, description="Raw hardware NFC UID hex string"
+    )
 
 
 class NfcScanPatientInfo(BaseModel):
@@ -158,24 +159,26 @@ class ViewByIdentifierResponse(BaseModel):
 # HTML rendering helpers for the NFC tap clinical view page
 # ---------------------------------------------------------------------------
 
+
 def _esc(value: object) -> str:
     """HTML-escape a value for safe embedding in the page."""
     import html as _html  # noqa: PLC0415
+
     return _html.escape(str(value)) if value is not None else ""
 
 
 def _render_nfc_view_html(  # noqa: PLR0912, PLR0915
     *,
-    patient: "Patient",
-    card: "HealthCard",
+    patient: Patient,
+    card: HealthCard,
     full_name: str,
     age: int,
     dob_str: str,
     conditions: list[str],
-    latest_visit: "Visit | None",
-    next_appointment: "Appointment | None",
-    last_appointment: "Appointment | None",
-    last_immunization: "Immunization | None",
+    latest_visit: Visit | None,
+    next_appointment: Appointment | None,
+    last_appointment: Appointment | None,
+    last_immunization: Immunization | None,
     scanned_at_str: str,
 ) -> str:
     """
@@ -186,6 +189,7 @@ def _render_nfc_view_html(  # noqa: PLR0912, PLR0915
     - No encrypted PHI (diagnosis, treatment_notes, medical_history.notes)
     - Only condition_name (plain text), vital signs, appointments, immunization
     """
+
     # ── Vitals strip ─────────────────────────────────────────────────────────
     def _fmt(val: object, unit: str = "") -> str:
         if val is None:
@@ -204,8 +208,10 @@ def _render_nfc_view_html(  # noqa: PLR0912, PLR0915
 
     # ── Address assembly ─────────────────────────────────────────────────────
     addr_parts = [
-        patient.sitio_purok, patient.barangay,
-        patient.municipality, patient.province,
+        patient.sitio_purok,
+        patient.barangay,
+        patient.municipality,
+        patient.province,
     ]
     address_display = ", ".join(p for p in addr_parts if p) or _esc(patient.address) or "—"
 
@@ -236,9 +242,7 @@ def _render_nfc_view_html(  # noqa: PLR0912, PLR0915
 
     # ── Medical conditions ────────────────────────────────────────────────────
     if conditions:
-        conditions_html = "".join(
-            f'<li class="condition-item">{_esc(c)}</li>' for c in conditions
-        )
+        conditions_html = "".join(f'<li class="condition-item">{_esc(c)}</li>' for c in conditions)
         conditions_section = f'<ul class="condition-list">{conditions_html}</ul>'
     else:
         conditions_section = '<p class="empty-note">No conditions on record.</p>'
@@ -968,7 +972,7 @@ async def view_health_card_by_identifier(
     from urllib.parse import unquote as _unquote  # noqa: PLC0415
 
     raw_identifier = _unquote(identifier).strip()
-    scanned_at_now = datetime.now(timezone.utc)
+    scanned_at_now = datetime.now(UTC)
     scanned_at_iso = scanned_at_now.isoformat()
     scanned_at_str = scanned_at_now.strftime("%b %d, %Y %I:%M %p")
     id_prefix = raw_identifier[:8] + ("..." if len(raw_identifier) > 8 else "")
@@ -982,16 +986,17 @@ async def view_health_card_by_identifier(
     # ── Fallback: case-insensitive nfc_uid match ──────────────────────────────
     if card is None:
         card_result2 = await db.execute(
-            select(HealthCard).where(
-                func.upper(HealthCard.nfc_uid) == raw_identifier.upper()
-            )
+            select(HealthCard).where(func.upper(HealthCard.nfc_uid) == raw_identifier.upper())
         )
         card = card_result2.scalar_one_or_none()
 
     # ── Not found ─────────────────────────────────────────────────────────────
     if card is None:
         _last_scan_cache.update(
-            scanned_at=scanned_at_iso, found=False, uid=raw_identifier, patient=None,
+            scanned_at=scanned_at_iso,
+            found=False,
+            uid=raw_identifier,
+            patient=None,
         )
         await write_audit_log(
             db=db,
@@ -1011,14 +1016,15 @@ async def view_health_card_by_identifier(
         )
 
     # ── Load patient ──────────────────────────────────────────────────────────
-    patient_result = await db.execute(
-        select(Patient).where(Patient.id == card.patient_id)
-    )
+    patient_result = await db.execute(select(Patient).where(Patient.id == card.patient_id))
     patient: Patient | None = patient_result.scalar_one_or_none()
 
     if patient is None or not patient.is_active:
         _last_scan_cache.update(
-            scanned_at=scanned_at_iso, found=False, uid=raw_identifier, patient=None,
+            scanned_at=scanned_at_iso,
+            found=False,
+            uid=raw_identifier,
+            patient=None,
         )
         await write_audit_log(
             db=db,
@@ -1050,11 +1056,7 @@ async def view_health_card_by_identifier(
 
     today = _date.today()
     bd = patient.birth_date
-    age = (
-        today.year - bd.year - ((today.month, today.day) < (bd.month, bd.day))
-        if bd
-        else 0
-    )
+    age = today.year - bd.year - ((today.month, today.day) < (bd.month, bd.day)) if bd else 0
     dob_str = bd.strftime("%b %d, %Y") if bd else "Unknown"
 
     # ── Latest visit vitals (NO diagnosis/treatment_notes — encrypted PHI) ────
@@ -1075,7 +1077,7 @@ async def view_health_card_by_identifier(
     conditions: list[str] = [row for row in conditions_result.scalars().all() if row]
 
     # ── Upcoming appointment (next pending/confirmed after now) ───────────────
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
     upcoming_result = await db.execute(
         select(Appointment)
         .where(
@@ -1150,13 +1152,22 @@ async def view_health_card_by_identifier(
             "patient_name": full_name,
             "card_status": card.status,
             "fields_shown": [
-                "full_name", "age", "sex", "blood_type", "address",
-                "philhealth_no", "allergies", "condition_names",
-                "vitals_last_visit", "upcoming_appointment",
-                "last_immunization", "emergency_contact",
+                "full_name",
+                "age",
+                "sex",
+                "blood_type",
+                "address",
+                "philhealth_no",
+                "allergies",
+                "condition_names",
+                "vitals_last_visit",
+                "upcoming_appointment",
+                "last_immunization",
+                "emergency_contact",
             ],
             "encrypted_fields_excluded": [
-                "visits.diagnosis", "visits.treatment_notes",
+                "visits.diagnosis",
+                "visits.treatment_notes",
                 "medical_history.notes",
             ],
             "ip": _get_client_ip(request),
@@ -1217,10 +1228,7 @@ async def get_bulk_health_card_status(
             card_id=uuid.UUID(data["card_id"]) if data["card_id"] else None,
             card_version=data["card_version"],
         )
-        for pid_uuid, data in (
-            (uuid.UUID(pid_str), status_map[pid_str])
-            for pid_str in status_map
-        )
+        for pid_uuid, data in ((uuid.UUID(pid_str), status_map[pid_str]) for pid_str in status_map)
     ]
     return BulkCardStatusResponse(items=items)
 
@@ -1269,9 +1277,7 @@ async def generate_health_card(
 
     # 2. Reset generation_status to "pending" on the card row so the status
     #    endpoint reflects the async PDF-dispatch state correctly.
-    card_result = await db.execute(
-        select(HealthCard).where(HealthCard.id == uuid.UUID(card_id))
-    )
+    card_result = await db.execute(select(HealthCard).where(HealthCard.id == uuid.UUID(card_id)))
     card: HealthCard | None = card_result.scalar_one_or_none()
     if card is not None:
         card.generation_status = "pending"
@@ -1329,6 +1335,7 @@ async def generate_health_card(
 #       However, since this router is mounted with full paths, the "generation-status"
 #       prefix is unambiguous — FastAPI won't confuse it with a UUID path param.
 
+
 @router.get(
     "/health-cards/generation-status/{card_id}",
     response_model=CardGenerationStatus,
@@ -1345,9 +1352,7 @@ async def get_generation_status(
     db: DbDep,
     current_user: CurrentUser,
 ) -> CardGenerationStatus:
-    card_result = await db.execute(
-        select(HealthCard).where(HealthCard.id == card_id)
-    )
+    card_result = await db.execute(select(HealthCard).where(HealthCard.id == card_id))
     card: HealthCard | None = card_result.scalar_one_or_none()
     if card is None:
         raise NotFoundError(f"Health card {card_id} not found.")
@@ -1413,9 +1418,7 @@ async def batch_health_card_pdf(
 
     for patient_id in body.patient_ids:
         # ── Load patient ──────────────────────────────────────────────────
-        patient_result = await db.execute(
-            select(Patient).where(Patient.id == patient_id)
-        )
+        patient_result = await db.execute(select(Patient).where(Patient.id == patient_id))
         patient: Patient | None = patient_result.scalar_one_or_none()
 
         if patient is None or not patient.is_active:
@@ -1442,22 +1445,16 @@ async def batch_health_card_pdf(
             continue
 
         # ── Generate QR (no PHI in payload) ──────────────────────────────
-        _signed_url, qr_data_uri = qr_service.encode_qr_payload(
-            str(patient_id), card.card_version
-        )
+        _signed_url, qr_data_uri = qr_service.encode_qr_payload(str(patient_id), card.card_version)
 
         # ── Build template context dicts ──────────────────────────────────
         _bd = patient.birth_date
         _age: int = (
-            _today.year
-            - _bd.year
-            - ((_today.month, _today.day) < (_bd.month, _bd.day))
+            _today.year - _bd.year - ((_today.month, _today.day) < (_bd.month, _bd.day))
             if _bd
             else 0
         )
-        _birth_date_display: str = (
-            _bd.strftime("%B %d, %Y").replace(" 0", " ") if _bd else "—"
-        )
+        _birth_date_display: str = _bd.strftime("%B %d, %Y").replace(" 0", " ") if _bd else "—"
 
         # Most-recent Visit for vitals.
         _visit_result = await db.execute(
@@ -1480,9 +1477,7 @@ async def batch_health_card_pdf(
                 f"{_latest_visit.temperature}°C" if _latest_visit.temperature is not None else "—"
             )
             _last_visit_date: str = (
-                _latest_visit.visit_date.strftime("%B %d, %Y")
-                if _latest_visit.visit_date
-                else "—"
+                _latest_visit.visit_date.strftime("%B %d, %Y") if _latest_visit.visit_date else "—"
             )
         else:
             _last_bp = "—"
@@ -1496,9 +1491,7 @@ async def batch_health_card_pdf(
         if patient.medical_histories:
             _allergies = (
                 ", ".join(
-                    mh.condition_name
-                    for mh in patient.medical_histories
-                    if mh.condition_name
+                    mh.condition_name for mh in patient.medical_histories if mh.condition_name
                 )
                 or "None on record"
             )
@@ -1762,7 +1755,7 @@ async def get_batch_generate_status(
             )
         elif status_value.startswith("failed:"):
             failed += 1
-            error_msg = status_value[len("failed:"):]
+            error_msg = status_value[len("failed:") :]
             results.append(
                 BatchStatusResult(
                     patient_id=uuid.UUID(patient_id_str),
@@ -2014,14 +2007,11 @@ async def download_health_card_pdf(
     card: HealthCard | None = card_result.scalar_one_or_none()
     if card is None:
         raise NotFoundError(
-            f"No active health card found for patient {patient_id}. "
-            "Generate a card first."
+            f"No active health card found for patient {patient_id}. Generate a card first."
         )
 
     # Generate QR image (deterministic from patient_id + card_version).
-    _signed_url, qr_data_uri = qr_service.encode_qr_payload(
-        str(patient_id), card.card_version
-    )
+    _signed_url, qr_data_uri = qr_service.encode_qr_payload(str(patient_id), card.card_version)
 
     # Build template context dicts (only display-safe fields — no encrypted PHI).
     from datetime import date as _date  # noqa: PLC0415
@@ -2030,10 +2020,7 @@ async def download_health_card_pdf(
     _today = _date.today()
     _bd = patient.birth_date
     _age: int = (
-        _today.year - _bd.year
-        - ((_today.month, _today.day) < (_bd.month, _bd.day))
-        if _bd
-        else 0
+        _today.year - _bd.year - ((_today.month, _today.day) < (_bd.month, _bd.day)) if _bd else 0
     )
 
     # Human-readable birth date, e.g. "January 15, 1985".
@@ -2064,9 +2051,7 @@ async def download_health_card_pdf(
             f"{_latest_visit.temperature}°C" if _latest_visit.temperature is not None else "—"
         )
         _last_visit_date: str = (
-            _latest_visit.visit_date.strftime("%B %d, %Y")
-            if _latest_visit.visit_date
-            else "—"
+            _latest_visit.visit_date.strftime("%B %d, %Y") if _latest_visit.visit_date else "—"
         )
     else:
         _last_bp = "—"
@@ -2079,9 +2064,10 @@ async def download_health_card_pdf(
     # condition_name is a plain-text field (not encrypted) — safe to display.
     _allergies: str
     if patient.medical_histories:
-        _allergies = ", ".join(
-            mh.condition_name for mh in patient.medical_histories if mh.condition_name
-        ) or "None on record"
+        _allergies = (
+            ", ".join(mh.condition_name for mh in patient.medical_histories if mh.condition_name)
+            or "None on record"
+        )
     else:
         _allergies = "None on record"
 
@@ -2229,7 +2215,7 @@ async def link_nfc_tag(
 # Called by the public /verify Next.js page that mobile phones land on.
 # ---------------------------------------------------------------------------
 
-from app.schemas.health_card import PublicVerifyResponse  # noqa: PLC0415
+from app.schemas.health_card import PublicVerifyResponse  # noqa: E402, PLC0415
 
 
 @router.get(
@@ -2250,16 +2236,16 @@ async def public_verify_health_card(
     db: DbDep,
 ) -> PublicVerifyResponse:
     """Public endpoint consumed by the /verify Next.js page on mobile phones."""
-    _INVALID = PublicVerifyResponse(valid=False)
+    _invalid = PublicVerifyResponse(valid=False)
 
     try:
         if not qr_service.verify_qr_payload(pid, v, sig):
-            return _INVALID
+            return _invalid
 
         try:
             patient_uuid = uuid.UUID(pid)
         except ValueError:
-            return _INVALID
+            return _invalid
 
         card_result = await db.execute(
             select(HealthCard)
@@ -2268,14 +2254,12 @@ async def public_verify_health_card(
         )
         card: HealthCard | None = card_result.scalar_one_or_none()
         if card is None or card.status == "revoked":
-            return _INVALID
+            return _invalid
 
-        patient_result = await db.execute(
-            select(Patient).where(Patient.id == patient_uuid)
-        )
+        patient_result = await db.execute(select(Patient).where(Patient.id == patient_uuid))
         patient: Patient | None = patient_result.scalar_one_or_none()
         if patient is None or not patient.is_active:
-            return _INVALID
+            return _invalid
 
         parts = [patient.first_name]
         if patient.middle_name:
@@ -2306,7 +2290,7 @@ async def public_verify_health_card(
             extra={"error": str(exc)},
             exc_info=True,
         )
-        return _INVALID
+        return _invalid
 
 
 # POST /health-cards/verify
@@ -2432,9 +2416,7 @@ async def verify_health_card(
             verify_method = "nfc"
             nfc_uid = body.nfc_uid.strip()
 
-            card_result = await db.execute(
-                select(HealthCard).where(HealthCard.nfc_uid == nfc_uid)
-            )
+            card_result = await db.execute(select(HealthCard).where(HealthCard.nfc_uid == nfc_uid))
             found_card = card_result.scalar_one_or_none()
 
             if found_card is None or found_card.status != "active":
@@ -2452,9 +2434,7 @@ async def verify_health_card(
         patient_id = found_card.patient_id
 
         # Load patient record.
-        patient_result = await db.execute(
-            select(Patient).where(Patient.id == patient_id)
-        )
+        patient_result = await db.execute(select(Patient).where(Patient.id == patient_id))
         patient: Patient | None = patient_result.scalar_one_or_none()
 
         if patient is None or not patient.is_active:
@@ -2466,7 +2446,7 @@ async def verify_health_card(
 
         # ── Expiry check — BEFORE writing any CardVerification row ────────────
         # expired-card attempts are NOT logged as successful verifications.
-        if found_card.expires_at is not None and found_card.expires_at < datetime.now(timezone.utc):
+        if found_card.expires_at is not None and found_card.expires_at < datetime.now(UTC):
             logger.warning(
                 "Verify: health card has expired",
                 extra={
@@ -2571,9 +2551,7 @@ async def verify_health_card(
 
         # Extended response: include patient_id, birth_date, mobile, photo.
         # photo_url is the relative path the frontend can prefix with the API host.
-        photo_url: str | None = (
-            f"/media/{patient.photo_path}" if patient.photo_path else None
-        )
+        photo_url: str | None = f"/media/{patient.photo_path}" if patient.photo_path else None
 
         return PatientVerifySummaryFull(
             **base_summary,
@@ -2684,14 +2662,12 @@ async def _scan_nfc_uid_impl(
 ) -> NfcScanResponse:
     """Implementation shared by the early-registered scan-uid route shim."""
     uid = body.uid.strip()
-    scanned_at_iso = datetime.now(timezone.utc).isoformat()
+    scanned_at_iso = datetime.now(UTC).isoformat()
 
     # Case-insensitive match: normalise both sides to upper hex.
     # SQLAlchemy func.upper works across PostgreSQL.
     card_result = await db.execute(
-        select(HealthCard).where(
-            func.upper(HealthCard.nfc_uid) == uid.upper()
-        )
+        select(HealthCard).where(func.upper(HealthCard.nfc_uid) == uid.upper())
     )
     card: HealthCard | None = card_result.scalar_one_or_none()
 
@@ -2724,9 +2700,7 @@ async def _scan_nfc_uid_impl(
         )
 
     # Load associated patient.
-    patient_result = await db.execute(
-        select(Patient).where(Patient.id == card.patient_id)
-    )
+    patient_result = await db.execute(select(Patient).where(Patient.id == card.patient_id))
     patient: Patient | None = patient_result.scalar_one_or_none()
 
     if patient is None or not patient.is_active:
@@ -2767,9 +2741,7 @@ async def _scan_nfc_uid_impl(
 
     # Allergies from medical_history.condition_name (plain text, not encrypted).
     allergies_result = await db.execute(
-        select(MedicalHistory.condition_name).where(
-            MedicalHistory.patient_id == patient.id
-        )
+        select(MedicalHistory.condition_name).where(MedicalHistory.patient_id == patient.id)
     )
     allergy_rows = allergies_result.scalars().all()
     allergies_str = ", ".join(r for r in allergy_rows if r) or "None on record"

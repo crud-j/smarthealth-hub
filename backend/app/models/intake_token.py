@@ -13,7 +13,8 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -54,18 +55,16 @@ class PatientIntakeToken(Base):
         ),
         nullable=True,
     )
-    expires_at: Mapped[datetime] = mapped_column(
-        sa.TIMESTAMP(timezone=True), nullable=False
-    )
-    used_at: Mapped[datetime | None] = mapped_column(
-        sa.TIMESTAMP(timezone=True), nullable=True
-    )
+    expires_at: Mapped[datetime] = mapped_column(sa.TIMESTAMP(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(sa.TIMESTAMP(timezone=True), nullable=True)
     draft_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     visit_purpose: Mapped[str | None] = mapped_column(sa.String(200), nullable=True)
     purpose_details: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     patient_id: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
-        sa.ForeignKey("patients.id", name="fk_intake_tokens_patient_id_patients", ondelete="SET NULL"),
+        sa.ForeignKey(
+            "patients.id", name="fk_intake_tokens_patient_id_patients", ondelete="SET NULL"
+        ),
         nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(
@@ -74,17 +73,17 @@ class PatientIntakeToken(Base):
         server_default=sa.text("now()"),
     )
 
-    created_by_user: Mapped["User | None"] = relationship(
+    created_by_user: Mapped[User | None] = relationship(
         "User",
         foreign_keys=[created_by_id],
         lazy="noload",
     )
-    appointment: Mapped["Appointment | None"] = relationship(
+    appointment: Mapped[Appointment | None] = relationship(
         "Appointment",
         foreign_keys=[appointment_id],
         lazy="noload",
     )
-    patient: Mapped["Patient | None"] = relationship(
+    patient: Mapped[Patient | None] = relationship(
         "Patient",
         foreign_keys=[patient_id],
         lazy="noload",

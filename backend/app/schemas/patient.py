@@ -124,13 +124,16 @@ class PatientCreate(BaseSchema):
         description="'member' if the patient is the primary PhilHealth member, "
         "'dependent' if covered under a family member",
     )
-    philhealth_category: Literal[
-        "indigent",
-        "sponsored",
-        "formal_economy",
-        "informal_economy",
-        "lifetime_member",
-    ] | None = Field(None, description="Expanded PhilHealth category")
+    philhealth_category: (
+        Literal[
+            "indigent",
+            "sponsored",
+            "formal_economy",
+            "informal_economy",
+            "lifetime_member",
+        ]
+        | None
+    ) = Field(None, description="Expanded PhilHealth category")
     is_4ps_beneficiary: bool = Field(False, description="4Ps beneficiary flag")
     household_id_4ps: str | None = Field(None, max_length=80)
     is_indigenous: bool = Field(False, description="Indigenous Peoples flag")
@@ -161,9 +164,9 @@ class PatientCreate(BaseSchema):
     )
 
     # ABO/Rh blood group — optional at registration; can be updated later.
-    blood_type: Literal[
-        "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-", "Unknown"
-    ] | None = Field(None, description="Patient's ABO/Rh blood group, or None if unknown")
+    blood_type: Literal["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-", "Unknown"] | None = Field(
+        None, description="Patient's ABO/Rh blood group, or None if unknown"
+    )
 
     # Duplicate-patient override (L-2). When a prior POST /patients call
     # returned duplicate_warning=true, the caller may resubmit the identical
@@ -307,13 +310,16 @@ class PatientUpdate(BaseSchema):
     emergency_contact_number: str | None = Field(None, max_length=20)
     philhealth_no: str | None = Field(None, max_length=20)
     philhealth_member_type: Literal["member", "dependent"] | None = Field(None)
-    philhealth_category: Literal[
-        "indigent",
-        "sponsored",
-        "formal_economy",
-        "informal_economy",
-        "lifetime_member",
-    ] | None = Field(None)
+    philhealth_category: (
+        Literal[
+            "indigent",
+            "sponsored",
+            "formal_economy",
+            "informal_economy",
+            "lifetime_member",
+        ]
+        | None
+    ) = Field(None)
     is_4ps_beneficiary: bool | None = Field(None)
     household_id_4ps: str | None = Field(None, max_length=80)
     is_indigenous: bool | None = Field(None)
@@ -333,9 +339,9 @@ class PatientUpdate(BaseSchema):
     known_conditions: str | None = Field(None, max_length=5000)
     registration_source: Literal["walk_in", "referral", "outreach", "others"] | None = Field(None)
     data_privacy_consent: bool | None = Field(None)
-    blood_type: Literal[
-        "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-", "Unknown"
-    ] | None = Field(None, description="Patient's ABO/Rh blood group, or None if unknown")
+    blood_type: Literal["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-", "Unknown"] | None = Field(
+        None, description="Patient's ABO/Rh blood group, or None if unknown"
+    )
 
     # Preferred language for SMS reminders ('en' = English, 'fil' = Filipino).
     preferred_language: Literal["en", "fil"] | None = Field(
@@ -500,14 +506,10 @@ class PatientResponse(BaseSchema):
     full_name: str = Field(default="", description="First Middle Last")
 
     @model_validator(mode="after")
-    def compute_derived_fields(self) -> "PatientResponse":
+    def compute_derived_fields(self) -> PatientResponse:
         today = date.today()
         bd = self.birth_date
-        years = (
-            today.year
-            - bd.year
-            - ((today.month, today.day) < (bd.month, bd.day))
-        )
+        years = today.year - bd.year - ((today.month, today.day) < (bd.month, bd.day))
         self.age = max(0, years)
         parts = [self.first_name]
         if self.middle_name:
@@ -552,14 +554,10 @@ class PatientSummary(BaseSchema):
     full_name: str = Field(default="")
 
     @model_validator(mode="after")
-    def compute_derived_fields(self) -> "PatientSummary":
+    def compute_derived_fields(self) -> PatientSummary:
         today = date.today()
         bd = self.birth_date
-        years = (
-            today.year
-            - bd.year
-            - ((today.month, today.day) < (bd.month, bd.day))
-        )
+        years = today.year - bd.year - ((today.month, today.day) < (bd.month, bd.day))
         self.age = max(0, years)
         parts = [self.first_name]
         if self.middle_name:
@@ -689,13 +687,13 @@ class OcrExtractResponse(BaseSchema):
     first_name: OcrFieldValue
     middle_name: OcrFieldValue
     last_name: OcrFieldValue
-    birth_date: OcrFieldValue       # ISO 8601 (YYYY-MM-DD) if parseable; raw string otherwise
-    sex: OcrFieldValue              # normalized to "male" or "female", or None
+    birth_date: OcrFieldValue  # ISO 8601 (YYYY-MM-DD) if parseable; raw string otherwise
+    sex: OcrFieldValue  # normalized to "male" or "female", or None
     address_line: OcrFieldValue
     philhealth_no: OcrFieldValue
     blood_type: OcrFieldValue
-    raw_text: str = ""              # full OCR output for debugging
-    provider: str = "tesseract"    # "tesseract" | "azure"
+    raw_text: str = ""  # full OCR output for debugging
+    provider: str = "tesseract"  # "tesseract" | "azure"
 
 
 # ---------------------------------------------------------------------------
@@ -707,8 +705,10 @@ class PatientArchiveRequest(BaseSchema):
     """Body for POST /patients/{id}/archive."""
 
     reason: str = Field(
-        ..., min_length=5, max_length=1000,
-        description="Reason for archiving this patient record (required)"
+        ...,
+        min_length=5,
+        max_length=1000,
+        description="Reason for archiving this patient record (required)",
     )
 
 
@@ -744,14 +744,10 @@ class ArchivedPatientSummary(BaseSchema):
     full_name: str = Field(default="")
 
     @model_validator(mode="after")
-    def compute_derived_fields(self) -> "ArchivedPatientSummary":
+    def compute_derived_fields(self) -> ArchivedPatientSummary:
         today = date.today()
         bd = self.birth_date
-        years = (
-            today.year
-            - bd.year
-            - ((today.month, today.day) < (bd.month, bd.day))
-        )
+        years = today.year - bd.year - ((today.month, today.day) < (bd.month, bd.day))
         self.age = max(0, years)
         parts = [self.first_name]
         if self.middle_name:

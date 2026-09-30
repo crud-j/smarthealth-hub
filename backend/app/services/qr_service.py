@@ -37,7 +37,7 @@ def _compute_hmac(patient_id: str, card_version: int) -> str:
     Canonical form: "{patient_id}:{card_version}"
     e.g. "3f4a9c2e-...:1"
     """
-    message = f"{patient_id}:{card_version}".encode("utf-8")
+    message = f"{patient_id}:{card_version}".encode()
     return hmac.new(_get_secret(), message, hashlib.sha256).hexdigest()
 
 
@@ -130,9 +130,7 @@ def verify_qr_payload(pid: str, v: int, sig: str) -> bool:
     """
     expected = _compute_hmac(pid, v)
     try:
-        return hmac.compare_digest(
-            expected.encode("ascii"), sig.encode("ascii")
-        )
+        return hmac.compare_digest(expected.encode("ascii"), sig.encode("ascii"))
     except (ValueError, TypeError):
         # compare_digest raises ValueError on mismatched types; treat as invalid.
         return False

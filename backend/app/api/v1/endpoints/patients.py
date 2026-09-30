@@ -24,6 +24,7 @@ import uuid
 from fastapi import APIRouter, File, HTTPException, Query, Request, Response, UploadFile, status
 
 from app.core.exceptions import NotFoundError
+from app.core.logging import get_logger
 from app.core.rate_limit import limiter
 from app.core.security import CurrentUser, require_role
 from app.db.session import DbDep
@@ -47,8 +48,6 @@ from app.schemas.patient import (
 from app.services import patient_service
 from app.services.audit_service import write_audit_log
 from app.utils.encryption import decrypt_text
-
-from app.core.logging import get_logger
 
 router = APIRouter(prefix="/patients", tags=["patients"])
 logger = get_logger(__name__)
@@ -84,9 +83,7 @@ def _build_patient_response(patient: Patient) -> PatientResponse:
     """
     # Build the root-relative photo URL from the stored relative path.
     # e.g. "patient_photos/<uuid>.jpg" → "/media/patient_photos/<uuid>.jpg"
-    photo_path_url: str | None = (
-        f"/media/{patient.photo_path}" if patient.photo_path else None
-    )
+    photo_path_url: str | None = f"/media/{patient.photo_path}" if patient.photo_path else None
     return PatientResponse(
         id=str(patient.id),
         patient_code=patient.patient_code,
@@ -129,9 +126,7 @@ def _build_patient_response(patient: Patient) -> PatientResponse:
         weight_kg=float(patient.weight_kg) if patient.weight_kg is not None else None,
         allergies=decrypt_text(patient.allergies) if patient.allergies else None,
         known_conditions=(
-            decrypt_text(patient.known_conditions)
-            if patient.known_conditions
-            else None
+            decrypt_text(patient.known_conditions) if patient.known_conditions else None
         ),
         registration_source=patient.registration_source,
         registration_data_source=patient.registration_data_source,
@@ -293,9 +288,7 @@ async def create_patient(
                 PatientDuplicateMatch(
                     id=str(m.id),
                     patient_code=m.patient_code,
-                    full_name=" ".join(
-                        p for p in (m.first_name, m.middle_name, m.last_name) if p
-                    ),
+                    full_name=" ".join(p for p in (m.first_name, m.middle_name, m.last_name) if p),
                     birth_date=m.birth_date,
                 )
                 for m in matches
@@ -312,6 +305,7 @@ async def create_patient(
             send_photo_reminder_task,
             send_welcome_sms_task,
         )
+
         patient_id_str = str(patient.id)
         staff_id_str = str(current_user.id)
 
@@ -378,7 +372,7 @@ async def ocr_extract(
     Security: Image bytes are held in memory only for the duration of this
     request. No OCR image is written to disk or stored in the database.
     """
-    from app.services.ocr_service import get_ocr_provider, OcrResult  # noqa: PLC0415
+    from app.services.ocr_service import OcrResult, get_ocr_provider  # noqa: PLC0415
 
     ip = _get_client_ip(request)
 
@@ -399,6 +393,7 @@ async def ocr_extract(
 
     # Read image bytes (enforced size limit)
     from app.core.config import settings as _settings  # noqa: PLC0415
+
     image_bytes = await image.read()
     if len(image_bytes) > _settings.OCR_MAX_IMAGE_BYTES:
         raise HTTPException(
@@ -436,7 +431,8 @@ async def ocr_extract(
 
     # Log extraction metadata (no PHI in the log — only field names and counts)
     fields_extracted = [
-        name for name, val in {
+        name
+        for name, val in {
             "given_names": ocr_result.given_names,
             "family_name": ocr_result.family_name,
             "date_of_birth": ocr_result.date_of_birth,
@@ -448,8 +444,7 @@ async def ocr_extract(
         if val is not None
     ]
     low_confidence_fields = [
-        name for name, conf in ocr_result.confidence.items()
-        if 0.0 < conf < 0.75
+        name for name, conf in ocr_result.confidence.items() if 0.0 < conf < 0.75
     ]
 
     logger.info(
@@ -507,8 +502,8 @@ async def generate_intake_token(
     The returned ``intake_url`` is ready to send to the patient via SMS.
     Auth: BHW, Physician/Nurse/Midwife, Admin Staff, Admin.
     """
-    from app.services import intake_service as _intake_service  # noqa: PLC0415
     from app.core.config import settings as _settings  # noqa: PLC0415
+    from app.services import intake_service as _intake_service  # noqa: PLC0415
 
     await limiter.check_rate_limit(
         key=f"intake_token:{current_user.id}",
@@ -810,19 +805,13 @@ async def patient_summary_pdf(
         vitals_dict = {
             "blood_pressure": latest_visit.blood_pressure,
             "weight_kg": (
-                float(latest_visit.weight_kg)
-                if latest_visit.weight_kg is not None
-                else None
+                float(latest_visit.weight_kg) if latest_visit.weight_kg is not None else None
             ),
             "height_cm": (
-                float(latest_visit.height_cm)
-                if latest_visit.height_cm is not None
-                else None
+                float(latest_visit.height_cm) if latest_visit.height_cm is not None else None
             ),
             "temperature": (
-                float(latest_visit.temperature)
-                if latest_visit.temperature is not None
-                else None
+                float(latest_visit.temperature) if latest_visit.temperature is not None else None
             ),
             # Human-readable visit date for the "Recorded on …" note in the PDF.
             "visit_date": (
@@ -852,9 +841,7 @@ async def patient_summary_pdf(
         {
             "vaccine_name": imm.vaccine_name,
             "next_due_date": (
-                imm.next_due_date.strftime("%B %d, %Y")
-                if imm.next_due_date
-                else "—"
+                imm.next_due_date.strftime("%B %d, %Y") if imm.next_due_date else "—"
             ),
             "status": imm.status,
         }
@@ -864,15 +851,9 @@ async def patient_summary_pdf(
     # ── 4. Build patient demographics dict (NO encrypted PHI fields) ─────────
     _bd = patient.birth_date
     _age: int = (
-        today.year
-        - _bd.year
-        - ((today.month, today.day) < (_bd.month, _bd.day))
-        if _bd
-        else 0
+        today.year - _bd.year - ((today.month, today.day) < (_bd.month, _bd.day)) if _bd else 0
     )
-    _birth_date_display: str = (
-        _bd.strftime("%B %d, %Y").replace(" 0", " ") if _bd else "—"
-    )
+    _birth_date_display: str = _bd.strftime("%B %d, %Y").replace(" 0", " ") if _bd else "—"
 
     patient_dict: dict[str, object] = {
         "patient_code": patient.patient_code,

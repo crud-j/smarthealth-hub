@@ -12,7 +12,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, field_validator, model_validator
 
-
 # ---------------------------------------------------------------------------
 # Request schemas
 # ---------------------------------------------------------------------------
@@ -67,20 +66,17 @@ class UserCreate(BaseModel):
     @classmethod
     def validate_mobile_number(cls, v: str) -> str:
         import re
+
         if not re.fullmatch(r"^\+639\d{9}$", v):
-            raise ValueError(
-                "mobile_number must be in Philippine E.164 format: +639XXXXXXXXX"
-            )
+            raise ValueError("mobile_number must be in Philippine E.164 format: +639XXXXXXXXX")
         return v
 
     @model_validator(mode="after")
-    def validate_credential_fields(self) -> "UserCreate":
+    def validate_credential_fields(self) -> UserCreate:
         """Enforce that password is present when credential_mode is 'password'."""
         if self.credential_mode == "password":
             if not self.password:
-                raise ValueError(
-                    "password is required when credential_mode is 'password'."
-                )
+                raise ValueError("password is required when credential_mode is 'password'.")
             if len(self.password) < 8:
                 raise ValueError("password must be at least 8 characters.")
         else:
@@ -114,12 +110,11 @@ class UserUpdate(BaseModel):
     @classmethod
     def validate_mobile_number(cls, v: str | None) -> str | None:
         import re
+
         if v is None:
             return v
         if not re.fullmatch(r"^\+639\d{9}$", v):
-            raise ValueError(
-                "mobile_number must be in Philippine E.164 format: +639XXXXXXXXX"
-            )
+            raise ValueError("mobile_number must be in Philippine E.164 format: +639XXXXXXXXX")
         return v
 
 

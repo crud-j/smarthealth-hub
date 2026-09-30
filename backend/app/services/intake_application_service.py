@@ -135,22 +135,15 @@ async def list_applications(
         # Search within form_data JSONB for name fields, or reference_number
         base = base.where(
             IntakeApplication.reference_number.ilike(term)
-            | sa.cast(
-                IntakeApplication.form_data["first_name"].astext, sa.String
-            ).ilike(term)
-            | sa.cast(
-                IntakeApplication.form_data["last_name"].astext, sa.String
-            ).ilike(term)
+            | sa.cast(IntakeApplication.form_data["first_name"].astext, sa.String).ilike(term)
+            | sa.cast(IntakeApplication.form_data["last_name"].astext, sa.String).ilike(term)
         )
 
-    count_result = await db.execute(
-        sa.select(sa.func.count()).select_from(base.subquery())
-    )
+    count_result = await db.execute(sa.select(sa.func.count()).select_from(base.subquery()))
     total: int = count_result.scalar_one()
 
     items_result = await db.execute(
-        base
-        .order_by(IntakeApplication.created_at.desc())
+        base.order_by(IntakeApplication.created_at.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
@@ -165,7 +158,7 @@ async def approve_application(
     reviewed_by_id: uuid.UUID,
     registration_source: str = "walk_in",
     ip_address: str | None = None,
-) -> "Any":  # returns Patient
+) -> Any:  # returns Patient
     """
     Approve an intake application — creates a Patient record from form_data.
 
@@ -256,7 +249,9 @@ async def approve_application(
     )
 
     if patient is None:
-        raise ValueError("Duplicate patient detected. Please resolve the duplicate before approving.")
+        raise ValueError(
+            "Duplicate patient detected. Please resolve the duplicate before approving."
+        )
 
     # Update application record
     app.status = "approved"
@@ -368,27 +363,30 @@ def map_application_to_detail(app: IntakeApplication) -> dict[str, Any]:
     """Map to IntakeApplicationDetail (superset of Summary)."""
     fd: dict[str, Any] = app.form_data or {}
     base = map_application_to_summary(app)
-    base.update({
-        "middle_name": fd.get("middle_name"),
-        "suffix": fd.get("suffix"),
-        "civil_status": fd.get("civil_status"),
-        "philhealth_id": fd.get("philhealth_id"),
-        "pwd_id": fd.get("pwd_id"),
-        "blood_type": fd.get("blood_type"),
-        "email": fd.get("email"),
-        "house_street": fd.get("house_street"),
-        "province": fd.get("province"),
-        "region": fd.get("region"),
-        "zip_code": fd.get("zip_code"),
-        "emergency_contact_name": fd.get("emergency_contact_name", ""),
-        "emergency_contact_relationship": fd.get("emergency_contact_relationship"),
-        "emergency_contact_number": fd.get("emergency_contact_number", ""),
-        "known_allergies": app.known_allergies or fd.get("known_allergies"),
-        "current_medications": app.current_medications or fd.get("current_medications"),
-        "pre_existing_conditions": app.pre_existing_conditions or fd.get("pre_existing_conditions"),
-        "data_privacy_consent": fd.get("data_privacy_consent", True),
-        "rejection_reason": app.rejection_reason,
-        "reviewed_by_id": str(app.reviewed_by_id) if app.reviewed_by_id else None,
-        "submitted_ip": app.submitted_ip,
-    })
+    base.update(
+        {
+            "middle_name": fd.get("middle_name"),
+            "suffix": fd.get("suffix"),
+            "civil_status": fd.get("civil_status"),
+            "philhealth_id": fd.get("philhealth_id"),
+            "pwd_id": fd.get("pwd_id"),
+            "blood_type": fd.get("blood_type"),
+            "email": fd.get("email"),
+            "house_street": fd.get("house_street"),
+            "province": fd.get("province"),
+            "region": fd.get("region"),
+            "zip_code": fd.get("zip_code"),
+            "emergency_contact_name": fd.get("emergency_contact_name", ""),
+            "emergency_contact_relationship": fd.get("emergency_contact_relationship"),
+            "emergency_contact_number": fd.get("emergency_contact_number", ""),
+            "known_allergies": app.known_allergies or fd.get("known_allergies"),
+            "current_medications": app.current_medications or fd.get("current_medications"),
+            "pre_existing_conditions": app.pre_existing_conditions
+            or fd.get("pre_existing_conditions"),
+            "data_privacy_consent": fd.get("data_privacy_consent", True),
+            "rejection_reason": app.rejection_reason,
+            "reviewed_by_id": str(app.reviewed_by_id) if app.reviewed_by_id else None,
+            "submitted_ip": app.submitted_ip,
+        }
+    )
     return base

@@ -29,14 +29,14 @@ import uuid
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError, ValidationError
 from app.core.logging import get_logger
 from app.models.appointment import Appointment
-from app.models.patient import Patient
 from app.models.intake_token import PatientIntakeToken
+from app.models.patient import Patient
 from app.schemas.appointment import (
     AppointmentCreate,
     AppointmentIntakeSummary,
@@ -127,6 +127,7 @@ def _enqueue_sms_reminder(sms_log_id: uuid.UUID) -> None:
     """
     try:
         from app.workers.sms_tasks import send_reminder_task
+
         send_reminder_task.delay(str(sms_log_id))
         logger.info(
             "SMS reminder task enqueued",
@@ -348,28 +349,19 @@ async def list_appointments(
     page_size = min(page_size, 100)  # cap page_size
     offset = (page - 1) * page_size
 
-    base_query = (
-        select(Appointment, Patient)
-        .join(Patient, Patient.id == Appointment.patient_id)
-    )
+    base_query = select(Appointment, Patient).join(Patient, Patient.id == Appointment.patient_id)
 
     if patient_id is not None:
         base_query = base_query.where(Appointment.patient_id == patient_id)
     if status is not None:
         base_query = base_query.where(Appointment.status == status)
     if from_date is not None:
-        base_query = base_query.where(
-            func.date(Appointment.scheduled_at) >= from_date
-        )
+        base_query = base_query.where(func.date(Appointment.scheduled_at) >= from_date)
     if to_date is not None:
-        base_query = base_query.where(
-            func.date(Appointment.scheduled_at) <= to_date
-        )
+        base_query = base_query.where(func.date(Appointment.scheduled_at) <= to_date)
 
     # Count total matching rows.
-    count_result = await db.execute(
-        select(func.count()).select_from(base_query.subquery())
-    )
+    count_result = await db.execute(select(func.count()).select_from(base_query.subquery()))
     total: int = count_result.scalar_one()
 
     # Fetch the page. Default: newest-scheduled-first. sort="scheduled_at"
@@ -380,9 +372,7 @@ async def list_appointments(
         else Appointment.scheduled_at.desc()
     )
     rows_result = await db.execute(
-        base_query.order_by(order_clause)
-        .offset(offset)
-        .limit(page_size)
+        base_query.order_by(order_clause).offset(offset).limit(page_size)
     )
     rows = rows_result.all()
 

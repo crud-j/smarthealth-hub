@@ -49,8 +49,7 @@ class DashboardOverview(BaseSchema):
     )
     upcoming_appointments_count: int = Field(
         description=(
-            "Appointments scheduled on or after now() with status "
-            "'pending' or 'confirmed'."
+            "Appointments scheduled on or after now() with status 'pending' or 'confirmed'."
         ),
         ge=0,
     )
@@ -141,12 +140,8 @@ class IllnessTrendItem(BaseSchema):
       - 'YYYY'      when group_by='year'  (e.g. '2026')
     """
 
-    period: str = Field(
-        description="Time bucket label (week, month, or year formatted string)."
-    )
-    condition_name: str = Field(
-        description="The medical condition or diagnosis name."
-    )
+    period: str = Field(description="Time bucket label (week, month, or year formatted string).")
+    condition_name: str = Field(description="The medical condition or diagnosis name.")
     count: int = Field(
         description="Number of medical_history records with this condition in this period.",
         ge=0,
@@ -162,9 +157,7 @@ class IllnessTrendsResponse(BaseSchema):
     )
     from_date: date = Field(description="Start of the requested date range (inclusive).")
     to_date: date = Field(description="End of the requested date range (inclusive).")
-    group_by: str = Field(
-        description="Grouping resolution used: 'week', 'month', or 'year'."
-    )
+    group_by: str = Field(description="Grouping resolution used: 'week', 'month', or 'year'.")
 
 
 class NoShowRateItem(BaseSchema):
@@ -208,9 +201,7 @@ class VisitTrendPoint(BaseSchema):
     week_label is formatted as 'YYYY-WNN' (e.g. '2026-W30').
     """
 
-    week_label: str = Field(
-        description="ISO week label for this data point (e.g. '2026-W30')."
-    )
+    week_label: str = Field(description="ISO week label for this data point (e.g. '2026-W30').")
     visit_count: int = Field(
         description="Number of visits recorded in this ISO week.",
         ge=0,
@@ -240,9 +231,7 @@ class VisitTypeBreakdownItem(BaseSchema):
     count:      number of visits of this type in the requested date range.
     """
 
-    visit_type: str = Field(
-        description="Visit type label as stored in visits.visit_type."
-    )
+    visit_type: str = Field(description="Visit type label as stored in visits.visit_type.")
     count: int = Field(
         description="Number of visits of this type in the requested date range.",
         ge=0,

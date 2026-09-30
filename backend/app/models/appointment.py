@@ -60,9 +60,7 @@ class Appointment(Base):
         nullable=False,
     )
     appointment_type: Mapped[str] = mapped_column(sa.String(50), nullable=False)
-    scheduled_at: Mapped[datetime] = mapped_column(
-        sa.TIMESTAMP(timezone=True), nullable=False
-    )
+    scheduled_at: Mapped[datetime] = mapped_column(sa.TIMESTAMP(timezone=True), nullable=False)
     status: Mapped[str] = mapped_column(
         sa.String(20),
         nullable=False,

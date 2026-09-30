@@ -17,7 +17,7 @@ import csv
 import io
 import json
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from typing import Any
 
 import sqlalchemy as sa
@@ -82,10 +82,7 @@ async def list_audit_logs(
         .order_by(AuditLog.created_at.desc())
     )
 
-    count_stmt = (
-        sa.select(sa.func.count())
-        .select_from(AuditLog)
-    )
+    count_stmt = sa.select(sa.func.count()).select_from(AuditLog)
 
     # Apply filters to both statements
     filters: list[Any] = []

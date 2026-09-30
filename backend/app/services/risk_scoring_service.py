@@ -17,8 +17,7 @@ from __future__ import annotations
 
 import math
 import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Any
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,12 +29,10 @@ from app.models.visit import Visit
 
 
 def _now_utc() -> datetime:
-    return datetime.now(tz=timezone.utc)
+    return datetime.now(tz=UTC)
 
 
-async def compute_patient_no_show_rate(
-    db: AsyncSession, patient_id: uuid.UUID
-) -> float:
+async def compute_patient_no_show_rate(db: AsyncSession, patient_id: uuid.UUID) -> float:
     """
     Returns missed / total past appointments for the given patient.
     Returns 0.0 if the patient has no appointment history.
@@ -61,9 +58,7 @@ async def compute_patient_no_show_rate(
     return round(missed / total, 4)
 
 
-async def compute_visit_frequency_90d(
-    db: AsyncSession, patient_id: uuid.UUID
-) -> int:
+async def compute_visit_frequency_90d(db: AsyncSession, patient_id: uuid.UUID) -> int:
     """
     Returns the number of visits recorded for the patient in the last 90 days.
     Uses visits.visit_date (a TIMESTAMPTZ column — compared via date truncation).
@@ -176,7 +171,7 @@ async def run_illness_anomaly_detection(
     # Aggregate: condition_name, ISO week label, count per week
     week_expr = func.to_char(
         func.date_trunc("week", MedicalHistory.created_at),
-        "IYYY-\"W\"IW",
+        'IYYY-"W"IW',
     ).label("week_label")
     stmt = (
         select(
@@ -195,9 +190,7 @@ async def run_illness_anomaly_detection(
     # Group by condition
     by_condition: dict[str, list[tuple[str, int]]] = {}
     for condition_name, week_label, case_count in rows:
-        by_condition.setdefault(condition_name, []).append(
-            (week_label, int(case_count))
-        )
+        by_condition.setdefault(condition_name, []).append((week_label, int(case_count)))
 
     # Current ISO week label
     current_week_label = now.strftime("%G-W%V")
@@ -222,16 +215,10 @@ async def run_illness_anomaly_detection(
             continue
 
         baseline_mean = sum(baseline_series) / len(baseline_series)
-        variance = sum((x - baseline_mean) ** 2 for x in baseline_series) / len(
-            baseline_series
-        )
+        variance = sum((x - baseline_mean) ** 2 for x in baseline_series) / len(baseline_series)
         baseline_stdev = math.sqrt(variance)
 
-        z_score = (
-            (current_count - baseline_mean) / baseline_stdev
-            if baseline_stdev > 0
-            else 0.0
-        )
+        z_score = (current_count - baseline_mean) / baseline_stdev if baseline_stdev > 0 else 0.0
 
         if z_score >= 2.0:
             anomalies.append(

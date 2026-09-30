@@ -11,7 +11,6 @@ SDP Reference: Section 6.9 — Users & Audit API
 from __future__ import annotations
 
 import logging
-import secrets
 import uuid
 
 import sqlalchemy as sa
@@ -53,18 +52,12 @@ async def list_users(
     page_size = min(page_size, 100)
     offset = (page - 1) * page_size
 
-    stmt = (
-        sa.select(User)
-        .options(selectinload(User.role))
-        .order_by(User.created_at.desc())
-    )
+    stmt = sa.select(User).options(selectinload(User.role)).order_by(User.created_at.desc())
     count_stmt = sa.select(sa.func.count()).select_from(User)
 
     if role is not None:
         stmt = stmt.join(Role, User.role_id == Role.id).where(Role.name == role)
-        count_stmt = count_stmt.join(Role, User.role_id == Role.id).where(
-            Role.name == role
-        )
+        count_stmt = count_stmt.join(Role, User.role_id == Role.id).where(Role.name == role)
 
     if is_active is not None:
         stmt = stmt.where(User.is_active == is_active)
@@ -88,9 +81,7 @@ async def get_user(db: AsyncSession, user_id: uuid.UUID) -> User:
         NotFoundError: If no user with the given ID exists.
     """
     result = await db.execute(
-        sa.select(User)
-        .where(User.id == user_id)
-        .options(selectinload(User.role))
+        sa.select(User).where(User.id == user_id).options(selectinload(User.role))
     )
     user: User | None = result.scalar_one_or_none()
     if user is None:
@@ -172,17 +163,13 @@ async def create_user(
             )
     """
     # 1. Verify role_id
-    role_result = await db.execute(
-        sa.select(Role).where(Role.id == data.role_id)
-    )
+    role_result = await db.execute(sa.select(Role).where(Role.id == data.role_id))
     role: Role | None = role_result.scalar_one_or_none()
     if role is None:
         raise NotFoundError(f"Role with id '{data.role_id}' not found.")
 
     # 2. Check email uniqueness
-    email_result = await db.execute(
-        sa.select(User.id).where(User.email == str(data.email))
-    )
+    email_result = await db.execute(sa.select(User.id).where(User.email == str(data.email)))
     if email_result.scalar_one_or_none() is not None:
         raise ConflictError(f"A user with email '{data.email}' already exists.")
 
@@ -191,9 +178,7 @@ async def create_user(
         sa.select(User.id).where(User.mobile_number == data.mobile_number)
     )
     if mobile_result.scalar_one_or_none() is not None:
-        raise ConflictError(
-            f"A user with mobile number '{data.mobile_number}' already exists."
-        )
+        raise ConflictError(f"A user with mobile number '{data.mobile_number}' already exists.")
 
     # 4. Determine credential setup based on credential_mode.
     #
@@ -272,6 +257,7 @@ async def create_user(
     if data.send_welcome_sms:
         try:
             from app.workers.sms_tasks import send_sms_task  # noqa: PLC0415
+
             if data.credential_mode == "password" and temp_pw is not None:
                 sms_message = (
                     f"Welcome to SmartHealth Hub. Your temporary password is: {temp_pw}. "
@@ -331,9 +317,7 @@ async def update_user(
     if data.email is not None and str(data.email) != user.email:
         # Check new email uniqueness
         email_result = await db.execute(
-            sa.select(User.id).where(
-                User.email == str(data.email), User.id != user_id
-            )
+            sa.select(User.id).where(User.email == str(data.email), User.id != user_id)
         )
         if email_result.scalar_one_or_none() is not None:
             raise ConflictError(f"Email '{data.email}' is already in use.")
@@ -342,21 +326,15 @@ async def update_user(
 
     if data.mobile_number is not None and data.mobile_number != user.mobile_number:
         mobile_result = await db.execute(
-            sa.select(User.id).where(
-                User.mobile_number == data.mobile_number, User.id != user_id
-            )
+            sa.select(User.id).where(User.mobile_number == data.mobile_number, User.id != user_id)
         )
         if mobile_result.scalar_one_or_none() is not None:
-            raise ConflictError(
-                f"Mobile number '{data.mobile_number}' is already in use."
-            )
+            raise ConflictError(f"Mobile number '{data.mobile_number}' is already in use.")
         user.mobile_number = data.mobile_number
         fields_changed.append("mobile_number")
 
     if data.role_id is not None and data.role_id != user.role_id:
-        role_result = await db.execute(
-            sa.select(Role).where(Role.id == data.role_id)
-        )
+        role_result = await db.execute(sa.select(Role).where(Role.id == data.role_id))
         role: Role | None = role_result.scalar_one_or_none()
         if role is None:
             raise NotFoundError(f"Role with id '{data.role_id}' not found.")
@@ -432,7 +410,7 @@ async def delete_user(
         NotFoundError: If user_id does not exist.
     """
     from app.models.patient import Patient  # noqa: PLC0415
-    from app.models.visit import Visit      # noqa: PLC0415
+    from app.models.visit import Visit  # noqa: PLC0415
 
     user = await get_user(db, user_id)
 
@@ -458,19 +436,14 @@ async def delete_user(
 
     # 2. Null out RESTRICT FKs (nullable, no cascade).
     await db.execute(
-        sa.update(Patient)
-        .where(Patient.created_by == user_id)
-        .values(created_by=None)
+        sa.update(Patient).where(Patient.created_by == user_id).values(created_by=None)
     )
-    await db.execute(
-        sa.update(Visit)
-        .where(Visit.recorded_by == user_id)
-        .values(recorded_by=None)
-    )
+    await db.execute(sa.update(Visit).where(Visit.recorded_by == user_id).values(recorded_by=None))
 
     # 3. Best-effort JWT token revocation — never blocks delete.
     try:
         from app.core.security import revoke_all_user_tokens  # noqa: PLC0415
+
         await revoke_all_user_tokens(str(user_id))
     except Exception:
         logger.warning(

@@ -151,8 +151,7 @@ def encrypt_text(plaintext: str) -> str:
         return base64.b64encode(combined).decode("ascii")
     except Exception as exc:  # noqa: BLE001
         logger.error(
-            "Unexpected error during PHI field encryption — storing as plaintext. "
-            "Error: %s",
+            "Unexpected error during PHI field encryption — storing as plaintext. Error: %s",
             exc,
         )
         return plaintext

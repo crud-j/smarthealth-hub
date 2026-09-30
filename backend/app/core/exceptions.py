@@ -228,9 +228,7 @@ async def _pydantic_validation_handler(
     )
 
 
-async def _integrity_error_handler(
-    request: Request, exc: IntegrityError
-) -> JSONResponse:
+async def _integrity_error_handler(request: Request, exc: IntegrityError) -> JSONResponse:
     """
     Convert SQLAlchemy ``IntegrityError`` (unique constraint violations, FK
     violations) to a 409 Conflict response.
@@ -250,9 +248,7 @@ async def _integrity_error_handler(
     )
 
 
-async def _unhandled_exception_handler(
-    request: Request, exc: Exception
-) -> JSONResponse:
+async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """
     Catch-all for any exception not matched by more specific handlers.
 

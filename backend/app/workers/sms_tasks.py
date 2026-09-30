@@ -26,10 +26,10 @@ from typing import Any
 
 from celery import Task
 
-from app.workers.celery_app import celery_app
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.sms_service import SMSPermanentError, SMSService, SMSTransientError
+from app.workers.celery_app import celery_app
 
 logger = get_logger(__name__)
 
@@ -66,21 +66,18 @@ async def _load_sms_log_and_send(sms_log_id: str) -> dict:  # type: ignore[type-
         SMSTransientError: Propagated so autoretry fires.
         SMSPermanentError: Caught — row marked 'failed', not re-raised.
     """
-    from datetime import datetime, UTC
+    from datetime import UTC, datetime
 
     from sqlalchemy import select
 
     from app.models.sms_log import SmsLog
-    from app.services.sms_service import SMSService
     from app.workers.db import CelerySessionLocal
 
     sms_log_uuid = uuid.UUID(sms_log_id)
 
     async with CelerySessionLocal() as db:
         # Load the sms_log row.
-        result = await db.execute(
-            select(SmsLog).where(SmsLog.id == sms_log_uuid)
-        )
+        result = await db.execute(select(SmsLog).where(SmsLog.id == sms_log_uuid))
         sms_log: SmsLog | None = result.scalar_one_or_none()
 
         if sms_log is None:
@@ -166,9 +163,9 @@ class SendSmsTask(Task):
     base=SendSmsTask,
     bind=True,
     autoretry_for=(SMSTransientError,),
-    retry_backoff=True,          # exponential backoff: 2s, 4s, 8s, …
-    retry_backoff_max=600,       # cap at 10 minutes between retries
-    retry_jitter=True,           # randomise backoff to avoid thundering herd
+    retry_backoff=True,  # exponential backoff: 2s, 4s, 8s, …
+    retry_backoff_max=600,  # cap at 10 minutes between retries
+    retry_jitter=True,  # randomise backoff to avoid thundering herd
     max_retries=settings.SMS_MAX_RETRIES,
     name="sms.send_sms",
     acks_late=True,
@@ -210,7 +207,6 @@ def send_sms_task(self: Task, mobile_number: str, message: str) -> dict:  # type
     )
 
     async def _send() -> dict:  # type: ignore[type-arg]
-        from app.services.sms_service import SMSService
 
         sms_svc = SMSService()
         try:
@@ -321,9 +317,9 @@ class SendReminderTask(Task):
     base=SendReminderTask,
     bind=True,
     autoretry_for=(SMSTransientError,),
-    retry_backoff=True,          # exponential backoff: 2s, 4s, 8s, …
-    retry_backoff_max=600,       # cap at 10 minutes between retries
-    retry_jitter=True,           # randomise backoff to avoid thundering herd
+    retry_backoff=True,  # exponential backoff: 2s, 4s, 8s, …
+    retry_backoff_max=600,  # cap at 10 minutes between retries
+    retry_jitter=True,  # randomise backoff to avoid thundering herd
     max_retries=settings.SMS_MAX_RETRIES,
     name="sms.send_reminder",
     # Ensure task ID is stable across retries so Flower shows one entry.
@@ -422,6 +418,3 @@ def _on_send_reminder_task_failure(
             "exc": str(exc),
         },
     )
-
-
-

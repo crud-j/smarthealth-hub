@@ -20,7 +20,8 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -91,13 +92,9 @@ class SmsLog(Base):
         nullable=False,
         server_default=sa.text("'queued'"),
     )
-    provider_message_id: Mapped[str | None] = mapped_column(
-        sa.String(100), nullable=True
-    )
+    provider_message_id: Mapped[str | None] = mapped_column(sa.String(100), nullable=True)
     error_detail: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
-    sent_at: Mapped[datetime | None] = mapped_column(
-        sa.TIMESTAMP(timezone=True), nullable=True
-    )
+    sent_at: Mapped[datetime | None] = mapped_column(sa.TIMESTAMP(timezone=True), nullable=True)
     # Stores auxiliary data such as the confirmation token for SMS reply-confirm
     # flow ({"confirmation_token": "1234", "appointment_id": "<uuid>"}).
     # Named sms_metadata on the ORM side because SQLAlchemy reserves "metadata".
@@ -130,7 +127,4 @@ class SmsLog(Base):
     )
 
     def __repr__(self) -> str:
-        return (
-            f"<SmsLog mobile={self.mobile_number!r} "
-            f"status={self.status!r}>"
-        )
+        return f"<SmsLog mobile={self.mobile_number!r} status={self.status!r}>"

@@ -101,9 +101,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(sa.String(150), unique=True, nullable=False)
     mobile_number: Mapped[str] = mapped_column(sa.String(20), unique=True, nullable=False)
     password_hash: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
-    refresh_token_hash: Mapped[str | None] = mapped_column(
-        sa.String(64), nullable=True, index=True
-    )
+    refresh_token_hash: Mapped[str | None] = mapped_column(sa.String(64), nullable=True, index=True)
     role_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         sa.ForeignKey("roles.id", name="fk_users_role_id_roles"),

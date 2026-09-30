@@ -23,7 +23,7 @@ import uuid
 from datetime import date
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Query, Request
 
 from app.core.rate_limit import limiter
 from app.core.security import CurrentUser, require_role
@@ -113,13 +113,19 @@ async def list_appointments(
         str | None,
         Query(description="Filter by status: pending | confirmed | completed | missed | cancelled"),
     ] = None,
-    from_date: Annotated[date | None, Query(description="Lower bound on scheduled_at (YYYY-MM-DD)")] = None,
-    to_date: Annotated[date | None, Query(description="Upper bound on scheduled_at (YYYY-MM-DD)")] = None,
+    from_date: Annotated[
+        date | None, Query(description="Lower bound on scheduled_at (YYYY-MM-DD)")
+    ] = None,
+    to_date: Annotated[
+        date | None, Query(description="Upper bound on scheduled_at (YYYY-MM-DD)")
+    ] = None,
     page: Annotated[int, Query(ge=1, description="Page number (1-based)")] = 1,
     page_size: Annotated[int, Query(ge=1, le=100, description="Records per page (max 100)")] = 20,
     sort: Annotated[
         str | None,
-        Query(description="'scheduled_at' sorts soonest-first (ascending); omitted defaults to newest-first"),
+        Query(
+            description="'scheduled_at' sorts soonest-first (ascending); omitted defaults to newest-first"
+        ),
     ] = None,
 ) -> PaginatedAppointments:
     """

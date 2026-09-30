@@ -35,7 +35,6 @@ import sys
 from datetime import UTC, datetime
 from typing import Any
 
-
 # ---------------------------------------------------------------------------
 # JSON formatter
 # ---------------------------------------------------------------------------
@@ -57,11 +56,28 @@ class JsonFormatter(logging.Formatter):
     # generic "extras" scan so they are not duplicated.
     _RESERVED: frozenset[str] = frozenset(
         {
-            "name", "msg", "args", "created", "levelname", "levelno",
-            "pathname", "filename", "module", "funcName", "lineno",
-            "msecs", "relativeCreated", "thread", "threadName",
-            "processName", "process", "exc_info", "exc_text",
-            "stack_info", "taskName", "message",
+            "name",
+            "msg",
+            "args",
+            "created",
+            "levelname",
+            "levelno",
+            "pathname",
+            "filename",
+            "module",
+            "funcName",
+            "lineno",
+            "msecs",
+            "relativeCreated",
+            "thread",
+            "threadName",
+            "processName",
+            "process",
+            "exc_info",
+            "exc_text",
+            "stack_info",
+            "taskName",
+            "message",
         }
     )
 

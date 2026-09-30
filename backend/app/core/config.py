@@ -34,7 +34,9 @@ class Settings(BaseSettings):
     BHC_NAME: str = "Barangay Health Center"
 
     # ── Database ──────────────────────────────────────────────────────────────
-    DATABASE_URL: str = "postgresql+asyncpg://shh_admin:SmartHealthHub@localhost:5445/smarthealthhub"
+    DATABASE_URL: str = (
+        "postgresql+asyncpg://shh_admin:SmartHealthHub@localhost:5445/smarthealthhub"
+    )
 
     # ── Redis / Celery ────────────────────────────────────────────────────────
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -91,7 +93,7 @@ class Settings(BaseSettings):
     # Sign up at https://itexmo.com — no sender-name Letter of Authorization.
     # All messages are delivered under the iTExmo platform sender name.
     ITEXMO_API_KEY: str = ""
-    ITEXMO_EMAIL: str = ""           # the email address you registered with iTExmo
+    ITEXMO_EMAIL: str = ""  # the email address you registered with iTExmo
     ITEXMO_BASE_URL: str = "https://api.itexmo.com/api"
 
     # ── PhilSMS (alternative — no LOA required) ───────────────────────────────
@@ -99,7 +101,7 @@ class Settings(BaseSettings):
     # Use PHILSMS_SENDER_ID=PhilSMS (platform default) to avoid LOA.
     # Custom alphanumeric sender IDs MUST be registered in the PhilSMS dashboard
     # under Settings → Sender IDs before use — unregistered IDs are rejected.
-    PHILSMS_TOKEN: str = ""          # Bearer token from the PhilSMS dashboard
+    PHILSMS_TOKEN: str = ""  # Bearer token from the PhilSMS dashboard
     PHILSMS_SENDER_ID: str = "PhilSMS"
     # IMPORTANT: do NOT add a trailing slash — the service appends "/send" to build
     # the full endpoint URL.  Correct: "https://dashboard.philsms.com/api/v3/sms"
@@ -131,16 +133,16 @@ class Settings(BaseSettings):
     # textbee cloud relay in transit to the Android device.  No diagnoses, record
     # numbers, or sensitive medical data should be included — the existing SMS
     # templates already comply with this constraint.
-    TEXTBEE_API_KEY: str = ""        # API key from textbee.dev dashboard
-    TEXTBEE_DEVICE_ID: str = ""      # Device ID of the registered Android phone
+    TEXTBEE_API_KEY: str = ""  # API key from textbee.dev dashboard
+    TEXTBEE_DEVICE_ID: str = ""  # Device ID of the registered Android phone
     #                                  Leave blank to use textbee's auto-selection
     #                                  (picks the device with the most recent heartbeat)
     TEXTBEE_BASE_URL: str = "https://api.textbee.dev/api/v1"
 
     # ── SMS reminder scheduling ───────────────────────────────────────────────
-    SMS_REMINDER_LEAD_HOURS: int = 24       # hours before appointment to send reminder
+    SMS_REMINDER_LEAD_HOURS: int = 24  # hours before appointment to send reminder
     SMS_MAX_RETRIES: int = 3
-    SMS_IMMUNIZATION_LEAD_DAYS: int = 3    # days before next_due_date to send reminder
+    SMS_IMMUNIZATION_LEAD_DAYS: int = 3  # days before next_due_date to send reminder
 
     # ── Application-layer encryption (AES-256-GCM) ────────────────────────────
     # Base64-encoded 32-byte key for: medical_history.notes, visits.diagnosis,
@@ -167,8 +169,8 @@ class Settings(BaseSettings):
     # ── Email / Gmail SMTP ───────────────────────────────────────────────────
     EMAIL_HOST: str = "smtp.gmail.com"
     EMAIL_PORT: int = 587
-    EMAIL_HOST_USER: str = ""          # Gmail address used to send OTPs
-    EMAIL_HOST_PASSWORD: str = ""      # Gmail App Password (not the account password)
+    EMAIL_HOST_USER: str = ""  # Gmail address used to send OTPs
+    EMAIL_HOST_PASSWORD: str = ""  # Gmail App Password (not the account password)
     EMAIL_FROM_NAME: str = "BHC-Verify"
     EMAIL_USE_TLS: bool = True
 
@@ -210,8 +212,8 @@ class Settings(BaseSettings):
     # (served from the FastAPI process itself) can issue browser fetch calls
     # back to the same origin during development.
     CORS_ORIGINS: list[str] = [
-        "http://localhost:3000",   # Next.js dev server
-        "http://localhost:8000",   # FastAPI itself (Swagger UI try-it-out)
+        "http://localhost:3000",  # Next.js dev server
+        "http://localhost:8000",  # FastAPI itself (Swagger UI try-it-out)
     ]
 
     @model_validator(mode="after")
@@ -264,7 +266,7 @@ class Settings(BaseSettings):
         if self.JWT_SECRET_KEY == "change-me-in-production":
             if self.ENVIRONMENT == "production":
                 raise ValueError(
-                    'JWT_SECRET_KEY must be changed in production. '
+                    "JWT_SECRET_KEY must be changed in production. "
                     'Generate with: python -c "import secrets; print(secrets.token_hex(32))"'
                 )
             logging.getLogger(__name__).warning(
@@ -279,7 +281,7 @@ class Settings(BaseSettings):
         if self.QR_HMAC_SECRET == "change-me-in-production":
             if self.ENVIRONMENT == "production":
                 raise ValueError(
-                    'QR_HMAC_SECRET must be changed in production. '
+                    "QR_HMAC_SECRET must be changed in production. "
                     'Generate with: python -c "import secrets; print(secrets.token_hex(32))"'
                 )
             logging.getLogger(__name__).warning(

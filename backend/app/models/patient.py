@@ -75,9 +75,7 @@ class Patient(Base):
         primary_key=True,
         server_default=sa.text("gen_random_uuid()"),
     )
-    patient_code: Mapped[str] = mapped_column(
-        sa.String(20), unique=True, nullable=False
-    )
+    patient_code: Mapped[str] = mapped_column(sa.String(20), unique=True, nullable=False)
     first_name: Mapped[str] = mapped_column(sa.String(100), nullable=False)
     middle_name: Mapped[str | None] = mapped_column(sa.String(100), nullable=True)
     last_name: Mapped[str] = mapped_column(sa.String(100), nullable=False)
@@ -94,17 +92,11 @@ class Patient(Base):
     address: Mapped[str] = mapped_column(sa.Text, nullable=False)
     guardian_name: Mapped[str | None] = mapped_column(sa.String(150), nullable=True)
     guardian_contact: Mapped[str | None] = mapped_column(sa.String(20), nullable=True)
-    emergency_contact_name: Mapped[str | None] = mapped_column(
-        sa.String(150), nullable=True
-    )
-    emergency_contact_number: Mapped[str | None] = mapped_column(
-        sa.String(20), nullable=True
-    )
+    emergency_contact_name: Mapped[str | None] = mapped_column(sa.String(150), nullable=True)
+    emergency_contact_number: Mapped[str | None] = mapped_column(sa.String(20), nullable=True)
     philhealth_no: Mapped[str | None] = mapped_column(sa.String(20), nullable=True)
     # RHU form: "PHILHEALTH MEMBER / DEPENDENTS" radio — 'member' or 'dependent'
-    philhealth_member_type: Mapped[str | None] = mapped_column(
-        sa.String(20), nullable=True
-    )
+    philhealth_member_type: Mapped[str | None] = mapped_column(sa.String(20), nullable=True)
     philhealth_category: Mapped[str | None] = mapped_column(sa.String(40), nullable=True)
     is_4ps_beneficiary: Mapped[bool] = mapped_column(
         sa.Boolean, nullable=False, server_default=sa.text("FALSE")
@@ -114,9 +106,7 @@ class Patient(Base):
         sa.Boolean, nullable=False, server_default=sa.text("FALSE")
     )
     place_of_birth: Mapped[str | None] = mapped_column(sa.String(150), nullable=True)
-    mothers_maiden_name: Mapped[str | None] = mapped_column(
-        sa.String(150), nullable=True
-    )
+    mothers_maiden_name: Mapped[str | None] = mapped_column(sa.String(150), nullable=True)
     senior_id_number: Mapped[str | None] = mapped_column(sa.String(80), nullable=True)
     pwd_id_number: Mapped[str | None] = mapped_column(sa.String(80), nullable=True)
     last_menstrual_period: Mapped[date | None] = mapped_column(sa.Date, nullable=True)
@@ -127,9 +117,7 @@ class Patient(Base):
     weight_kg: Mapped[float | None] = mapped_column(sa.Numeric(5, 2), nullable=True)
     allergies: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     known_conditions: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
-    registration_source: Mapped[str | None] = mapped_column(
-        sa.String(20), nullable=True
-    )
+    registration_source: Mapped[str | None] = mapped_column(sa.String(20), nullable=True)
     data_privacy_consent: Mapped[bool] = mapped_column(
         sa.Boolean, nullable=False, server_default=sa.text("FALSE")
     )
@@ -160,9 +148,7 @@ class Patient(Base):
     # Archive fields — distinct from is_active deactivation.
     # An archived patient is hidden from normal list/search but all clinical
     # records are preserved.  Only Admins can archive / unarchive.
-    archived_at: Mapped[datetime | None] = mapped_column(
-        sa.TIMESTAMP(timezone=True), nullable=True
-    )
+    archived_at: Mapped[datetime | None] = mapped_column(sa.TIMESTAMP(timezone=True), nullable=True)
     archived_by: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         sa.ForeignKey("users.id", name="fk_patients_archived_by_users", ondelete="SET NULL"),
@@ -253,7 +239,4 @@ class Patient(Base):
     )
 
     def __repr__(self) -> str:
-        return (
-            f"<Patient code={self.patient_code!r} "
-            f"name={self.last_name!r}, {self.first_name!r}>"
-        )
+        return f"<Patient code={self.patient_code!r} name={self.last_name!r}, {self.first_name!r}>"

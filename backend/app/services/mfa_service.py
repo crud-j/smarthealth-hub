@@ -29,7 +29,7 @@ from passlib.hash import argon2
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import UnauthorizedError, ValidationError
+from app.core.exceptions import UnauthorizedError
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -236,9 +236,7 @@ async def verify_otp(
             },
         )
         remaining = MAX_OTP_ATTEMPTS - otp_row.attempt_count
-        raise UnauthorizedError(
-            f"Invalid OTP code. {max(remaining, 0)} attempt(s) remaining."
-        )
+        raise UnauthorizedError(f"Invalid OTP code. {max(remaining, 0)} attempt(s) remaining.")
 
     # Success — mark used so it cannot be replayed.
     otp_row.is_used = True

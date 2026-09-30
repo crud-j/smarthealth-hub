@@ -44,8 +44,8 @@ logger = get_logger(__name__)
 # Mirrors the media path used by patient_photo_service.
 _PDF_OUTPUT_DIR = os.path.join(
     os.path.dirname(__file__),  # backend/app/workers/
-    "..",                       # backend/app/
-    "..",                       # backend/
+    "..",  # backend/app/
+    "..",  # backend/
     "media",
     "health_cards",
 )
@@ -103,9 +103,7 @@ async def _generate_health_card_pdf_async(
 
     async with CelerySessionLocal() as db:
         # ── 1. Fetch HealthCard ───────────────────────────────────────────────
-        card_result = await db.execute(
-            select(HealthCard).where(HealthCard.id == card_uuid)
-        )
+        card_result = await db.execute(select(HealthCard).where(HealthCard.id == card_uuid))
         card: HealthCard | None = card_result.scalar_one_or_none()
         if card is None:
             raise ValueError(f"HealthCard {card_id} not found")
@@ -116,9 +114,7 @@ async def _generate_health_card_pdf_async(
 
         try:
             # ── 3. Fetch Patient with medical_histories ───────────────────────
-            patient_result = await db.execute(
-                select(Patient).where(Patient.id == patient_uuid)
-            )
+            patient_result = await db.execute(select(Patient).where(Patient.id == patient_uuid))
             patient: Patient | None = patient_result.scalar_one_or_none()
             if patient is None:
                 raise ValueError(f"Patient {patient_id} not found")
@@ -130,9 +126,7 @@ async def _generate_health_card_pdf_async(
                 )
             )
             mh_rows = mh_result.scalars().all()
-            allergies_str = (
-                ", ".join(r for r in mh_rows if r) or "None on record"
-            )
+            allergies_str = ", ".join(r for r in mh_rows if r) or "None on record"
 
             # ── 4. Most-recent Visit for vitals ───────────────────────────────
             visit_result = await db.execute(
@@ -146,19 +140,13 @@ async def _generate_health_card_pdf_async(
             if latest_visit is not None:
                 last_bp: str = latest_visit.blood_pressure or "—"
                 last_weight: str = (
-                    f"{latest_visit.weight_kg} kg"
-                    if latest_visit.weight_kg is not None
-                    else "—"
+                    f"{latest_visit.weight_kg} kg" if latest_visit.weight_kg is not None else "—"
                 )
                 last_height: str = (
-                    f"{latest_visit.height_cm} cm"
-                    if latest_visit.height_cm is not None
-                    else "—"
+                    f"{latest_visit.height_cm} cm" if latest_visit.height_cm is not None else "—"
                 )
                 last_temp: str = (
-                    f"{latest_visit.temperature}°C"
-                    if latest_visit.temperature is not None
-                    else "—"
+                    f"{latest_visit.temperature}°C" if latest_visit.temperature is not None else "—"
                 )
                 last_visit_date: str = (
                     latest_visit.visit_date.strftime("%B %d, %Y")
@@ -178,15 +166,9 @@ async def _generate_health_card_pdf_async(
             today = _date.today()
             bd = patient.birth_date
             age: int = (
-                today.year
-                - bd.year
-                - ((today.month, today.day) < (bd.month, bd.day))
-                if bd
-                else 0
+                today.year - bd.year - ((today.month, today.day) < (bd.month, bd.day)) if bd else 0
             )
-            birth_date_display: str = (
-                bd.strftime("%B %d, %Y").replace(" 0", " ") if bd else "—"
-            )
+            birth_date_display: str = bd.strftime("%B %d, %Y").replace(" 0", " ") if bd else "—"
 
             patient_dict: dict[str, object] = {
                 "first_name": patient.first_name,

@@ -21,7 +21,6 @@ Token delivery on authenticate/complete:
 from __future__ import annotations
 
 import uuid
-from typing import Annotated
 
 from fastapi import APIRouter, Request, Response, status
 

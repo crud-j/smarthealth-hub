@@ -26,19 +26,18 @@ SDP Reference: Section 4.2 (schema) and Section 6.3 (API contracts).
 from __future__ import annotations
 
 from datetime import date, datetime
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import Field
 
 from app.schemas._base import BaseSchema
-
 
 # ---------------------------------------------------------------------------
 # Severity enum
 # ---------------------------------------------------------------------------
 
 
-class SeverityEnum(str, Enum):
+class SeverityEnum(StrEnum):
     """
     Permitted values for MedicalHistory.severity.
 

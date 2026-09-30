@@ -45,9 +45,7 @@ class AiRiskScore(Base):
         unique=True,
     )
     # patient_id stored for frontend linking — NOT sent to OpenAI
-    patient_id: Mapped[uuid.UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False
-    )
+    patient_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     patient_code: Mapped[str] = mapped_column(sa.String(20), nullable=False)
     risk_level: Mapped[str] = mapped_column(sa.String(10), nullable=False)
     risk_score: Mapped[float] = mapped_column(sa.Float, nullable=False)
@@ -59,10 +57,6 @@ class AiRiskScore(Base):
         nullable=False,
         server_default=sa.text("NOW()"),
     )
-    expires_at: Mapped[datetime | None] = mapped_column(
-        sa.TIMESTAMP(timezone=True), nullable=True
-    )
+    expires_at: Mapped[datetime | None] = mapped_column(sa.TIMESTAMP(timezone=True), nullable=True)
 
-    appointment: Mapped["Appointment"] = relationship(
-        "Appointment", foreign_keys=[appointment_id]
-    )
+    appointment: Mapped["Appointment"] = relationship("Appointment", foreign_keys=[appointment_id])

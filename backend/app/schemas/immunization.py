@@ -53,9 +53,7 @@ class ImmunizationCreate(BaseSchema):
         None, description="User ID of the staff member who administered the dose"
     )
     batch_number: str | None = Field(None, max_length=50, description="Vaccine lot/batch number")
-    next_due_date: date | None = Field(
-        None, description="Date the next dose or booster is due"
-    )
+    next_due_date: date | None = Field(None, description="Date the next dose or booster is due")
     notes: str | None = Field(None, description="Free-text clinical notes")
     status: ImmunizationStatus = Field(
         "scheduled",
@@ -66,9 +64,7 @@ class ImmunizationCreate(BaseSchema):
     @classmethod
     def validate_status(cls, v: str) -> str:
         if v not in _VALID_STATUSES:
-            raise ValueError(
-                f"status must be one of: {', '.join(_VALID_STATUSES)}"
-            )
+            raise ValueError(f"status must be one of: {', '.join(_VALID_STATUSES)}")
         return v
 
 
@@ -99,9 +95,7 @@ class ImmunizationUpdate(BaseSchema):
     @classmethod
     def validate_status(cls, v: str | None) -> str | None:
         if v is not None and v not in _VALID_STATUSES:
-            raise ValueError(
-                f"status must be one of: {', '.join(_VALID_STATUSES)}"
-            )
+            raise ValueError(f"status must be one of: {', '.join(_VALID_STATUSES)}")
         return v
 
 

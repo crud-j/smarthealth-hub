@@ -24,7 +24,6 @@ from pydantic import Field, field_validator
 
 from app.schemas._base import BaseSchema
 
-
 # ---------------------------------------------------------------------------
 # Request schemas
 # ---------------------------------------------------------------------------
@@ -162,9 +161,7 @@ class CardGenerateResponse(BaseSchema):
         description="Full HMAC-signed URL encoded in the QR code, e.g. http://host/verify?pid=...&v=...&sig=..."
     )
     # base64 PNG data URI — display immediately, no second round-trip needed
-    qr_data_uri: str = Field(
-        description="data:image/png;base64,... — QR code for the card front"
-    )
+    qr_data_uri: str = Field(description="data:image/png;base64,... — QR code for the card front")
     # JSON to write to the NFC chip + NDEF URI record for NFC Tools
     nfc_payload: dict[str, str | int] = Field(
         description=(
@@ -246,7 +243,9 @@ class CardGenerationAccepted(BaseSchema):
     """
 
     card_id: str = Field(description="UUID of the newly created or existing HealthCard row.")
-    task_id: str = Field(description="Celery task ID — for monitoring via Flower or the status endpoint.")
+    task_id: str = Field(
+        description="Celery task ID — for monitoring via Flower or the status endpoint."
+    )
     status: str = Field(default="pending", description="Always 'pending' at dispatch time.")
 
 
@@ -283,8 +282,12 @@ class PublicVerifyResponse(BaseSchema):
 
     valid: bool = Field(description="True if the HMAC signature is valid and the card is active.")
     full_name: str | None = Field(None, description="Patient name — only set when valid=True.")
-    patient_code: str | None = Field(None, description="e.g. BHC-2026-000042 — only set when valid=True.")
-    card_status: str | None = Field(None, description="'active', 'reissued', etc. — only set when valid=True.")
+    patient_code: str | None = Field(
+        None, description="e.g. BHC-2026-000042 — only set when valid=True."
+    )
+    card_status: str | None = Field(
+        None, description="'active', 'reissued', etc. — only set when valid=True."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -306,8 +309,12 @@ class NfcBatchItem(BaseSchema):
     patient-facing screen.
     """
 
-    patient_id: uuid.UUID = Field(description="Patient UUID — for correlation only; do not display to patients.")
-    card_version: int = Field(description="Current card version integer matching the HMAC used in the QR code.")
+    patient_id: uuid.UUID = Field(
+        description="Patient UUID — for correlation only; do not display to patients."
+    )
+    card_version: int = Field(
+        description="Current card version integer matching the HMAC used in the QR code."
+    )
     nfc_uri: str = Field(
         description=(
             "NDEF URI string to write to the physical NFC chip, e.g. "
@@ -351,10 +358,18 @@ class CardStatusItem(BaseSchema):
     """
 
     patient_id: uuid.UUID = Field(description="Patient UUID this status item belongs to.")
-    status: str = Field(description="Card status: 'active', 'lost', 'reissued', 'revoked', or 'none'.")
-    card_number: str | None = Field(None, description="Card number (e.g. SH-2026-000001), or None if no card exists.")
-    card_id: uuid.UUID | None = Field(None, description="Health card UUID, or None if no card exists.")
-    card_version: int | None = Field(None, description="Card version integer, or None if no card exists.")
+    status: str = Field(
+        description="Card status: 'active', 'lost', 'reissued', 'revoked', or 'none'."
+    )
+    card_number: str | None = Field(
+        None, description="Card number (e.g. SH-2026-000001), or None if no card exists."
+    )
+    card_id: uuid.UUID | None = Field(
+        None, description="Health card UUID, or None if no card exists."
+    )
+    card_version: int | None = Field(
+        None, description="Card version integer, or None if no card exists."
+    )
 
 
 class BulkCardStatusRequest(BaseSchema):
@@ -386,9 +401,7 @@ class BulkCardStatusResponse(BaseSchema):
     Patients without a card row receive status='none'.
     """
 
-    items: list[CardStatusItem] = Field(
-        description="One status entry per requested patient_id."
-    )
+    items: list[CardStatusItem] = Field(description="One status entry per requested patient_id.")
 
 
 # ---------------------------------------------------------------------------
@@ -441,9 +454,7 @@ class BatchGenerateResponse(BaseSchema):
     batch_id: str = Field(
         description="UUID string identifying this batch run — use to poll batch-status."
     )
-    total: int = Field(
-        description="Number of card-generation tasks enqueued (one per patient_id)."
-    )
+    total: int = Field(description="Number of card-generation tasks enqueued (one per patient_id).")
 
 
 class BatchStatusResult(BaseSchema):

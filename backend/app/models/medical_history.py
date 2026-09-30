@@ -92,7 +92,4 @@ class MedicalHistory(Base):
     )
 
     def __repr__(self) -> str:
-        return (
-            f"<MedicalHistory patient_id={self.patient_id} "
-            f"condition={self.condition_name!r}>"
-        )
+        return f"<MedicalHistory patient_id={self.patient_id} condition={self.condition_name!r}>"

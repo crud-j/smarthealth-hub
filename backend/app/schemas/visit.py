@@ -27,7 +27,6 @@ from pydantic import Field
 
 from app.schemas._base import BaseSchema
 
-
 # ---------------------------------------------------------------------------
 # VitalSigns — sub-model (embedded in VisitCreate / VisitUpdate / VisitResponse)
 # ---------------------------------------------------------------------------

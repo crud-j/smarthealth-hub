@@ -70,9 +70,7 @@ class TrustedDevice(Base):
         nullable=False,
         server_default=sa.text("now()"),
     )
-    expires_at: Mapped[datetime] = mapped_column(
-        sa.TIMESTAMP(timezone=True), nullable=False
-    )
+    expires_at: Mapped[datetime] = mapped_column(sa.TIMESTAMP(timezone=True), nullable=False)
 
     # Relationships
     user: Mapped["User"] = relationship(

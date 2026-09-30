@@ -57,9 +57,7 @@ class PasskeyCredential(Base):
         nullable=False,
     )
     # Raw credential ID bytes returned by the authenticator at registration.
-    credential_id: Mapped[bytes] = mapped_column(
-        sa.LargeBinary, nullable=False, unique=True
-    )
+    credential_id: Mapped[bytes] = mapped_column(sa.LargeBinary, nullable=False, unique=True)
     # COSE-encoded public key bytes (output of verify_registration_response).
     public_key: Mapped[bytes] = mapped_column(sa.LargeBinary, nullable=False)
     # Authenticator signature counter — used for clone/replay detection.

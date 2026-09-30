@@ -16,7 +16,7 @@ SDP Reference: Section 6.9 (Audit), Section 5.7 (Security & Audit)
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Query
@@ -50,9 +50,7 @@ async def list_audit_logs(
         None,
         description="Filter by entity type (patient, user, health_card, etc.)",
     ),
-    entity_id: uuid.UUID | None = Query(
-        None, description="Filter by affected entity UUID"
-    ),
+    entity_id: uuid.UUID | None = Query(None, description="Filter by affected entity UUID"),
     date_from: date | None = Query(
         None, description="Include entries on or after this date (YYYY-MM-DD)"
     ),
@@ -60,9 +58,7 @@ async def list_audit_logs(
         None, description="Include entries on or before this date (YYYY-MM-DD)"
     ),
     page: int = Query(1, ge=1, description="Page number (1-based)"),
-    page_size: int = Query(
-        20, ge=1, le=100, description="Records per page (max 100)"
-    ),
+    page_size: int = Query(20, ge=1, le=100, description="Records per page (max 100)"),
 ) -> PaginatedAuditLogs:
     """
     Returns a paginated, filterable audit trail of all sensitive system actions.
@@ -110,11 +106,19 @@ async def export_audit_logs(
     current_user: Annotated[User, AdminOnly],
     db: DbDep,
     user_id: uuid.UUID | None = Query(None, description="Filter by acting user UUID"),
-    action: str | None = Query(None, description="Filter by action (CREATE, UPDATE, DELETE, VIEW_PHI, LOGIN, etc.)"),
-    entity_type: str | None = Query(None, description="Filter by entity type (patient, user, health_card, etc.)"),
+    action: str | None = Query(
+        None, description="Filter by action (CREATE, UPDATE, DELETE, VIEW_PHI, LOGIN, etc.)"
+    ),
+    entity_type: str | None = Query(
+        None, description="Filter by entity type (patient, user, health_card, etc.)"
+    ),
     entity_id: uuid.UUID | None = Query(None, description="Filter by affected entity UUID"),
-    date_from: date | None = Query(None, description="Include entries on or after this date (YYYY-MM-DD)"),
-    date_to: date | None = Query(None, description="Include entries on or before this date (YYYY-MM-DD)"),
+    date_from: date | None = Query(
+        None, description="Include entries on or after this date (YYYY-MM-DD)"
+    ),
+    date_to: date | None = Query(
+        None, description="Include entries on or before this date (YYYY-MM-DD)"
+    ),
 ) -> StreamingResponse:
     """
     Export the audit trail as a CSV download.
@@ -137,7 +141,7 @@ async def export_audit_logs(
         date_to=date_to,
     )
 
-    today = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
+    today = datetime.now(tz=UTC).strftime("%Y-%m-%d")
     filename = f"audit_log_{today}.csv"
 
     return StreamingResponse(

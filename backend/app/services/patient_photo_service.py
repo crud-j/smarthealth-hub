@@ -61,9 +61,7 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 # Accepted MIME types for uploads; anything else is rejected with HTTP 422.
-_ALLOWED_CONTENT_TYPES: frozenset[str] = frozenset(
-    {"image/jpeg", "image/png", "image/webp"}
-)
+_ALLOWED_CONTENT_TYPES: frozenset[str] = frozenset({"image/jpeg", "image/png", "image/webp"})
 
 # Sub-directory within MEDIA_DIR where all patient photos are stored.
 _PHOTO_SUBDIR = "patient_photos"
@@ -79,8 +77,7 @@ _PLACEHOLDER_SVG = (
     "</svg>"
 )
 _PLACEHOLDER_DATA_URI = (
-    "data:image/svg+xml;base64,"
-    + base64.b64encode(_PLACEHOLDER_SVG.encode()).decode()
+    "data:image/svg+xml;base64," + base64.b64encode(_PLACEHOLDER_SVG.encode()).decode()
 )
 
 # Target JPEG quality for saved photos — balances file size vs. print clarity.

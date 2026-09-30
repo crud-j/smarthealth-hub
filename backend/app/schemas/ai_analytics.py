@@ -15,14 +15,14 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import Field
 
 from app.schemas._base import BaseSchema
 
 
-class RiskLevel(str, Enum):
+class RiskLevel(StrEnum):
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
@@ -53,7 +53,7 @@ class NoShowRiskResponse(BaseSchema):
     generated_at: datetime
 
 
-class AnomalySeverity(str, Enum):
+class AnomalySeverity(StrEnum):
     WARNING = "warning"
     CRITICAL = "critical"
 

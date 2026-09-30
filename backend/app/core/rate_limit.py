@@ -89,7 +89,7 @@ class InMemoryRateLimiter:
 
             if len(window) >= max_attempts:
                 raise TooManyRequestsError(
-                    f"Too many requests. Please wait before trying again.",
+                    "Too many requests. Please wait before trying again.",
                     detail={
                         "key": key,
                         "max_attempts": max_attempts,

@@ -185,9 +185,7 @@ async def add_medical_history(
         MedicalHistoryResponse with the new entry's data and decrypted notes.
     """
     # Encrypt notes before storage — None is preserved as None
-    encrypted_notes: str | None = (
-        encrypt_text(data.notes) if data.notes else None
-    )
+    encrypted_notes: str | None = encrypt_text(data.notes) if data.notes else None
 
     entry = MedicalHistory(
         patient_id=patient_id,
@@ -264,15 +262,11 @@ async def get_medical_history_entry(
     Raises:
         NotFoundError: If no entry with the given ID exists.
     """
-    result = await db.execute(
-        select(MedicalHistory).where(MedicalHistory.id == entry_id)
-    )
+    result = await db.execute(select(MedicalHistory).where(MedicalHistory.id == entry_id))
     entry: MedicalHistory | None = result.scalar_one_or_none()
 
     if entry is None:
-        raise NotFoundError(
-            f"Medical history entry with ID {entry_id} was not found."
-        )
+        raise NotFoundError(f"Medical history entry with ID {entry_id} was not found.")
 
     await write_audit_log(
         db=db,

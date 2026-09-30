@@ -15,7 +15,7 @@ import re
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, field_validator
 
 from app.schemas._base import BaseSchema
 
@@ -65,11 +65,13 @@ class IntakeApplicationCreate(BaseSchema):
     birth_date: date = Field(..., description="Date of birth (past date required)")
     sex: Literal["male", "female", "other"] = Field(..., description="'male', 'female', or 'other'")
     civil_status: str | None = Field(None, max_length=20)
-    philhealth_id: str | None = Field(None, max_length=20, description="PhilHealth ID number (optional)")
+    philhealth_id: str | None = Field(
+        None, max_length=20, description="PhilHealth ID number (optional)"
+    )
     pwd_id: str | None = Field(None, max_length=80, description="PWD ID number (optional)")
-    blood_type: Literal[
-        "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-", "Unknown"
-    ] | None = Field(None)
+    blood_type: Literal["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-", "Unknown"] | None = Field(
+        None
+    )
 
     # Contact & Address
     mobile_number: str | None = Field(None, max_length=20, description="Philippine mobile number")
@@ -84,7 +86,9 @@ class IntakeApplicationCreate(BaseSchema):
     # Emergency Contact
     emergency_contact_name: str = Field(..., min_length=1, max_length=150)
     emergency_contact_relationship: str | None = Field(None, max_length=80)
-    emergency_contact_number: str = Field(..., max_length=20, description="Philippine mobile number")
+    emergency_contact_number: str = Field(
+        ..., max_length=20, description="Philippine mobile number"
+    )
 
     # Medical Background
     known_allergies: str | None = Field(None, max_length=2000)
@@ -92,8 +96,12 @@ class IntakeApplicationCreate(BaseSchema):
     pre_existing_conditions: str | None = Field(None, max_length=2000)
 
     # Visit purpose (from public intake form)
-    visit_purpose: str | None = Field(None, max_length=200, description="Service the applicant is visiting for")
-    visit_purpose_other: str | None = Field(None, max_length=500, description="Free-text purpose when 'Others' is selected")
+    visit_purpose: str | None = Field(
+        None, max_length=200, description="Service the applicant is visiting for"
+    )
+    visit_purpose_other: str | None = Field(
+        None, max_length=500, description="Free-text purpose when 'Others' is selected"
+    )
 
     # Consent
     data_privacy_consent: bool = Field(..., description="Must be True to submit")
@@ -115,16 +123,27 @@ class IntakeApplicationCreate(BaseSchema):
     def validate_emergency_contact(cls, v: str) -> str:
         result = _normalise_mobile(v)
         if result is None:
-            raise ValueError(
-                "Emergency contact number must be a valid Philippine mobile number."
-            )
+            raise ValueError("Emergency contact number must be a valid Philippine mobile number.")
         return result
 
     @field_validator(
-        "first_name", "middle_name", "last_name", "suffix", "civil_status",
-        "house_street", "barangay", "municipality", "province", "region",
-        "zip_code", "emergency_contact_name", "emergency_contact_relationship",
-        "philhealth_id", "pwd_id", "known_allergies", "current_medications",
+        "first_name",
+        "middle_name",
+        "last_name",
+        "suffix",
+        "civil_status",
+        "house_street",
+        "barangay",
+        "municipality",
+        "province",
+        "region",
+        "zip_code",
+        "emergency_contact_name",
+        "emergency_contact_relationship",
+        "philhealth_id",
+        "pwd_id",
+        "known_allergies",
+        "current_medications",
         "pre_existing_conditions",
         mode="before",
     )
@@ -159,6 +178,7 @@ class IntakeApplicationCreate(BaseSchema):
 
 class IntakeApplicationApprove(BaseSchema):
     """Body for POST /intake-applications/{id}/approve."""
+
     # No fields required — approval maps form_data to a Patient record.
     # Optionally override registration_source.
     registration_source: Literal["walk_in", "referral", "outreach", "others"] = Field(
@@ -169,9 +189,12 @@ class IntakeApplicationApprove(BaseSchema):
 
 class IntakeApplicationReject(BaseSchema):
     """Body for POST /intake-applications/{id}/reject."""
+
     rejection_reason: str = Field(
-        ..., min_length=5, max_length=1000,
-        description="Reason for rejecting this application (required)"
+        ...,
+        min_length=5,
+        max_length=1000,
+        description="Reason for rejecting this application (required)",
     )
 
 

@@ -69,7 +69,7 @@ def _get_client_ip(request: Request) -> str | None:
     return None
 
 
-def _build_response(rec: "object") -> ImmunizationResponse:
+def _build_response(rec: object) -> ImmunizationResponse:
     """
     Map an Immunization ORM instance to ImmunizationResponse.
 
@@ -77,6 +77,7 @@ def _build_response(rec: "object") -> ImmunizationResponse:
     need to be serialized as strings.
     """
     from app.models.immunization import Immunization as ImmunizationModel  # noqa: PLC0415
+
     r: ImmunizationModel = rec  # type: ignore[assignment]
     return ImmunizationResponse(
         id=str(r.id),

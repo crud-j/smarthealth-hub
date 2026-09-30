@@ -5,7 +5,7 @@ Pydantic v2 schemas for the pre-visit patient intake token flow.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Literal, Union
+from typing import Annotated, Literal
 
 from pydantic import Field
 
@@ -18,7 +18,9 @@ class IntakeTokenResponse(BaseSchema):
 
     token: str = Field(..., description="UUID token string for the intake link")
     intake_url: str = Field(..., description="Full URL the patient uses to fill in the form")
-    expires_at: datetime = Field(..., description="When this token expires (48 hours from creation)")
+    expires_at: datetime = Field(
+        ..., description="When this token expires (48 hours from creation)"
+    )
 
 
 class IntakeDraftResponse(BaseSchema):
@@ -242,22 +244,20 @@ class OthersDetails(BaseSchema):
 
 
 PurposeDetails = Annotated[
-    Union[
-        GeneralConsultationDetails,
-        ImmunizationDetails,
-        PrenatalDetails,
-        FamilyPlanningDetails,
-        DentalDetails,
-        TBDotsDetails,
-        ChildHealthDetails,
-        HypertensionDetails,
-        DiabetesDetails,
-        WoundCareDetails,
-        NutritionDetails,
-        SeniorHealthDetails,
-        MedicalCertificateDetails,
-        OthersDetails,
-    ],
+    GeneralConsultationDetails
+    | ImmunizationDetails
+    | PrenatalDetails
+    | FamilyPlanningDetails
+    | DentalDetails
+    | TBDotsDetails
+    | ChildHealthDetails
+    | HypertensionDetails
+    | DiabetesDetails
+    | WoundCareDetails
+    | NutritionDetails
+    | SeniorHealthDetails
+    | MedicalCertificateDetails
+    | OthersDetails,
     Field(discriminator="visit_purpose"),
 ]
 

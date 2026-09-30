@@ -22,16 +22,18 @@ _VALID_STATUSES = frozenset({"pending", "confirmed", "completed", "missed", "can
 
 # Valid appointment_type examples (not enforced at schema level — validated
 # at service level so new types can be added without a code change).
-APPOINTMENT_TYPES = frozenset({
-    "consultation",
-    "immunization",
-    "prenatal",
-    "follow_up",
-    "general_checkup",
-    "dental",
-    "family_planning",
-    "postnatal",
-})
+APPOINTMENT_TYPES = frozenset(
+    {
+        "consultation",
+        "immunization",
+        "prenatal",
+        "follow_up",
+        "general_checkup",
+        "dental",
+        "family_planning",
+        "postnatal",
+    }
+)
 
 
 class AppointmentCreate(BaseSchema):
@@ -73,8 +75,7 @@ class AppointmentUpdate(BaseSchema):
     def validate_status(cls, v: str | None) -> str | None:
         if v is not None and v not in _VALID_STATUSES:
             raise ValueError(
-                f"Invalid status '{v}'. Must be one of: "
-                + ", ".join(sorted(_VALID_STATUSES))
+                f"Invalid status '{v}'. Must be one of: " + ", ".join(sorted(_VALID_STATUSES))
             )
         return v
 

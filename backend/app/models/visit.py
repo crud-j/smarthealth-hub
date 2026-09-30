@@ -72,9 +72,7 @@ class Visit(Base):
         server_default=sa.text("now()"),
     )
     # RHU form CASE NO. column — auto-generated: BHC-VISIT-YYYY-NNNNNN
-    case_no: Mapped[str | None] = mapped_column(
-        sa.String(30), unique=True, nullable=True
-    )
+    case_no: Mapped[str | None] = mapped_column(sa.String(30), unique=True, nullable=True)
     visit_type: Mapped[str] = mapped_column(sa.String(50), nullable=False)
 
     # ---- Vital signs (VITAL SIGNS column on the RHU physical form) -----------
@@ -85,21 +83,13 @@ class Visit(Base):
     temperature: Mapped[float | None] = mapped_column(
         sa.Numeric(4, 1), nullable=True
     )  # degrees Celsius
-    pulse_rate: Mapped[int | None] = mapped_column(
-        sa.Integer, nullable=True
-    )  # beats per minute
+    pulse_rate: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)  # beats per minute
     respiratory_rate: Mapped[int | None] = mapped_column(
         sa.Integer, nullable=True
     )  # breaths per minute
-    oxygen_saturation: Mapped[int | None] = mapped_column(
-        sa.Integer, nullable=True
-    )  # SpO2 %
-    weight_kg: Mapped[float | None] = mapped_column(
-        sa.Numeric(5, 2), nullable=True
-    )  # kilograms
-    height_cm: Mapped[float | None] = mapped_column(
-        sa.Numeric(5, 1), nullable=True
-    )  # centimeters
+    oxygen_saturation: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)  # SpO2 %
+    weight_kg: Mapped[float | None] = mapped_column(sa.Numeric(5, 2), nullable=True)  # kilograms
+    height_cm: Mapped[float | None] = mapped_column(sa.Numeric(5, 1), nullable=True)  # centimeters
 
     # ---- Complaint and history -----------------------------------------------
     chief_complaint: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
@@ -135,6 +125,5 @@ class Visit(Base):
 
     def __repr__(self) -> str:
         return (
-            f"<Visit patient_id={self.patient_id} "
-            f"type={self.visit_type!r} date={self.visit_date}>"
+            f"<Visit patient_id={self.patient_id} type={self.visit_type!r} date={self.visit_date}>"
         )

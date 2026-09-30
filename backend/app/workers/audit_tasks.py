@@ -100,18 +100,13 @@ def scan_audit_anomalies() -> dict[str, int]:
     if settings.ADMIN_ALERT_PHONE:
         # Build a compact summary: show up to 3 findings inline; suffix with
         # "+N more" when there are additional findings.
-        summary_parts = [
-            f"{e.check_name}: {e.detail[:60]}" for e in anomalies[:3]
-        ]
+        summary_parts = [f"{e.check_name}: {e.detail[:60]}" for e in anomalies[:3]]
         summary = "; ".join(summary_parts)
         if len(anomalies) > 3:
             summary += f" (+{len(anomalies) - 3} more)"
 
         plural = "y" if len(anomalies) == 1 else "ies"
-        message = (
-            f"[SmartHealth Alert] {len(anomalies)} audit anomal{plural} "
-            f"detected: {summary}"
-        )
+        message = f"[SmartHealth Alert] {len(anomalies)} audit anomal{plural} detected: {summary}"
 
         try:
             send_sms_sync(phone=settings.ADMIN_ALERT_PHONE, message=message)

@@ -33,7 +33,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -43,6 +42,7 @@ logger = logging.getLogger(__name__)
 # OpenAI client (lazy-initialised to avoid import-time failures when key absent)
 # ---------------------------------------------------------------------------
 
+
 def _get_openai_client():  # type: ignore[return]
     """
     Return an AsyncOpenAI client. Returns None if the key is absent or
@@ -50,7 +50,9 @@ def _get_openai_client():  # type: ignore[return]
     """
     try:
         from openai import AsyncOpenAI
+
         from app.core.config import settings
+
         if not settings.OPENAI_API_KEY:
             return None
         return AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
@@ -62,6 +64,7 @@ def _get_openai_client():  # type: ignore[return]
 # ---------------------------------------------------------------------------
 # Threshold-only fallback helpers (used when OpenAI is unavailable)
 # ---------------------------------------------------------------------------
+
 
 def _threshold_risk_level(no_show_rate: float) -> str:
     if no_show_rate > 0.5:
@@ -88,18 +91,15 @@ FALLBACK_RECOMMENDATIONS: dict[str, str] = {
         "Send a reminder at least 48 hours before the appointment. "
         "Consider a personal follow-up call from the BHW if the patient does not confirm."
     ),
-    "medium": (
-        "Send the standard SMS reminder. Monitor for confirmation reply."
-    ),
-    "low": (
-        "Standard reminder schedule applies. No additional action needed."
-    ),
+    "medium": ("Send the standard SMS reminder. Monitor for confirmation reply."),
+    "low": ("Standard reminder schedule applies. No additional action needed."),
 }
 
 
 # ---------------------------------------------------------------------------
 # Retry decorator (simple exponential backoff, no third-party library)
 # ---------------------------------------------------------------------------
+
 
 async def _with_retry(coro_fn, max_retries: int = 3) -> Any:  # type: ignore[type-arg]
     """
@@ -114,7 +114,7 @@ async def _with_retry(coro_fn, max_retries: int = 3) -> Any:  # type: ignore[typ
         try:
             return await coro_fn()
         except openai.RateLimitError as exc:
-            wait = 2 ** attempt
+            wait = 2**attempt
             logger.warning(
                 "OpenAI rate limit — retrying",
                 extra={"attempt": attempt + 1, "wait_seconds": wait},
@@ -122,7 +122,7 @@ async def _with_retry(coro_fn, max_retries: int = 3) -> Any:  # type: ignore[typ
             await asyncio.sleep(wait)
             last_exc = exc
         except openai.APIError as exc:
-            wait = 2 ** attempt
+            wait = 2**attempt
             logger.warning(
                 "OpenAI API error — retrying",
                 extra={"attempt": attempt + 1, "error": str(exc), "wait_seconds": wait},
@@ -135,6 +135,7 @@ async def _with_retry(coro_fn, max_retries: int = 3) -> Any:  # type: ignore[typ
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 async def score_appointment_risk(
     patient_code: str,
@@ -175,10 +176,10 @@ async def score_appointment_risk(
         "an upcoming appointment, using only aggregate statistical features — never any "
         "personally identifiable information. "
         "Return a JSON object with exactly four keys: "
-        "\"risk_level\" (\"high\", \"medium\", or \"low\"), "
-        "\"risk_score\" (a float between 0.0 and 1.0 where 1.0 = certain no-show), "
-        "\"recommendation\" (a short, practical action for the BHW, max 60 words, in English), "
-        "and \"reasoning\" (one or two sentences explaining the score). "
+        '"risk_level" ("high", "medium", or "low"), '
+        '"risk_score" (a float between 0.0 and 1.0 where 1.0 = certain no-show), '
+        '"recommendation" (a short, practical action for the BHW, max 60 words, in English), '
+        'and "reasoning" (one or two sentences explaining the score). '
         "Use domain knowledge about Philippine barangay health center operations, "
         "such as common reasons for missed appointments (transportation, work schedule, "
         "lack of follow-up contact) and effective BHW interventions."
@@ -280,8 +281,8 @@ async def generate_anomaly_alert(
         "recent baseline. Your audience is BHW staff and local government health officers — "
         "not clinical specialists. Write in plain English. "
         "Return a JSON object with two keys: "
-        "\"alert_message\" (1 to 3 sentences describing the anomaly and a suggested action, "
-        "max 80 words) and \"severity\" (\"warning\" if z_score < 3.0, \"critical\" if >= 3.0)."
+        '"alert_message" (1 to 3 sentences describing the anomaly and a suggested action, '
+        'max 80 words) and "severity" ("warning" if z_score < 3.0, "critical" if >= 3.0).'
     )
 
     user_content = (

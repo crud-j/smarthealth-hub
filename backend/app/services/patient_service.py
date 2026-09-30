@@ -79,9 +79,7 @@ async def _next_patient_code(db: AsyncSession) -> str:
     prefix = f"BHC-{year}-"
 
     result = await db.execute(
-        sa.select(sa.func.max(Patient.patient_code)).where(
-            Patient.patient_code.like(f"{prefix}%")
-        )
+        sa.select(sa.func.max(Patient.patient_code)).where(Patient.patient_code.like(f"{prefix}%"))
     )
     max_code: str | None = result.scalar_one_or_none()
 
@@ -201,9 +199,7 @@ async def list_patients(
         base_query = base_query.where(Patient.is_pregnant.is_(is_pregnant))
 
     # Count query (same filters, no pagination)
-    count_result = await db.execute(
-        sa.select(sa.func.count()).select_from(base_query.subquery())
-    )
+    count_result = await db.execute(sa.select(sa.func.count()).select_from(base_query.subquery()))
     total: int = count_result.scalar_one()
 
     # Paginated fetch — default ordering is alphabetical (last_name, first_name);
@@ -214,12 +210,7 @@ async def list_patients(
         if sort == "created_at"
         else (Patient.last_name, Patient.first_name)
     )
-    paginated_query = (
-        base_query
-        .order_by(*order_by_clause)
-        .offset(offset)
-        .limit(page_size)
-    )
+    paginated_query = base_query.order_by(*order_by_clause).offset(offset).limit(page_size)
     rows = await db.execute(paginated_query)
     patients: list[Patient] = list(rows.scalars().all())
 
@@ -233,9 +224,7 @@ async def get_patient(db: AsyncSession, patient_id: uuid.UUID) -> Patient:
     Raises:
         NotFoundError: If no patient with the given ID exists (active or not).
     """
-    result = await db.execute(
-        sa.select(Patient).where(Patient.id == patient_id)
-    )
+    result = await db.execute(sa.select(Patient).where(Patient.id == patient_id))
     patient: Patient | None = result.scalar_one_or_none()
     if patient is None:
         raise NotFoundError(f"Patient with ID {patient_id} was not found.")
@@ -288,13 +277,9 @@ async def create_patient(
         )
     ]
     if data.mobile_number:
-        duplicate_filters.append(
-            sa.func.lower(Patient.mobile_number) == data.mobile_number.lower()
-        )
+        duplicate_filters.append(sa.func.lower(Patient.mobile_number) == data.mobile_number.lower())
     if data.philhealth_no:
-        duplicate_filters.append(
-            sa.func.lower(Patient.philhealth_no) == data.philhealth_no.lower()
-        )
+        duplicate_filters.append(sa.func.lower(Patient.philhealth_no) == data.philhealth_no.lower())
 
     dup_check = await db.execute(
         sa.select(Patient).where(
@@ -542,9 +527,7 @@ async def archive_patient(
     patient = await get_patient(db, patient_id)
 
     if patient.archived_at is not None:
-        raise ValueError(
-            f"Patient {patient.patient_code} is already archived."
-        )
+        raise ValueError(f"Patient {patient.patient_code} is already archived.")
 
     patient.archived_at = datetime.now(UTC)
     patient.archived_by = archived_by_id
@@ -595,9 +578,7 @@ async def unarchive_patient(
     patient = await get_patient(db, patient_id)
 
     if patient.archived_at is None:
-        raise ValueError(
-            f"Patient {patient.patient_code} is not currently archived."
-        )
+        raise ValueError(f"Patient {patient.patient_code} is not currently archived.")
 
     previous_reason = patient.archive_reason
     patient.archived_at = None
@@ -657,14 +638,11 @@ async def list_archived_patients(
             | Patient.mobile_number.ilike(term)
         )
 
-    count_result = await db.execute(
-        sa.select(sa.func.count()).select_from(base_query.subquery())
-    )
+    count_result = await db.execute(sa.select(sa.func.count()).select_from(base_query.subquery()))
     total: int = count_result.scalar_one()
 
     rows = await db.execute(
-        base_query
-        .order_by(Patient.archived_at.desc())
+        base_query.order_by(Patient.archived_at.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
     )

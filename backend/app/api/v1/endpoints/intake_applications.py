@@ -28,9 +28,9 @@ from app.schemas.intake_application import (
     IntakeApplicationDetail,
     IntakeApplicationPublicResponse,
     IntakeApplicationReject,
+    IntakeApplicationSummary,
     IntakeApproveResponse,
     PaginatedIntakeApplications,
-    IntakeApplicationSummary,
 )
 from app.services import intake_application_service
 

@@ -23,6 +23,8 @@ class SystemInfoResponse(BaseModel):
 class RegistrationUrlResponse(BaseModel):
     """Response for GET /system/registration-url — non-sensitive, all staff."""
 
-    registration_url: str = Field(..., description="Full public URL of the patient registration form")
+    registration_url: str = Field(
+        ..., description="Full public URL of the patient registration form"
+    )
     qr_base_url: str = Field(..., description="Base URL configured in QR_BASE_URL env var")
     bhc_name: str = Field(..., description="Barangay Health Center name")

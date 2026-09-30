@@ -60,9 +60,7 @@ async def _next_case_no(db: AsyncSession) -> str:
     prefix = f"BHC-VISIT-{year}-"
 
     result = await db.execute(
-        select(func.max(Visit.case_no)).where(
-            Visit.case_no.like(f"{prefix}%")
-        )
+        select(func.max(Visit.case_no)).where(Visit.case_no.like(f"{prefix}%"))
     )
     max_code: str | None = result.scalar_one_or_none()
 
@@ -130,9 +128,7 @@ async def list_visits(
                        this service trusts the caller has already validated).
     """
     result = await db.execute(
-        select(Visit)
-        .where(Visit.patient_id == patient_id)
-        .order_by(Visit.visit_date.desc())
+        select(Visit).where(Visit.patient_id == patient_id).order_by(Visit.visit_date.desc())
     )
     visits: list[Visit] = list(result.scalars().all())
 
@@ -183,9 +179,7 @@ async def create_visit(
     visit_date = data.visit_date or datetime.utcnow()
 
     # Encrypt PHI fields before storage
-    encrypted_diagnosis: str | None = (
-        encrypt_text(data.diagnosis) if data.diagnosis else None
-    )
+    encrypted_diagnosis: str | None = encrypt_text(data.diagnosis) if data.diagnosis else None
     encrypted_treatment: str | None = (
         encrypt_text(data.treatment_notes) if data.treatment_notes else None
     )
@@ -359,18 +353,14 @@ async def get_visit(
     """
     from app.models.patient import Patient  # avoid circular import at module level
 
-    result = await db.execute(
-        select(Visit).where(Visit.id == visit_id)
-    )
+    result = await db.execute(select(Visit).where(Visit.id == visit_id))
     visit: Visit | None = result.scalar_one_or_none()
     if visit is None:
         raise NotFoundError(f"Visit with ID {visit_id} was not found.")
 
     # Fetch patient name for convenience field
     patient_result = await db.execute(
-        select(Patient.first_name, Patient.last_name).where(
-            Patient.id == visit.patient_id
-        )
+        select(Patient.first_name, Patient.last_name).where(Patient.id == visit.patient_id)
     )
     patient_row = patient_result.one_or_none()
     patient_name: str | None = None

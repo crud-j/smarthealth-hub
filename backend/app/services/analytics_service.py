@@ -27,7 +27,7 @@ import csv
 import io
 import json
 import logging
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, Literal
 
 from sqlalchemy import case, func, select
@@ -77,7 +77,7 @@ _VALID_GROUP_BY: set[str] = {"week", "month", "year"}
 
 def _now_utc() -> datetime:
     """Return current UTC datetime (timezone-aware)."""
-    return datetime.now(tz=timezone.utc)
+    return datetime.now(tz=UTC)
 
 
 def _start_of_week(dt: datetime) -> datetime:
@@ -157,21 +157,15 @@ async def get_dashboard_overview(db: AsyncSession) -> dict[str, int]:
     next_week_date = today_date + timedelta(days=7)
 
     # -- Total active patients -------------------------------------------------
-    result = await db.execute(
-        select(func.count(Patient.id)).where(Patient.is_active.is_(True))
-    )
+    result = await db.execute(select(func.count(Patient.id)).where(Patient.is_active.is_(True)))
     total_active_patients: int = result.scalar() or 0
 
     # -- Visits this ISO week --------------------------------------------------
-    result = await db.execute(
-        select(func.count(Visit.id)).where(Visit.visit_date >= week_start)
-    )
+    result = await db.execute(select(func.count(Visit.id)).where(Visit.visit_date >= week_start))
     visits_this_week: int = result.scalar() or 0
 
     # -- Visits this calendar month --------------------------------------------
-    result = await db.execute(
-        select(func.count(Visit.id)).where(Visit.visit_date >= month_start)
-    )
+    result = await db.execute(select(func.count(Visit.id)).where(Visit.visit_date >= month_start))
     visits_this_month: int = result.scalar() or 0
 
     # -- Upcoming appointments (pending + confirmed, future) -------------------
@@ -208,9 +202,7 @@ async def get_dashboard_overview(db: AsyncSession) -> dict[str, int]:
     senior_count: int = result.scalar() or 0
 
     result = await db.execute(
-        select(func.count(Patient.id)).where(
-            Patient.is_pwd.is_(True), Patient.is_active.is_(True)
-        )
+        select(func.count(Patient.id)).where(Patient.is_pwd.is_(True), Patient.is_active.is_(True))
     )
     pwd_count: int = result.scalar() or 0
 
@@ -320,9 +312,9 @@ async def get_vaccination_coverage(db: AsyncSession) -> dict[str, list[dict[str,
         if row.status == "completed":
             age_buckets[group]["completed_patients"].add(row.patient_id)
 
-    _AGE_GROUP_ORDER = ["0-1", "2-5", "6-11", "12-17", "18-59", "60+"]
+    _age_group_order = ["0-1", "2-5", "6-11", "12-17", "18-59", "60+"]
     by_age_group: list[dict[str, Any]] = []
-    for grp in _AGE_GROUP_ORDER:
+    for grp in _age_group_order:
         if grp not in age_buckets:
             continue
         total = len(age_buckets[grp]["all_patients"])
@@ -374,8 +366,8 @@ async def get_illness_trends(
     truncated = func.date_trunc(group_by, MedicalHistory.created_at).label("period_ts")
 
     # Convert from_date / to_date to datetime for TIMESTAMPTZ comparisons.
-    from_dt = datetime(from_date.year, from_date.month, from_date.day, tzinfo=timezone.utc)
-    to_dt = datetime(to_date.year, to_date.month, to_date.day, 23, 59, 59, tzinfo=timezone.utc)
+    from_dt = datetime(from_date.year, from_date.month, from_date.day, tzinfo=UTC)
+    to_dt = datetime(to_date.year, to_date.month, to_date.day, 23, 59, 59, tzinfo=UTC)
 
     q = await db.execute(
         select(
@@ -438,8 +430,8 @@ async def get_appointment_no_show_rate(
     Column used: appointments.scheduled_at (TIMESTAMPTZ).
     Missed status: appointments.status = 'missed'.
     """
-    from_dt = datetime(from_date.year, from_date.month, from_date.day, tzinfo=timezone.utc)
-    to_dt = datetime(to_date.year, to_date.month, to_date.day, 23, 59, 59, tzinfo=timezone.utc)
+    from_dt = datetime(from_date.year, from_date.month, from_date.day, tzinfo=UTC)
+    to_dt = datetime(to_date.year, to_date.month, to_date.day, 23, 59, 59, tzinfo=UTC)
 
     q = await db.execute(
         select(
@@ -507,8 +499,8 @@ async def export_report_data(
     No encrypted PHI fields (diagnosis, treatment_notes, notes) are included
     in export data — only non-sensitive columns are exported.
     """
-    from_dt = datetime(from_date.year, from_date.month, from_date.day, tzinfo=timezone.utc)
-    to_dt = datetime(to_date.year, to_date.month, to_date.day, 23, 59, 59, tzinfo=timezone.utc)
+    from_dt = datetime(from_date.year, from_date.month, from_date.day, tzinfo=UTC)
+    to_dt = datetime(to_date.year, to_date.month, to_date.day, 23, 59, 59, tzinfo=UTC)
 
     rows: list[dict[str, Any]] = []
 
@@ -536,11 +528,7 @@ async def export_report_data(
         for row in q.fetchall():
             today = date.today()
             bd: date = row.birth_date
-            age = (
-                today.year
-                - bd.year
-                - ((today.month, today.day) < (bd.month, bd.day))
-            )
+            age = today.year - bd.year - ((today.month, today.day) < (bd.month, bd.day))
             middle = f" {row.middle_name}" if row.middle_name else ""
             full_name = f"{row.first_name}{middle} {row.last_name}"
             rows.append(
@@ -620,13 +608,9 @@ async def export_report_data(
                     "vaccine_name": row.vaccine_name,
                     "dose_number": row.dose_number,
                     "administered_at": (
-                        row.date_administered.isoformat()
-                        if row.date_administered
-                        else ""
+                        row.date_administered.isoformat() if row.date_administered else ""
                     ),
-                    "next_due_date": (
-                        row.next_due_date.isoformat() if row.next_due_date else ""
-                    ),
+                    "next_due_date": (row.next_due_date.isoformat() if row.next_due_date else ""),
                     "status": row.status,
                 }
             )
@@ -688,7 +672,7 @@ async def get_visit_trends(
     Column used: visits.visit_date (TIMESTAMPTZ).
     """
     weeks = max(1, min(52, weeks))
-    cutoff = datetime.now(tz=timezone.utc) - timedelta(weeks=weeks)
+    cutoff = datetime.now(tz=UTC) - timedelta(weeks=weeks)
 
     week_trunc = func.date_trunc("week", Visit.visit_date)
     result = await db.execute(
@@ -704,9 +688,7 @@ async def get_visit_trends(
 
     return [
         {
-            "week_label": (
-                f"{row.week_start.year}-W{row.week_start.isocalendar()[1]:02d}"
-            ),
+            "week_label": (f"{row.week_start.year}-W{row.week_start.isocalendar()[1]:02d}"),
             "visit_count": row.visit_count,
         }
         for row in rows
@@ -735,8 +717,8 @@ async def get_visit_type_breakdown(
 
     Column used: visits.visit_date (TIMESTAMPTZ).
     """
-    from_dt = datetime(from_date.year, from_date.month, from_date.day, tzinfo=timezone.utc)
-    to_dt = datetime(to_date.year, to_date.month, to_date.day, 23, 59, 59, tzinfo=timezone.utc)
+    from_dt = datetime(from_date.year, from_date.month, from_date.day, tzinfo=UTC)
+    to_dt = datetime(to_date.year, to_date.month, to_date.day, 23, 59, 59, tzinfo=UTC)
 
     q = await db.execute(
         select(

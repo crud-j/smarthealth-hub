@@ -18,7 +18,7 @@ Called from app.workers.audit_tasks (Celery Beat, hourly).
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 import sqlalchemy as sa
 from pydantic import BaseModel
@@ -56,7 +56,7 @@ async def check_phi_view_burst(db: AsyncSession) -> list[AnomalyEvent]:
         List of AnomalyEvent — one per offending user_id.  Empty list when
         no violations are found.
     """
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=60)
+    cutoff = datetime.now(UTC) - timedelta(minutes=60)
 
     rows = (
         await db.execute(
@@ -78,8 +78,7 @@ async def check_phi_view_burst(db: AsyncSession) -> list[AnomalyEvent]:
         AnomalyEvent(
             check_name="phi_view_burst",
             detail=(
-                f"User {row.user_id} performed {row.cnt} PHI_VIEW actions "
-                f"in the last 60 minutes"
+                f"User {row.user_id} performed {row.cnt} PHI_VIEW actions in the last 60 minutes"
             ),
             severity="HIGH",
         )
@@ -105,36 +104,41 @@ async def check_after_hours_deletes(db: AsyncSession) -> list[AnomalyEvent]:
         List of AnomalyEvent — one per offending audit row.  Empty list when
         no violations are found.
     """
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    cutoff = datetime.now(UTC) - timedelta(hours=24)
 
     rows = (
-        await db.execute(
-            sa.select(AuditLog)
-            .where(
-                AuditLog.action == "DELETE",
-                AuditLog.entity_type == "patient",
-                AuditLog.created_at >= cutoff,
-                sa.or_(
-                    sa.extract(
-                        "hour",
-                        AuditLog.created_at + sa.cast(
-                            sa.text("interval '8 hours'"),
-                            sa.Interval,
-                        ),
-                    )
-                    < 8,
-                    sa.extract(
-                        "hour",
-                        AuditLog.created_at + sa.cast(
-                            sa.text("interval '8 hours'"),
-                            sa.Interval,
-                        ),
-                    )
-                    >= 18,
-                ),
+        (
+            await db.execute(
+                sa.select(AuditLog).where(
+                    AuditLog.action == "DELETE",
+                    AuditLog.entity_type == "patient",
+                    AuditLog.created_at >= cutoff,
+                    sa.or_(
+                        sa.extract(
+                            "hour",
+                            AuditLog.created_at
+                            + sa.cast(
+                                sa.text("interval '8 hours'"),
+                                sa.Interval,
+                            ),
+                        )
+                        < 8,
+                        sa.extract(
+                            "hour",
+                            AuditLog.created_at
+                            + sa.cast(
+                                sa.text("interval '8 hours'"),
+                                sa.Interval,
+                            ),
+                        )
+                        >= 18,
+                    ),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     return [
         AnomalyEvent(
@@ -142,7 +146,7 @@ async def check_after_hours_deletes(db: AsyncSession) -> list[AnomalyEvent]:
             detail=(
                 f"DELETE on patient record (entity_id={row.entity_id}) "
                 f"by user {row.user_id} at "
-                f"{(row.created_at.replace(tzinfo=timezone.utc) + _PHT_OFFSET).strftime('%Y-%m-%d %H:%M')} PHT"
+                f"{(row.created_at.replace(tzinfo=UTC) + _PHT_OFFSET).strftime('%Y-%m-%d %H:%M')} PHT"
             ),
             severity="HIGH",
         )
@@ -165,7 +169,7 @@ async def check_login_failure_burst(db: AsyncSession) -> list[AnomalyEvent]:
         List of AnomalyEvent — one per offending IP address.  Empty list when
         no violations are found.
     """
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
+    cutoff = datetime.now(UTC) - timedelta(minutes=5)
 
     rows = (
         await db.execute(
@@ -186,10 +190,7 @@ async def check_login_failure_burst(db: AsyncSession) -> list[AnomalyEvent]:
     return [
         AnomalyEvent(
             check_name="login_failure_burst",
-            detail=(
-                f"IP {row.ip} had {row.cnt} failed login attempts "
-                f"in the last 5 minutes"
-            ),
+            detail=(f"IP {row.ip} had {row.cnt} failed login attempts in the last 5 minutes"),
             severity="HIGH",
         )
         for row in rows

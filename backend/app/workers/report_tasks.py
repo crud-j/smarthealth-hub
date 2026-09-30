@@ -37,7 +37,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import smtplib
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -81,8 +81,7 @@ def _send_email(subject: str, body: str, recipients: list[str]) -> bool:
 
     if not host_user or not host_password:
         logger.warning(
-            "_send_email: EMAIL_HOST_USER or EMAIL_HOST_PASSWORD is not set "
-            "— skipping report email"
+            "_send_email: EMAIL_HOST_USER or EMAIL_HOST_PASSWORD is not set — skipping report email"
         )
         return False
 
@@ -132,13 +131,17 @@ async def _get_admin_emails(db: AsyncSession) -> list[str]:
         List of non-empty email address strings for active admin users.
     """
     rows: list[str] = (
-        await db.execute(
-            sa.select(User.email)
-            .join(Role, User.role_id == Role.id)
-            .where(Role.name == "admin")
-            .where(User.is_active == sa.true())
+        (
+            await db.execute(
+                sa.select(User.email)
+                .join(Role, User.role_id == Role.id)
+                .where(Role.name == "admin")
+                .where(User.is_active == sa.true())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return [e for e in rows if e]
 
 
@@ -167,24 +170,20 @@ def send_weekly_report() -> dict[str, object]:
         from app.workers.db import CelerySessionLocal
 
         if not settings.REPORT_EMAIL_ENABLED:
-            logger.info(
-                "send_weekly_report: REPORT_EMAIL_ENABLED=False — skipping"
-            )
+            logger.info("send_weekly_report: REPORT_EMAIL_ENABLED=False — skipping")
             return {"sent": False, "recipients": 0, "skipped": "REPORT_EMAIL_ENABLED=False"}
 
         async with CelerySessionLocal() as db:
             recipients = await _get_admin_emails(db)
 
             if not recipients:
-                logger.warning(
-                    "send_weekly_report: no active admin users found — skipping"
-                )
+                logger.warning("send_weekly_report: no active admin users found — skipping")
                 return {"sent": False, "recipients": 0, "skipped": "no_admin_users"}
 
             # Date range: last 7 days expressed in UTC (DB stores in UTC).
             now_pht = datetime.now(_PHT)
             week_start_pht = now_pht - timedelta(days=7)
-            week_start_utc = week_start_pht.astimezone(timezone.utc).replace(tzinfo=None)
+            week_start_utc = week_start_pht.astimezone(UTC).replace(tzinfo=None)
 
             # New patient registrations created in the period.
             total_patients: int = (
@@ -224,9 +223,7 @@ def send_weekly_report() -> dict[str, object]:
                 )
             ).scalar_one()
 
-        period = (
-            f"{week_start_pht.strftime('%b %d')} – {now_pht.strftime('%b %d, %Y')}"
-        )
+        period = f"{week_start_pht.strftime('%b %d')} – {now_pht.strftime('%b %d, %Y')}"
         subject = f"SmartHealth Hub — Weekly Report ({period})"
 
         sms_status_line = (
@@ -299,28 +296,20 @@ def send_monthly_report() -> dict[str, object]:
         from app.workers.db import CelerySessionLocal
 
         if not settings.REPORT_EMAIL_ENABLED:
-            logger.info(
-                "send_monthly_report: REPORT_EMAIL_ENABLED=False — skipping"
-            )
+            logger.info("send_monthly_report: REPORT_EMAIL_ENABLED=False — skipping")
             return {"sent": False, "recipients": 0, "skipped": "REPORT_EMAIL_ENABLED=False"}
 
         async with CelerySessionLocal() as db:
             recipients = await _get_admin_emails(db)
 
             if not recipients:
-                logger.warning(
-                    "send_monthly_report: no active admin users found — skipping"
-                )
+                logger.warning("send_monthly_report: no active admin users found — skipping")
                 return {"sent": False, "recipients": 0, "skipped": "no_admin_users"}
 
             # Month range: first day of the current month in PHT → now, expressed in UTC.
             now_pht = datetime.now(_PHT)
-            month_start_pht = now_pht.replace(
-                day=1, hour=0, minute=0, second=0, microsecond=0
-            )
-            month_start_utc = month_start_pht.astimezone(timezone.utc).replace(
-                tzinfo=None
-            )
+            month_start_pht = now_pht.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            month_start_utc = month_start_pht.astimezone(UTC).replace(tzinfo=None)
 
             # New patient registrations this month.
             total_patients: int = (
@@ -388,9 +377,7 @@ def send_monthly_report() -> dict[str, object]:
             round(total_completed / total_due * 100, 1) if total_due > 0 else 0.0
         )
         sms_total = sms_sent + sms_failed
-        sms_success_rate: float = (
-            round(sms_sent / sms_total * 100, 1) if sms_total > 0 else 0.0
-        )
+        sms_success_rate: float = round(sms_sent / sms_total * 100, 1) if sms_total > 0 else 0.0
 
         month_name = month_start_pht.strftime("%B %Y")
         subject = f"SmartHealth Hub — Monthly Report ({month_name})"

@@ -46,8 +46,9 @@ from webauthn import (
     verify_authentication_response,
     verify_registration_response,
 )
-from webauthn.helpers import base64url_to_bytes, bytes_to_base64url
 from webauthn.helpers import (
+    base64url_to_bytes,
+    bytes_to_base64url,
     parse_authentication_credential_json,
     parse_registration_credential_json,
 )
@@ -146,9 +147,7 @@ async def begin_registration(
     from app.models.user import User
 
     result = await db.execute(
-        select(User)
-        .where(User.id == user_id)
-        .options(selectinload(User.role))
+        select(User).where(User.id == user_id).options(selectinload(User.role))
     )
     user: User | None = result.scalar_one_or_none()
     if user is None:
@@ -206,9 +205,7 @@ async def complete_registration(
     redis_key = f"passkey:reg:{user_id}"
     stored_challenge_b64: str | None = await _get_redis_challenge(redis_key)
     if not stored_challenge_b64:
-        raise ValidationError(
-            "Registration session expired. Please start the registration again."
-        )
+        raise ValidationError("Registration session expired. Please start the registration again.")
     await _delete_redis_key(redis_key)
 
     try:
@@ -280,16 +277,12 @@ async def begin_authentication(
     from app.models.user import User
 
     result = await db.execute(
-        select(User)
-        .where(User.email == email)
-        .options(selectinload(User.role))
+        select(User).where(User.email == email).options(selectinload(User.role))
     )
     user: User | None = result.scalar_one_or_none()
     if user is None or not user.is_active:
         # Generic message — do not leak whether the account exists.
-        raise UnauthorizedError(
-            "Invalid credentials or no passkeys registered."
-        )
+        raise UnauthorizedError("Invalid credentials or no passkeys registered.")
 
     creds_result = await db.execute(
         select(PasskeyCredential).where(
@@ -307,9 +300,7 @@ async def begin_authentication(
 
     options = generate_authentication_options(
         rp_id=settings.WEBAUTHN_RP_ID,
-        allow_credentials=[
-            PublicKeyCredentialDescriptor(id=c.credential_id) for c in creds
-        ],
+        allow_credentials=[PublicKeyCredentialDescriptor(id=c.credential_id) for c in creds],
         challenge=challenge,
         timeout=60000,
         user_verification=UserVerificationRequirement.REQUIRED,
@@ -349,9 +340,7 @@ async def complete_authentication(
     from app.services import audit_service
 
     result = await db.execute(
-        select(User)
-        .where(User.email == email)
-        .options(selectinload(User.role))
+        select(User).where(User.email == email).options(selectinload(User.role))
     )
     user: User | None = result.scalar_one_or_none()
     if user is None or not user.is_active:
@@ -377,9 +366,7 @@ async def complete_authentication(
     redis_key = f"passkey:auth:{user.id}"
     stored_challenge_b64: str | None = await _get_redis_challenge(redis_key)
     if not stored_challenge_b64:
-        raise UnauthorizedError(
-            "Authentication session expired. Please try signing in again."
-        )
+        raise UnauthorizedError("Authentication session expired. Please try signing in again.")
     await _delete_redis_key(redis_key)
 
     try:

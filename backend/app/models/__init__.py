@@ -13,22 +13,22 @@ Import order respects FK dependency:
   ai_risk_scores → ai_anomaly_alerts
 """
 
-from app.models.user import Role, User  # noqa: F401
-from app.models.patient import Patient  # noqa: F401
-from app.models.medical_history import MedicalHistory  # noqa: F401
-from app.models.immunization import Immunization  # noqa: F401
-from app.models.appointment import Appointment  # noqa: F401
-from app.models.visit import Visit  # noqa: F401
-from app.models.health_card import HealthCard  # noqa: F401
-from app.models.card_verification import CardVerification  # noqa: F401
-from app.models.mfa_otp import MfaOtp  # noqa: F401
-from app.models.sms_log import SmsLog  # noqa: F401
-from app.models.audit_log import AuditLog  # noqa: F401
-from app.models.passkey_credential import PasskeyCredential  # noqa: F401
-from app.models.ai_risk_score import AiRiskScore  # noqa: F401
 from app.models.ai_anomaly_alert import AiAnomalyAlert  # noqa: F401
-from app.models.intake_token import PatientIntakeToken  # noqa: F401
+from app.models.ai_risk_score import AiRiskScore  # noqa: F401
+from app.models.appointment import Appointment  # noqa: F401
+from app.models.audit_log import AuditLog  # noqa: F401
+from app.models.card_verification import CardVerification  # noqa: F401
+from app.models.health_card import HealthCard  # noqa: F401
+from app.models.immunization import Immunization  # noqa: F401
 from app.models.intake_application import IntakeApplication  # noqa: F401
+from app.models.intake_token import PatientIntakeToken  # noqa: F401
+from app.models.medical_history import MedicalHistory  # noqa: F401
+from app.models.mfa_otp import MfaOtp  # noqa: F401
+from app.models.passkey_credential import PasskeyCredential  # noqa: F401
+from app.models.patient import Patient  # noqa: F401
+from app.models.sms_log import SmsLog  # noqa: F401
+from app.models.user import Role, User  # noqa: F401
+from app.models.visit import Visit  # noqa: F401
 
 __all__ = [
     "Role",

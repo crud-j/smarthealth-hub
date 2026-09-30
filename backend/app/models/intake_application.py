@@ -39,9 +39,7 @@ class IntakeApplication(Base):
         primary_key=True,
         server_default=sa.text("gen_random_uuid()"),
     )
-    reference_number: Mapped[str] = mapped_column(
-        sa.String(20), nullable=False, unique=True
-    )
+    reference_number: Mapped[str] = mapped_column(sa.String(20), nullable=False, unique=True)
     # lifecycle: 'pending' | 'approved' | 'rejected'
     status: Mapped[str] = mapped_column(
         sa.String(20), nullable=False, server_default=sa.text("'pending'")
@@ -57,18 +55,20 @@ class IntakeApplication(Base):
     # Review
     reviewed_by_id: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
-        sa.ForeignKey("users.id", name="fk_intake_applications_reviewed_by_users", ondelete="SET NULL"),
+        sa.ForeignKey(
+            "users.id", name="fk_intake_applications_reviewed_by_users", ondelete="SET NULL"
+        ),
         nullable=True,
     )
-    reviewed_at: Mapped[datetime | None] = mapped_column(
-        sa.TIMESTAMP(timezone=True), nullable=True
-    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(sa.TIMESTAMP(timezone=True), nullable=True)
     rejection_reason: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
 
     # Set after approval
     patient_id: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
-        sa.ForeignKey("patients.id", name="fk_intake_applications_patient_id_patients", ondelete="SET NULL"),
+        sa.ForeignKey(
+            "patients.id", name="fk_intake_applications_patient_id_patients", ondelete="SET NULL"
+        ),
         nullable=True,
     )
 
@@ -87,18 +87,16 @@ class IntakeApplication(Base):
     )
 
     # Relationships
-    reviewed_by_user: Mapped["User | None"] = relationship(
+    reviewed_by_user: Mapped[User | None] = relationship(
         "User",
         foreign_keys=[reviewed_by_id],
         lazy="noload",
     )
-    patient: Mapped["Patient | None"] = relationship(
+    patient: Mapped[Patient | None] = relationship(
         "Patient",
         foreign_keys=[patient_id],
         lazy="noload",
     )
 
     def __repr__(self) -> str:
-        return (
-            f"<IntakeApplication ref={self.reference_number!r} status={self.status!r}>"
-        )
+        return f"<IntakeApplication ref={self.reference_number!r} status={self.status!r}>"

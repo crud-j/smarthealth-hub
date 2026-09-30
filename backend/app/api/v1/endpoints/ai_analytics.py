@@ -24,7 +24,7 @@ All routes require JWT auth via get_current_user.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Query
@@ -32,8 +32,8 @@ from fastapi import APIRouter, Query
 from app.core.security import CurrentUser, require_role
 from app.db.session import DbDep
 from app.schemas.ai_analytics import (
-    AnomalyAlertsResponse,
     AnomalyAlert,
+    AnomalyAlertsResponse,
     AppointmentRiskScore,
     NoShowRiskResponse,
     TriggerTaskResponse,
@@ -47,9 +47,7 @@ async def get_no_show_risk(
     db: DbDep,
     current_user: CurrentUser,
     limit: Annotated[int, Query(ge=1, le=50)] = 10,
-    risk_level: Annotated[
-        Literal["high", "medium", "low"] | None, Query()
-    ] = None,
+    risk_level: Annotated[Literal["high", "medium", "low"] | None, Query()] = None,
 ) -> NoShowRiskResponse:
     """
     Return the latest AI-computed risk scores for upcoming appointments,
@@ -57,6 +55,7 @@ async def get_no_show_risk(
     Optionally filter by risk_level.
     """
     from sqlalchemy import select
+
     from app.models.ai_risk_score import AiRiskScore
 
     stmt = select(AiRiskScore).order_by(AiRiskScore.risk_score.desc())
@@ -69,10 +68,9 @@ async def get_no_show_risk(
 
     # Count totals (unfiltered by risk_level for summary)
     from sqlalchemy import func
+
     total_stmt = select(func.count(AiRiskScore.id))
-    high_stmt = select(func.count(AiRiskScore.id)).where(
-        AiRiskScore.risk_level == "high"
-    )
+    high_stmt = select(func.count(AiRiskScore.id)).where(AiRiskScore.risk_level == "high")
     total_result = await db.execute(total_stmt)
     high_result = await db.execute(high_stmt)
     total = total_result.scalar_one_or_none() or 0
@@ -97,7 +95,7 @@ async def get_no_show_risk(
         items=items,
         total=total,
         high_risk_count=high_risk_count,
-        generated_at=datetime.now(tz=timezone.utc),
+        generated_at=datetime.now(tz=UTC),
     )
 
 
@@ -110,6 +108,7 @@ async def get_anomaly_alerts(
     Return active anomaly alerts (is_active=True), ordered by z_score descending.
     """
     from sqlalchemy import select
+
     from app.models.ai_anomaly_alert import AiAnomalyAlert
 
     stmt = (
@@ -139,7 +138,7 @@ async def get_anomaly_alerts(
     return AnomalyAlertsResponse(
         alerts=alerts,
         total=len(alerts),
-        generated_at=datetime.now(tz=timezone.utc),
+        generated_at=datetime.now(tz=UTC),
     )
 
 

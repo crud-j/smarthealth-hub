@@ -23,27 +23,29 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from app.workers.celery_app import celery_app
 from app.core.logging import get_logger
+from app.workers.celery_app import celery_app
 
 logger = get_logger(__name__)
 
 
 def _now_utc() -> datetime:
-    return datetime.now(tz=timezone.utc)
+    return datetime.now(tz=UTC)
 
 
 # ---------------------------------------------------------------------------
 # Risk scoring task
 # ---------------------------------------------------------------------------
 
+
 async def _run_risk_scoring_async() -> dict:  # type: ignore[type-arg]
     from sqlalchemy import delete, select
-    from app.workers.db import CelerySessionLocal
+
     from app.models.ai_risk_score import AiRiskScore
-    from app.services import risk_scoring_service, ai_service
+    from app.services import ai_service, risk_scoring_service
+    from app.workers.db import CelerySessionLocal
 
     scored = 0
     skipped = 0
@@ -163,11 +165,13 @@ def run_risk_scoring_task(self) -> dict:  # type: ignore[type-arg]
 # Anomaly detection task
 # ---------------------------------------------------------------------------
 
+
 async def _run_anomaly_detection_async() -> dict:  # type: ignore[type-arg]
     from sqlalchemy import update
-    from app.workers.db import CelerySessionLocal
+
     from app.models.ai_anomaly_alert import AiAnomalyAlert
-    from app.services import risk_scoring_service, ai_service
+    from app.services import ai_service, risk_scoring_service
+    from app.workers.db import CelerySessionLocal
 
     alerts_created = 0
     alerts_cleared = 0
@@ -194,14 +198,13 @@ async def _run_anomaly_detection_async() -> dict:  # type: ignore[type-arg]
         )
 
         # Step 2: Run statistical anomaly detection
-        anomalies = await risk_scoring_service.run_illness_anomaly_detection(
-            db, lookback_weeks=8
-        )
+        anomalies = await risk_scoring_service.run_illness_anomaly_detection(db, lookback_weeks=8)
 
         # Step 3: For each anomaly, generate AI alert and insert if not exists
         for anomaly in anomalies:
             # Idempotency: skip if alert for this condition+week already active
             from sqlalchemy import select
+
             existing_stmt = select(AiAnomalyAlert.id).where(
                 AiAnomalyAlert.condition_name == anomaly["condition_name"],
                 AiAnomalyAlert.week_label == anomaly["week_label"],

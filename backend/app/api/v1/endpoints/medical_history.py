@@ -43,8 +43,7 @@ from app.schemas.medical_history import (
     MedicalHistoryResponse,
 )
 from app.schemas.visit import VisitCreate, VisitResponse, VisitSummary, VisitUpdate
-from app.services import patient_service, visit_service
-from app.services import medical_history_service
+from app.services import medical_history_service, patient_service, visit_service
 
 router = APIRouter(tags=["medical-history"])
 

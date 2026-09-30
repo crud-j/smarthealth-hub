@@ -45,7 +45,7 @@ from app.schemas.sms_log import (
 
 logger = get_logger(__name__)
 
-from app.workers.sms_tasks import send_reminder_task as _send_reminder_task
+from app.workers.sms_tasks import send_reminder_task as _send_reminder_task  # noqa: E402
 
 send_reminder_task = _send_reminder_task
 
@@ -80,8 +80,12 @@ async def list_sms_logs(
         str | None,
         Query(description="Filter by status: queued | sent | delivered | failed"),
     ] = None,
-    date_from: Annotated[date | None, Query(description="Lower bound on created_at (YYYY-MM-DD)")] = None,
-    date_to: Annotated[date | None, Query(description="Upper bound on created_at (YYYY-MM-DD)")] = None,
+    date_from: Annotated[
+        date | None, Query(description="Lower bound on created_at (YYYY-MM-DD)")
+    ] = None,
+    date_to: Annotated[
+        date | None, Query(description="Upper bound on created_at (YYYY-MM-DD)")
+    ] = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> PaginatedSMSLogs:
@@ -93,6 +97,7 @@ async def list_sms_logs(
     **Required roles:** admin, bhw
     """
     from sqlalchemy import func, select
+
     from app.models.sms_log import SmsLog
 
     page_size = min(page_size, 100)
@@ -108,9 +113,7 @@ async def list_sms_logs(
     if date_to is not None:
         base_q = base_q.where(func.date(SmsLog.created_at) <= date_to)
 
-    count_result = await db.execute(
-        select(func.count()).select_from(base_q.subquery())
-    )
+    count_result = await db.execute(select(func.count()).select_from(base_q.subquery()))
     total: int = count_result.scalar_one()
 
     rows_result = await db.execute(
@@ -183,6 +186,7 @@ async def send_manual_sms(
     from datetime import UTC, datetime
 
     from sqlalchemy import select
+
     from app.core.exceptions import NotFoundError, ValidationError
     from app.models.patient import Patient
     from app.models.sms_log import SmsLog
@@ -333,6 +337,7 @@ async def sms_delivery_status_webhook(
                     extra={"remote": str(request.client)},
                 )
                 from fastapi.responses import JSONResponse
+
                 return JSONResponse(
                     status_code=403,
                     content={"detail": "Invalid webhook signature"},
@@ -359,6 +364,7 @@ async def sms_delivery_status_webhook(
 
     try:
         from sqlalchemy import select
+
         from app.models.sms_log import SmsLog
 
         # Normalise Semaphore status strings to our internal status values.
@@ -423,15 +429,14 @@ async def sms_delivery_status_webhook(
     # delivery-status value).
     try:
         from sqlalchemy import select as sa_select
+
         from app.models.sms_log import SmsLog as SmsLogModel
         from app.services import appointment_service
 
         # Extract reply text from known Semaphore inbound reply field names.
         extra_fields: dict = body.model_extra or {}  # type: ignore[type-arg]
         reply_text: str | None = (
-            extra_fields.get("message")
-            or extra_fields.get("text")
-            or extra_fields.get("body")
+            extra_fields.get("message") or extra_fields.get("text") or extra_fields.get("body")
         )
 
         # If none of the extra fields carry the reply, check whether the
@@ -447,13 +452,10 @@ async def sms_delivery_status_webhook(
 
             if "CONFIRM" in normalised_reply:
                 # Extract the 4-digit token immediately following CONFIRM.
-                _match = re.search(
-                    r"\bCONFIRM\s+(\d{4})\b", normalised_reply, re.IGNORECASE
-                )
+                _match = re.search(r"\bCONFIRM\s+(\d{4})\b", normalised_reply, re.IGNORECASE)
                 if not _match:
                     logger.debug(
-                        "Semaphore inbound reply contains CONFIRM but no valid "
-                        "4-digit token",
+                        "Semaphore inbound reply contains CONFIRM but no valid 4-digit token",
                         extra={"reply_text": reply_text[:80]},
                     )
                 else:
@@ -470,20 +472,15 @@ async def sms_delivery_status_webhook(
                         SmsLogModel.status != "replied",
                     )
                     confirm_result = await db.execute(stmt)
-                    sms_log_row: SmsLogModel | None = (
-                        confirm_result.scalar_one_or_none()
-                    )
+                    sms_log_row: SmsLogModel | None = confirm_result.scalar_one_or_none()
 
                     if sms_log_row is None:
                         logger.info(
-                            "Semaphore CONFIRM reply: no matching sms_log found "
-                            "for token",
+                            "Semaphore CONFIRM reply: no matching sms_log found for token",
                             extra={"token": token},
                         )
                     else:
-                        appointment_id = uuid.UUID(
-                            sms_log_row.sms_metadata["appointment_id"]
-                        )
+                        appointment_id = uuid.UUID(sms_log_row.sms_metadata["appointment_id"])
 
                         # Confirm the appointment — idempotent; already-confirmed
                         # appointments are silently skipped inside the service.
@@ -526,13 +523,12 @@ async def sms_delivery_status_webhook(
     # in "message", "text", or "body" (same fields as CONFIRM handling).
     try:
         from sqlalchemy import select as _sa_select
+
         from app.models.patient import Patient as _Patient
 
         _extra: dict = body.model_extra or {}  # type: ignore[type-arg]
         _reply_text_stop: str | None = (
-            _extra.get("message")
-            or _extra.get("text")
-            or _extra.get("body")
+            _extra.get("message") or _extra.get("text") or _extra.get("body")
         )
 
         # Fall back to body.status when it is not a known delivery-status value
@@ -545,15 +541,13 @@ async def sms_delivery_status_webhook(
         if _reply_text_stop:
             _normalised_stop = _reply_text_stop.strip().upper()
             # CTIA opt-out keywords as per short-code standards.
-            _STOP_KEYWORDS = {"STOP", "UNSUBSCRIBE", "CANCEL", "QUIT", "END"}
+            _stop_keywords = {"STOP", "UNSUBSCRIBE", "CANCEL", "QUIT", "END"}
 
-            if _normalised_stop in _STOP_KEYWORDS:
+            if _normalised_stop in _stop_keywords:
                 # Semaphore inbound reply payload carries the sender's number
                 # in "from" or "sender_number" extra fields.
                 _sender_number: str | None = (
-                    _extra.get("from")
-                    or _extra.get("sender_number")
-                    or _extra.get("sender")
+                    _extra.get("from") or _extra.get("sender_number") or _extra.get("sender")
                 )
 
                 if _sender_number:
@@ -596,7 +590,11 @@ async def sms_delivery_status_webhook(
         )
 
     reason = _delivery_result.get("reason") if isinstance(_delivery_result, dict) else None
-    processed = bool(_delivery_result.get("delivery_processed")) if isinstance(_delivery_result, dict) else False
+    processed = (
+        bool(_delivery_result.get("delivery_processed"))
+        if isinstance(_delivery_result, dict)
+        else False
+    )
     payload = {"received": True, "processed": processed}
     if reason is not None:
         payload["reason"] = reason

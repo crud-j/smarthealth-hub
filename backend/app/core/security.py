@@ -32,15 +32,14 @@ Security notes:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Annotated, Any
 
-import asyncio
-
 import redis.asyncio as aioredis
-from fastapi import Cookie, Depends, Request
+from fastapi import Cookie, Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import ExpiredSignatureError, JWTError, jwt
 from passlib.hash import argon2
@@ -166,8 +165,7 @@ async def is_token_revoked(jti: str) -> bool:
         # so a Windows-side TCP reset (error 10054) on the Redis connection never
         # turns into a 500 on the caller's request. Fail open: allow the token.
         _logger.warning(
-            "is_token_revoked: Redis unavailable — allowing token (JTI %s). "
-            "Error: %s",
+            "is_token_revoked: Redis unavailable — allowing token (JTI %s). Error: %s",
             jti,
             exc,
         )
@@ -413,9 +411,7 @@ async def get_current_user(
 
     # Load user with role relationship in one query (avoids lazy-load error in async).
     result = await db.execute(
-        select(UserModel)
-        .where(UserModel.id == user_id)
-        .options(selectinload(UserModel.role))
+        select(UserModel).where(UserModel.id == user_id).options(selectinload(UserModel.role))
     )
     user: UserModel | None = result.scalar_one_or_none()
 
@@ -472,6 +468,7 @@ def require_role(*roles: str) -> Any:
         async def delete_patient(current_user: User = AdminOnly, ...):
             ...
     """
+
     async def _role_checker(
         current_user: Annotated[User, Depends(get_current_user)],
     ) -> User:

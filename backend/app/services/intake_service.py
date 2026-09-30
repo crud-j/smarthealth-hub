@@ -73,10 +73,14 @@ async def get_intake_token(
 
     now = datetime.now(UTC)
     if intake_token.expires_at < now:
-        raise ValueError("This intake link has expired. Please ask the health center to send a new link.")
+        raise ValueError(
+            "This intake link has expired. Please ask the health center to send a new link."
+        )
 
     if intake_token.used_at is not None:
-        raise ValueError("This intake link has already been used. Please contact the health center.")
+        raise ValueError(
+            "This intake link has already been used. Please contact the health center."
+        )
 
     return intake_token
 
@@ -101,7 +105,9 @@ async def save_draft(
             if "visit_purpose" not in raw_details:
                 raw_details = {**raw_details, "visit_purpose": visit_purpose}
             import pydantic  # noqa: PLC0415
+
             from app.schemas.intake import PurposeDetails  # noqa: PLC0415
+
             pydantic.TypeAdapter(PurposeDetails).validate_python(raw_details)
             intake_token.purpose_details = raw_details
         except pydantic.ValidationError:

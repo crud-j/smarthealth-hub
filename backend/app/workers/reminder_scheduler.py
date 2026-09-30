@@ -35,15 +35,15 @@ from __future__ import annotations
 import asyncio
 import random
 import uuid
-from datetime import date, datetime, timedelta, UTC
+from datetime import UTC, date, datetime, timedelta
 
-from app.workers.celery_app import celery_app
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.workers.celery_app import celery_app
 
 logger = get_logger(__name__)
 
-from app.workers.sms_tasks import send_reminder_task as _celery_send_reminder_task
+from app.workers.sms_tasks import send_reminder_task as _celery_send_reminder_task  # noqa: E402
 
 send_reminder_task = _celery_send_reminder_task
 
@@ -125,7 +125,8 @@ async def _dispatch_appointment_reminders_async() -> int:
 
     Returns the number of sms_log rows newly created (for logging).
     """
-    from sqlalchemy import select, not_, exists, text
+    from sqlalchemy import exists, not_, select
+
     from app.models.appointment import Appointment
     from app.models.patient import Patient
     from app.models.sms_log import SmsLog
@@ -167,9 +168,7 @@ async def _dispatch_appointment_reminders_async() -> int:
         rows = result.all()
 
         for appt, patient in rows:
-            full_name = _build_full_name(
-                patient.first_name, patient.middle_name, patient.last_name
-            )
+            full_name = _build_full_name(patient.first_name, patient.middle_name, patient.last_name)
             scheduled_date = appt.scheduled_at.strftime("%m/%d/%Y")
             scheduled_time = appt.scheduled_at.strftime("%I:%M %p")
 
@@ -239,7 +238,8 @@ async def _dispatch_immunization_reminders_async() -> int:
 
     Returns the number of sms_log rows newly created.
     """
-    from sqlalchemy import and_, func, not_, exists, select
+    from sqlalchemy import exists, func, not_, select
+
     from app.models.immunization import Immunization
     from app.models.patient import Patient
     from app.models.sms_log import SmsLog
@@ -281,9 +281,7 @@ async def _dispatch_immunization_reminders_async() -> int:
         rows = result.all()
 
         for immunization, patient in rows:
-            full_name = _build_full_name(
-                patient.first_name, patient.middle_name, patient.last_name
-            )
+            full_name = _build_full_name(patient.first_name, patient.middle_name, patient.last_name)
             due_date_str = immunization.next_due_date.strftime("%m/%d/%Y")
 
             lang = _resolve_lang(patient.preferred_language, "immunization_reminder")
@@ -391,6 +389,7 @@ async def _mark_missed_appointments_async() -> int:
     Returns the number of rows updated.
     """
     from sqlalchemy import func, select, update
+
     from app.models.appointment import Appointment
     from app.models.patient import Patient
     from app.models.sms_log import SmsLog
@@ -440,7 +439,13 @@ async def _mark_missed_appointments_async() -> int:
             bhc_name: str = settings.BHC_NAME
             enqueued_count = 0
 
-            for appointment_id, patient_id, mobile_number, first_name, preferred_language in missed_rows:
+            for (
+                appointment_id,
+                patient_id,
+                mobile_number,
+                first_name,
+                preferred_language,
+            ) in missed_rows:
                 lang = _resolve_lang(preferred_language, "missed_appointment")
                 message = SMS_TEMPLATES["missed_appointment"][lang].format(
                     first_name=first_name,

@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,8 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import NotFoundError
 from app.core.logging import get_logger
 from app.models.health_card import HealthCard
-from app.services import qr_service
-from app.services import nfc_payload_service
+from app.services import nfc_payload_service, qr_service
 from app.services.audit_service import write_audit_log
 from app.services.patient_service import get_patient
 
@@ -62,9 +61,7 @@ async def _next_card_number(db: AsyncSession) -> str:
     prefix = f"SH-{year}-"
 
     result = await db.execute(
-        select(func.max(HealthCard.card_number)).where(
-            HealthCard.card_number.like(f"{prefix}%")
-        )
+        select(func.max(HealthCard.card_number)).where(HealthCard.card_number.like(f"{prefix}%"))
     )
     max_number: str | None = result.scalar_one_or_none()
 
@@ -194,9 +191,7 @@ async def generate_card(
     card_number = await _next_card_number(db)
     card_version = 1
 
-    signed_url, qr_data_uri = qr_service.encode_qr_payload(
-        str(patient_id), card_version
-    )
+    signed_url, qr_data_uri = qr_service.encode_qr_payload(str(patient_id), card_version)
     qr_hash = qr_service.hash_qr_url(signed_url)
 
     new_card = HealthCard(
@@ -205,7 +200,7 @@ async def generate_card(
         qr_payload_hash=qr_hash,
         card_version=card_version,
         status="active",
-        issued_at=datetime.now(timezone.utc),
+        issued_at=datetime.now(UTC),
         issued_by=issued_by_id,
     )
     db.add(new_card)
@@ -309,9 +304,7 @@ async def reissue_card(
     new_card_number = await _next_card_number(db)
     new_card_version = old_version + 1
 
-    signed_url, qr_data_uri = qr_service.encode_qr_payload(
-        str(patient_id), new_card_version
-    )
+    signed_url, qr_data_uri = qr_service.encode_qr_payload(str(patient_id), new_card_version)
     qr_hash = qr_service.hash_qr_url(signed_url)
 
     new_card = HealthCard(
@@ -320,7 +313,7 @@ async def reissue_card(
         qr_payload_hash=qr_hash,
         card_version=new_card_version,
         status="active",
-        issued_at=datetime.now(timezone.utc),
+        issued_at=datetime.now(UTC),
         issued_by=issued_by_id,
         # nfc_uid is None — staff must re-link via /nfc-link after reissue.
     )
@@ -410,9 +403,7 @@ async def get_bulk_card_status(
     if not patient_ids:
         return {}
 
-    result = await db.execute(
-        select(HealthCard).where(HealthCard.patient_id.in_(patient_ids))
-    )
+    result = await db.execute(select(HealthCard).where(HealthCard.patient_id.in_(patient_ids)))
     cards = result.scalars().all()
 
     # Build a map of patient_id → card dict.  If a patient has multiple card

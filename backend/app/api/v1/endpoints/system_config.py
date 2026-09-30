@@ -22,7 +22,7 @@ from fastapi import APIRouter
 from app.core.config import settings
 from app.core.security import CurrentUser, require_role
 from app.models.user import User
-from app.schemas.system_config import SystemInfoResponse, RegistrationUrlResponse
+from app.schemas.system_config import RegistrationUrlResponse, SystemInfoResponse
 
 router = APIRouter(prefix="/system", tags=["System"])
 
