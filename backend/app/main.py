@@ -390,7 +390,7 @@ async def custom_swagger_ui() -> HTMLResponse:
         },
     )
     # Inject the auto-auth script just before </body>.
-    patched = html.body.decode().replace("</body>", f"{_SWAGGER_AUTO_AUTH_JS}</body>")
+    patched = bytes(html.body).decode().replace("</body>", f"{_SWAGGER_AUTO_AUTH_JS}</body>")
     return HTMLResponse(content=patched, status_code=200)
 
 
@@ -471,7 +471,9 @@ async def nfc_tap_view(
     db: _DbDep,
 ) -> _ViewByIdentifierResponse:
     """Thin shim — delegates to the health-cards view handler."""
-    return await _view_health_card_by_identifier(identifier=identifier, request=request, db=db)
+    return await _view_health_card_by_identifier(  # type: ignore[return-value]
+        identifier=identifier, request=request, db=db
+    )
 
 
 # ---------------------------------------------------------------------------

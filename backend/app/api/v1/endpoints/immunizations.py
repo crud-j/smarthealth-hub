@@ -339,21 +339,19 @@ async def list_all_immunizations(
     )
     items = [
         ImmunizationWithPatientResponse(
-            **{
-                "id": str(rec.id),
-                "patient_id": str(rec.patient_id),
-                "vaccine_name": rec.vaccine_name,
-                "dose_number": rec.dose_number,
-                "date_administered": rec.date_administered,
-                "administered_by": str(rec.administered_by) if rec.administered_by else None,
-                "batch_number": rec.batch_number,
-                "next_due_date": rec.next_due_date,
-                "notes": rec.notes,
-                "status": rec.status,
-                "created_at": rec.created_at,
-                "updated_at": rec.updated_at,
-                "patient_name": patient_name,
-            }
+            id=str(rec.id),
+            patient_id=str(rec.patient_id),
+            vaccine_name=rec.vaccine_name,
+            dose_number=rec.dose_number,
+            date_administered=rec.date_administered,
+            administered_by=str(rec.administered_by) if rec.administered_by else None,
+            batch_number=rec.batch_number,
+            next_due_date=rec.next_due_date,
+            notes=rec.notes,
+            status=rec.status,
+            created_at=rec.created_at,
+            updated_at=rec.updated_at,
+            patient_name=patient_name,
         )
         for rec, patient_name in rows
     ]

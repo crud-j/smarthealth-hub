@@ -130,7 +130,7 @@ async def _get_admin_emails(db: AsyncSession) -> list[str]:
     Returns:
         List of non-empty email address strings for active admin users.
     """
-    rows: list[str] = (
+    rows = list(
         (
             await db.execute(
                 sa.select(User.email)

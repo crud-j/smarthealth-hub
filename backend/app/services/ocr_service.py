@@ -358,7 +358,7 @@ def _preprocess_for_ocr(image: PIL.Image.Image) -> PIL.Image.Image:  # type: ign
         scale = target_min_dim / longest
         new_w = int(round(w * scale))
         new_h = int(round(h * scale))
-        gray = gray.resize((new_w, new_h), Image.LANCZOS)
+        gray = gray.resize((new_w, new_h), Image.Resampling.LANCZOS)
 
     # Sharpen
     gray = gray.filter(ImageFilter.UnsharpMask(radius=1.5, percent=180, threshold=3))

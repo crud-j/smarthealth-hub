@@ -24,6 +24,9 @@ from __future__ import annotations
 import asyncio
 import uuid
 from datetime import UTC, datetime
+from typing import Any, cast
+
+from sqlalchemy.engine import CursorResult
 
 from app.core.logging import get_logger
 from app.workers.celery_app import celery_app
@@ -62,7 +65,7 @@ async def _run_risk_scoring_async() -> dict:  # type: ignore[type-arg]
         await db.commit()
         logger.info(
             "Expired risk scores deleted",
-            extra={"count": deleted_result.rowcount},
+            extra={"count": cast(CursorResult[tuple[()]], deleted_result).rowcount},
         )
 
         # Step 2: Get upcoming appointments with features
@@ -143,7 +146,7 @@ async def _run_risk_scoring_async() -> dict:  # type: ignore[type-arg]
 
 
 @celery_app.task(name="ai_tasks.run_risk_scoring", bind=True, max_retries=2)
-def run_risk_scoring_task(self) -> dict:  # type: ignore[type-arg]
+def run_risk_scoring_task(self: Any) -> dict:  # type: ignore[misc]
     """
     Nightly Celery Beat task (01:00 Asia/Manila).
     Scores upcoming appointments and writes results to ai_risk_scores.
@@ -191,7 +194,7 @@ async def _run_anomaly_detection_async() -> dict:  # type: ignore[type-arg]
         )
         cleared_result = await db.execute(clear_stmt)
         await db.commit()
-        alerts_cleared = cleared_result.rowcount
+        alerts_cleared = cast(CursorResult[tuple[()]], cleared_result).rowcount
         logger.info(
             "Previous anomaly alerts deactivated",
             extra={"count": alerts_cleared},
@@ -262,7 +265,7 @@ async def _run_anomaly_detection_async() -> dict:  # type: ignore[type-arg]
 
 
 @celery_app.task(name="ai_tasks.run_anomaly_detection", bind=True, max_retries=2)
-def run_anomaly_detection_task(self) -> dict:  # type: ignore[type-arg]
+def run_anomaly_detection_task(self: Any) -> dict:  # type: ignore[misc]
     """
     Nightly Celery Beat task (01:30 Asia/Manila).
     Detects illness trend anomalies and writes results to ai_anomaly_alerts.

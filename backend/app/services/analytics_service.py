@@ -304,13 +304,13 @@ async def get_vaccination_coverage(db: AsyncSession) -> dict[str, list[dict[str,
 
     # Aggregate into a nested dict: {age_group: {"total_patients": set, "completed": set}}
     age_buckets: dict[str, dict[str, set[Any]]] = {}
-    for row in age_rows:
-        group = _age_group_from_birth_date(row.birth_date)
+    for age_row in age_rows:  # type: ignore[assignment]
+        group = _age_group_from_birth_date(age_row.birth_date)
         if group not in age_buckets:
             age_buckets[group] = {"all_patients": set(), "completed_patients": set()}
-        age_buckets[group]["all_patients"].add(row.patient_id)
-        if row.status == "completed":
-            age_buckets[group]["completed_patients"].add(row.patient_id)
+        age_buckets[group]["all_patients"].add(age_row.patient_id)
+        if age_row.status == "completed":
+            age_buckets[group]["completed_patients"].add(age_row.patient_id)
 
     _age_group_order = ["0-1", "2-5", "6-11", "12-17", "18-59", "60+"]
     by_age_group: list[dict[str, Any]] = []

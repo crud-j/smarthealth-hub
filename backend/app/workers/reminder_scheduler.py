@@ -36,6 +36,9 @@ import asyncio
 import random
 import uuid
 from datetime import UTC, date, datetime, timedelta
+from typing import Any, cast
+
+from sqlalchemy.engine import CursorResult
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -282,7 +285,7 @@ async def _dispatch_immunization_reminders_async() -> int:
 
         for immunization, patient in rows:
             full_name = _build_full_name(patient.first_name, patient.middle_name, patient.last_name)
-            due_date_str = immunization.next_due_date.strftime("%m/%d/%Y")
+            due_date_str = immunization.next_due_date.strftime("%m/%d/%Y") if immunization.next_due_date is not None else ""  # type: ignore[union-attr]
 
             lang = _resolve_lang(patient.preferred_language, "immunization_reminder")
             message = SMS_TEMPLATES["immunization_reminder"][lang].format(
@@ -407,7 +410,7 @@ async def _mark_missed_appointments_async() -> int:
             .execution_options(synchronize_session=False)
         )
         await db.commit()
-        updated_count: int = result.rowcount
+        updated_count: int = cast(CursorResult[tuple[()]], result).rowcount
 
     # ── Step 2: enqueue post-miss follow-up SMS for affected patients ─────────
     # Runs in a separate session so a failure here cannot roll back the status
@@ -506,7 +509,7 @@ async def _mark_missed_appointments_async() -> int:
 
 
 @celery_app.task(name="workers.mark_missed_appointments", bind=True, max_retries=3)
-def mark_missed_appointments(self) -> dict:  # type: ignore[type-arg]
+def mark_missed_appointments(self: Any) -> dict:  # type: ignore[misc]
     """
     Nightly periodic task (Celery Beat, runs at 23:00 Asia/Manila).
 

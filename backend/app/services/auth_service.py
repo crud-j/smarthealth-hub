@@ -161,6 +161,8 @@ async def login(
             )
         raise UnauthorizedError("Invalid credentials. Please check your email and password.")
 
+    assert user is not None  # narrowed: password_ok=True implies user is not None
+
     if not user.is_active:
         await audit_service.write_audit_log(
             db=db,
@@ -183,7 +185,7 @@ async def login(
             select(TrustedDevice).where(
                 TrustedDevice.user_id == user.id,
                 TrustedDevice.device_fingerprint == device_fingerprint,
-                TrustedDevice.expires_at > datetime.now(tz=UTC),
+                TrustedDevice.expires_at > datetime.now(tz=UTC),  # type: ignore[arg-type]
             )
         )
         trusted_device = trusted_result.scalar_one_or_none()
@@ -642,7 +644,7 @@ async def change_password(
     if user is None:
         raise UnauthorizedError("User account not found.")
 
-    if not verify_password(current_password, user.password_hash):
+    if user.password_hash is None or not verify_password(current_password, user.password_hash):
         raise UnauthorizedError("Current password is incorrect.")
 
     user.password_hash = hash_password(new_password)

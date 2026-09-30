@@ -34,8 +34,10 @@ from app.db.session import DbDep
 from app.schemas.ai_analytics import (
     AnomalyAlert,
     AnomalyAlertsResponse,
+    AnomalySeverity,
     AppointmentRiskScore,
     NoShowRiskResponse,
+    RiskLevel,
     TriggerTaskResponse,
 )
 
@@ -81,7 +83,7 @@ async def get_no_show_risk(
             appointment_id=row.appointment_id,
             patient_id=row.patient_id,
             patient_code=row.patient_code,
-            risk_level=row.risk_level,
+            risk_level=RiskLevel(row.risk_level),
             risk_score=row.risk_score,
             recommendation=row.recommendation,
             reasoning=row.reasoning,
@@ -123,7 +125,7 @@ async def get_anomaly_alerts(
         AnomalyAlert(
             id=row.id,
             condition_name=row.condition_name,
-            severity=row.severity,
+            severity=AnomalySeverity(row.severity),
             z_score=row.z_score,
             current_count=row.current_count,
             baseline_mean=row.baseline_mean,

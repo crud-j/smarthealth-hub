@@ -33,7 +33,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any
+from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +101,7 @@ FALLBACK_RECOMMENDATIONS: dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 
-async def _with_retry(coro_fn, max_retries: int = 3) -> Any:  # type: ignore[type-arg]
+async def _with_retry(coro_fn: Callable[[], Any], max_retries: int = 3) -> Any:
     """
     Run ``coro_fn()`` (a zero-argument async callable) with exponential
     backoff on RateLimitError and APIError. On exhaustion, raises the

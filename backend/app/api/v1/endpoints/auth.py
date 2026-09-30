@@ -245,7 +245,7 @@ async def swagger_token(
     ip = request.client.host if request.client else "unknown"
 
     # Step 1 — validate credentials and dispatch OTP.
-    user_id = await auth_service.login(
+    user_id, _tokens = await auth_service.login(
         db=db,
         email=username,
         password=password,

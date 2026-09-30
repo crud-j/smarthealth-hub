@@ -96,6 +96,7 @@ def scan_audit_anomalies() -> dict[str, int]:
         )
 
     alert_sent: bool = False
+    plural = "y" if len(anomalies) == 1 else "ies"
 
     if settings.ADMIN_ALERT_PHONE:
         # Build a compact summary: show up to 3 findings inline; suffix with
@@ -105,7 +106,7 @@ def scan_audit_anomalies() -> dict[str, int]:
         if len(anomalies) > 3:
             summary += f" (+{len(anomalies) - 3} more)"
 
-        plural = "y" if len(anomalies) == 1 else "ies"
+
         message = f"[SmartHealth Alert] {len(anomalies)} audit anomal{plural} detected: {summary}"
 
         try:

@@ -2236,7 +2236,7 @@ async def public_verify_health_card(
     db: DbDep,
 ) -> PublicVerifyResponse:
     """Public endpoint consumed by the /verify Next.js page on mobile phones."""
-    _invalid = PublicVerifyResponse(valid=False)
+    _invalid = PublicVerifyResponse(valid=False, full_name=None, patient_code=None, card_status=None)
 
     try:
         if not qr_service.verify_qr_payload(pid, v, sig):
@@ -2331,7 +2331,7 @@ async def verify_health_card(
             "entry is written.  Only available to authenticated staff."
         ),
     ),
-) -> PatientVerifySummary | PatientVerifySummaryFull:
+) -> dict[str, object]:
     """
     Verify a health card by QR scan or NFC tap.
 
@@ -2547,19 +2547,20 @@ async def verify_health_card(
             # response_model=None on the route decorator means FastAPI will not
             # validate/filter the return value; we serialise explicitly so only
             # the base PatientVerifySummary fields are included in the JSON body.
-            return PatientVerifySummary(**base_summary).model_dump(mode="json")
+            return PatientVerifySummary.model_validate(base_summary).model_dump(mode="json")
 
         # Extended response: include patient_id, birth_date, mobile, photo.
         # photo_url is the relative path the frontend can prefix with the API host.
         photo_url: str | None = f"/media/{patient.photo_path}" if patient.photo_path else None
 
-        return PatientVerifySummaryFull(
+        full_data: dict[str, object] = {
             **base_summary,
-            patient_id=str(patient_id),
-            birth_date=bd.isoformat(),
-            mobile_number=patient.mobile_number,
-            photo_url=photo_url,
-        ).model_dump(mode="json")
+            "patient_id": str(patient_id),
+            "birth_date": bd.isoformat(),
+            "mobile_number": patient.mobile_number,
+            "photo_url": photo_url,
+        }
+        return PatientVerifySummaryFull.model_validate(full_data).model_dump(mode="json")
 
     except ForbiddenError:
         # Record the failed attempt (write-and-forget — best-effort).

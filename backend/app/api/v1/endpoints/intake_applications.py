@@ -186,7 +186,7 @@ async def approve_application(
     request: Request,
     db: DbDep,
     current_user: CurrentUser,
-    body: IntakeApplicationApprove = IntakeApplicationApprove(),
+    body: IntakeApplicationApprove = IntakeApplicationApprove(registration_source="walk_in"),
 ) -> IntakeApproveResponse:
     """
     Approve a pending intake application.

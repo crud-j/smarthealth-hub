@@ -18,6 +18,8 @@ clear_auth_cookies(response)
 
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import Response
 
 from app.core.config import settings
@@ -27,7 +29,7 @@ from app.core.config import settings
 # ---------------------------------------------------------------------------
 
 _COOKIE_HTTPONLY = True
-_COOKIE_SAMESITE = "lax"
+_COOKIE_SAMESITE: Literal["lax", "strict", "none"] = "lax"
 # Derive cookie TTLs from the JWT lifetime settings so the cookie never
 # expires before the token it carries (fixes the "logged out during lag"
 # bug where a 15-minute cookie outlived by an 8-hour access token).

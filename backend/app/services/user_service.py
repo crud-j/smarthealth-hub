@@ -126,7 +126,7 @@ async def create_user(
     db: AsyncSession,
     data: UserCreate,
     created_by: uuid.UUID,
-) -> tuple[User, str]:
+) -> tuple[User, str | None]:
     """
     Create a new staff user account.
 

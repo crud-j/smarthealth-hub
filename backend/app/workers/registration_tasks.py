@@ -371,10 +371,16 @@ async def _send_photo_reminder_async(patient_id: str, staff_user_id: str) -> dic
     try:
         from app.services.email_service import _send_email_sync  # noqa: PLC0415
 
+        plain_body = (
+            f"Patient photo reminder: {patient_display} was registered 24 hours ago "
+            "but does not yet have a profile photo on file. "
+            "Please capture or upload a photo at your earliest convenience."
+        )
         await asyncio.to_thread(
             _send_email_sync,
             staff_user.email,
             subject,
+            plain_body,
             html_body,
         )
         logger.info(

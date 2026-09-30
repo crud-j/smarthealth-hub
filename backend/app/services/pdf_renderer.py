@@ -35,8 +35,12 @@ from __future__ import annotations
 
 import pathlib
 from datetime import date
+from typing import TYPE_CHECKING
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+
+if TYPE_CHECKING:
+    from app.models.patient import Patient
 
 # ---------------------------------------------------------------------------
 # Jinja2 environment — health card templates
@@ -149,7 +153,7 @@ def render_health_card_pdf(
         if patient_orm is not None:
             from app.services.patient_photo_service import get_photo_data_uri  # noqa: PLC0415
 
-            resolved_photo = get_photo_data_uri(patient_orm)
+            resolved_photo = get_photo_data_uri(patient_orm)  # type: ignore[arg-type]
         else:
             from app.services.patient_photo_service import _PLACEHOLDER_DATA_URI  # noqa: PLC0415
 
@@ -243,7 +247,7 @@ def _build_card_html_pages(
         if patient_orm is not None:
             from app.services.patient_photo_service import get_photo_data_uri  # noqa: PLC0415
 
-            resolved_photo = get_photo_data_uri(patient_orm)
+            resolved_photo = get_photo_data_uri(patient_orm)  # type: ignore[arg-type]
         else:
             from app.services.patient_photo_service import _PLACEHOLDER_DATA_URI  # noqa: PLC0415
 

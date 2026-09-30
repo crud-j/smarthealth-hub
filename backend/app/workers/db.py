@@ -73,7 +73,7 @@ class CelerySessionLocal:
         await self._session.__aenter__()
         return self._session
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+    async def __aexit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
         if self._session is not None and self._session is not _active_test_session:
             await self._session.__aexit__(exc_type, exc_val, exc_tb)
             await self._engine.dispose()

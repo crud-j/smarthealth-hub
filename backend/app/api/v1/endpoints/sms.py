@@ -282,7 +282,7 @@ async def sms_delivery_status_webhook(
     request: Request,
     db: DbDep,
     x_semaphore_signature: Annotated[str | None, Header()] = None,
-) -> dict:  # type: ignore[type-arg]
+) -> dict[str, object]:
     """
     Receive delivery status updates from Semaphore and update the matching
     ``sms_logs`` row.
@@ -338,7 +338,7 @@ async def sms_delivery_status_webhook(
                 )
                 from fastapi.responses import JSONResponse
 
-                return JSONResponse(
+                return JSONResponse(  # type: ignore[return-value]
                     status_code=403,
                     content={"detail": "Invalid webhook signature"},
                 )
@@ -480,7 +480,8 @@ async def sms_delivery_status_webhook(
                             extra={"token": token},
                         )
                     else:
-                        appointment_id = uuid.UUID(sms_log_row.sms_metadata["appointment_id"])
+                        sms_meta = sms_log_row.sms_metadata or {}
+                        appointment_id = uuid.UUID(sms_meta["appointment_id"])
 
                         # Confirm the appointment — idempotent; already-confirmed
                         # appointments are silently skipped inside the service.
@@ -595,7 +596,7 @@ async def sms_delivery_status_webhook(
         if isinstance(_delivery_result, dict)
         else False
     )
-    payload = {"received": True, "processed": processed}
+    payload: dict[str, object] = {"received": True, "processed": processed}
     if reason is not None:
         payload["reason"] = reason
     if isinstance(_delivery_result, dict) and _delivery_result.get("sms_log_id"):

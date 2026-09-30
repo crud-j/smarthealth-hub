@@ -172,6 +172,31 @@ async def is_token_revoked(jti: str) -> bool:
         return False
 
 
+async def revoke_all_user_tokens(user_id: str) -> None:
+    """
+    Best-effort: set a Redis marker that signals all tokens for ``user_id``
+    issued before now should be treated as revoked.
+
+    Because we do not maintain a per-user token index, this sets a
+    ``revoked:user:{user_id}`` key that ``is_token_revoked`` could check
+    in addition to the per-JTI key.  Short-lived access tokens (8 h) and
+    7-day refresh tokens mean the window of exposure is bounded.
+
+    On Redis error: logs a WARNING and returns — best-effort only.
+    """
+    try:
+        r = _get_redis()
+        # Keep the marker for 7 days (longest possible token lifetime).
+        await r.setex(f"revoked:user:{user_id}", 7 * 24 * 3600, "1")
+    except (Exception, asyncio.CancelledError) as exc:  # noqa: BLE001
+        _logger.warning(
+            "revoke_all_user_tokens: Redis unavailable — tokens for user %s not revoked. "
+            "Error: %s",
+            user_id,
+            exc,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Algorithm constant
 # ---------------------------------------------------------------------------

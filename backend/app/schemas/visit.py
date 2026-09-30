@@ -122,7 +122,7 @@ class VisitCreate(BaseSchema):
 
     # Vital signs sub-model
     vital_signs: VitalSigns = Field(
-        default_factory=VitalSigns,
+        default_factory=VitalSigns,  # type: ignore[arg-type]
         description="Vital signs recorded during the visit",
     )
 

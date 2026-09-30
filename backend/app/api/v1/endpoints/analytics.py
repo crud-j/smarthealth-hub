@@ -127,7 +127,7 @@ async def vaccination_coverage(
     Auth: Any authenticated user.
     """
     data = await analytics_service.get_vaccination_coverage(db)
-    return VaccinationCoverageResponse(**data)
+    return VaccinationCoverageResponse.model_validate(data)
 
 
 @router.get(
@@ -184,11 +184,13 @@ async def illness_trends(
         to_date=resolved_to,
         group_by=group_by,
     )
-    return IllnessTrendsResponse(
-        items=items,
-        from_date=resolved_from,
-        to_date=resolved_to,
-        group_by=group_by,
+    return IllnessTrendsResponse.model_validate(
+        {
+            "items": items,
+            "from_date": resolved_from,
+            "to_date": resolved_to,
+            "group_by": group_by,
+        }
     )
 
 
@@ -237,10 +239,12 @@ async def appointments_no_show_rate(
         from_date=resolved_from,
         to_date=resolved_to,
     )
-    return NoShowRateResponse(
-        items=items,
-        from_date=resolved_from,
-        to_date=resolved_to,
+    return NoShowRateResponse.model_validate(
+        {
+            "items": items,
+            "from_date": resolved_from,
+            "to_date": resolved_to,
+        }
     )
 
 
