@@ -46,7 +46,7 @@
     "postcss": "^8",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vitest": "^2.0.0",
+    "vitest": "^5.0.2",
     "wait-on": "^8.0.1"
   }
 }
