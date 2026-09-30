@@ -1,195 +1,255 @@
 # SmartHealth Hub
 
-**An Integrated Health Care Information Management System for Barangay Health Centers with NFC ID Card and SMS Notification Services**
+**An Integrated Health Care Information Management System for Barangay Health Centers**
+**with NFC ID Card and SMS Notification Services**
 
-This monorepo contains the full-stack implementation of the SmartHealth Hub thesis project — a digital health management platform for Barangay Health Centers (BHCs) in the Philippines.
+SmartHealth Hub is a thesis project and full-stack digital health management platform built for Barangay Health Centers (BHCs) in the Philippines. It replaces manual paper logbooks with a secure, networked system for patient registration, medical records, immunization tracking, appointment scheduling, hybrid NFC/QR health cards, automated SMS reminders, and real-time analytics.
+
+---
+
+## Key Features
+
+- **Patient Registration** — Digital intake with OCR-assisted ID scanning, duplicate detection, auto-generated BHC patient codes, and senior/PWD/pregnant auto-flagging
+- **Medical Records** — Encrypted clinical visits, diagnoses, treatment notes, and medical history (AES-256-GCM at the application layer)
+- **Hybrid Health Cards** — PDF health cards with HMAC-signed QR codes and NFC chip support; no PHI on the card itself
+- **Appointments & SMS Reminders** — Schedule visits and auto-send reminders via textbee, Semaphore, iTExmo, or PhilSMS
+- **Immunization Tracking** — Per-patient immunization records with automated due-date SMS reminders
+- **Analytics Dashboard** — Visit trends, illness frequency, vaccination coverage, no-show rates, CSV/JSON export, and optional AI-powered insights via OpenAI
+- **Role-Based Access** — Four roles: Admin, BHW, Physician/Nurse/Midwife, Admin Staff
+- **MFA Authentication** — Email OTP + optional FIDO2/WebAuthn passkey login
+- **Audit Log** — Immutable, tamper-proof event trail on every patient data action
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Frontend | Next.js (App Router) · TypeScript strict · Tailwind CSS v4 · React 19 |
+| Backend | FastAPI · Python 3.12+ · SQLAlchemy 2.0 async · Pydantic v2 |
+| Database | PostgreSQL 16 · Alembic migrations |
+| Task Queue | Celery 5 + Redis (SMS dispatch, scheduled reminders) |
+| PDF Generation | WeasyPrint + Jinja2 HTML templates |
+| Authentication | JWT (httpOnly cookies) · Argon2id · Email OTP · FIDO2/WebAuthn passkey |
+| SMS Providers | textbee (recommended) · Semaphore · iTExmo · PhilSMS |
+| Encryption | AES-256-GCM on all PHI text fields |
+| Containerization | Docker + Docker Compose |
 
 ---
 
 ## Prerequisites
 
-| Tool | Version |
-|---|---|
-| Node.js | >= 20 |
-| pnpm | >= 9 |
-| Python | >= 3.12 |
-| Docker & Docker Compose | >= 24 |
+| Tool | Minimum Version | Notes |
+|------|----------------|-------|
+| Python | 3.12+ | `python --version` to check |
+| Node.js | 20 LTS+ | `node --version` to check |
+| Docker Desktop | 4.x+ | Required for PostgreSQL + Redis |
+| npm | 9+ | Comes with Node.js |
 
 ---
 
 ## Quick Start
 
-### 1. Install dependencies
+### 1. Clone the repository
 
 ```bash
-# Install all JS/TS workspace dependencies
-pnpm install
+git clone <repository-url> smarthealth-hub
+cd smarthealth-hub
+```
 
-# Set up Python virtual environment for the backend
+### 2. Set up the Python virtual environment
+
+```bash
 cd backend
 python -m venv .venv
-# Windows
+
+# Windows (PowerShell):
 .venv\Scripts\activate
-# macOS/Linux
+
+# macOS / Linux:
 source .venv/bin/activate
+
 pip install -e ".[dev]"
 cd ..
 ```
 
-### 2. Configure environment variables
+### 3. Configure environment variables
 
 ```bash
-# Backend
-cp backend/.env.example backend/.env
-# Edit backend/.env with your secrets
+# Windows (PowerShell):
+Copy-Item backend\.env.example backend\.env
 
-# Frontend
-cp frontend/web/.env.local.example frontend/web/.env.local
-# Edit frontend/web/.env.local if needed
+# macOS / Linux:
+cp backend/.env.example backend/.env
 ```
 
-### 3. Start infrastructure (Postgres + Redis)
+Open `backend/.env` and fill in the required values — at minimum:
+- `JWT_SECRET_KEY` — generate with `python -c "import secrets; print(secrets.token_hex(32))"`
+- `QR_HMAC_SECRET` — generate the same way (use a different value)
+- `ENCRYPTION_KEY` — generate with `python -c "import secrets, base64; print(base64.b64encode(secrets.token_bytes(32)).decode())"`
+- `EMAIL_HOST_USER` + `EMAIL_HOST_PASSWORD` — Gmail address + App Password for OTP emails
+
+See [`docs/CLIENT_HANDOVER.md`](docs/CLIENT_HANDOVER.md) for a full explanation of every variable.
+
+### 4. Start the database and Redis
 
 ```bash
-docker-compose -f infra/docker-compose.yml up db redis -d
+docker compose -f infra/docker-compose.yml up db redis -d
+```
 
+This starts PostgreSQL on port `5445` and Redis on port `6380` as background services.
 
-### Postgresql
+### 5. Run database migrations
 
-┌──────────────┬─────────────────────────────────────────┐
-│   Command    │              What it does               │
-├──────────────┼─────────────────────────────────────────┤
-│ \dt          │ List all tables                         │
-├──────────────┼─────────────────────────────────────────┤
-│ \d tablename │ Show columns/schema of a specific table │
-├──────────────┼─────────────────────────────────────────┤
-│ \dn          │ List schemas                            │
-├──────────────┼─────────────────────────────────────────┤
-│ \du          │ List users/roles                        │
-├──────────────┼─────────────────────────────────────────┤
-│ \l           │ List all databases                      │
-├──────────────┼─────────────────────────────────────────┤
-│ \q           │ Quit psql                               │
-└──────────────┴─────────────────────────────────────────┘
+```bash
+cd backend
+alembic upgrade head
+```
 
-`Quick example — view all patients:
-`SELECT patient_code, first_name, last_name, is_active FROM patients ORDER BY created_at DESC LIMIT 10;`
+Creates all 21 tables. Run once on first setup, and again after pulling new code that includes migrations.
 
-`View all health cards:`
-`SELECT card_number, status, generation_status, issued_at FROM health_cards ORDER BY issued_at DESC;`
+### 6. (Optional) Seed demo data
 
+```bash
+cd backend
+python scripts/seed_db.py
+```
 
-Host:     localhost
-Port:     5445
-Database: smarthealthhub
-User:     shh_admin
-Password: SmartHealthHub
+Creates two demo staff accounts and sample patient records for testing:
 
-### Start cloudflare.
+| Role | Email | Password |
+|------|-------|----------|
+| Admin | `e2e-admin@bhc.local` | `E2eAdmin!2026` |
+| BHW | `e2e-bhw@bhc.local` | `E2eBhw!2026` |
 
+### 7. Start the development servers
+
+Open **separate terminal windows** for each service, in this order:
+
+**Terminal 1 — FastAPI Backend** (port 8000)
+```bash
+cd backend
+.venv\Scripts\activate        # Windows
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+**Terminal 2 — Celery Worker** (background tasks: SMS, PDF generation)
+```bash
+cd backend
+.venv\Scripts\activate        # Windows
+
+# Windows (required — no fork support):
+celery -A app.workers.celery_app worker --loglevel=info -P solo
+
+# macOS / Linux:
+# celery -A app.workers.celery_app worker --loglevel=info --concurrency=2
+```
+
+**Terminal 3 — Celery Beat** (scheduled reminders)
+```bash
+cd backend
+.venv\Scripts\activate        # Windows
+celery -A app.workers.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+```
+
+**Terminal 4 — Next.js Frontend** (port 3000)
+```bash
+cd frontend/web
+npm install       # first run only
+npm run dev
+```
+
+The application will be available at **http://localhost:3000**.
+The API documentation (Swagger UI) is at **http://localhost:8000/docs**.
+
+---
+
+## NFC Demo Setup
+
+The NFC relay bridges an Android phone's NFC reader to the backend over Wi-Fi.
+
+**Start the relay server** (port 9000):
+```bash
+cd backend
+.venv\Scripts\activate
+python scripts/nfc_relay_server.py
+```
+
+**Open Windows Firewall for port 9000** (run once as Administrator):
+```powershell
+New-NetFirewallRule `
+  -DisplayName "SmartHealth NFC Relay (9000)" `
+  -Direction Inbound -Protocol TCP `
+  -LocalPort 9000 -Action Allow -Profile Private
+```
+
+See [`docs/NFC_WiFi_Relay_Setup.md`](docs/NFC_WiFi_Relay_Setup.md) for the full NFC setup guide, including how to link a patient to an NFC chip and how to use the HTTP Shortcuts Android app as the NFC reader.
+
+---
+
+## Cloudflare Tunnel (QR codes from phones)
+
+QR codes embed your `QR_BASE_URL`. For QR scanning to work from a phone that is not on the same LAN, use a Cloudflare Quick Tunnel to expose localhost publicly over HTTPS:
 
 ```bash
 cloudflared tunnel --url http://localhost:3000
 ```
-`unknownusers8273827@gmail.com`
 
-### start windows celery
-
-```bash
-celery -A app.workers.celery_app worker --loglevel=info -P solo
-celery -A app.workers.celery_app beat --loglevel=info
+Copy the generated URL (e.g. `https://xxxx.trycloudflare.com`) and update `backend/.env`:
+```env
+QR_BASE_URL=https://xxxx.trycloudflare.com
+WEBAUTHN_ORIGIN=https://xxxx.trycloudflare.com
+WEBAUTHN_RP_ID=xxxx.trycloudflare.com
 ```
 
-### start nfc
-`python backend/scripts/nfc_relay_server.py`
+Then restart the backend and regenerate any health cards.
 
-### 4. Run database migrations
-
-```bash
-turbo db:migrate
-# or directly:
-cd backend && alembic upgrade head
-```
-
-### 5. Run development servers
-
-```bash
-# Start all services concurrently via Turborepo
-turbo dev
-
-# Or individually:
-# Frontend (Next.js on http://localhost:3000)
-cd frontend/web && pnpm dev
-
-# Backend (FastAPI on http://localhost:8000)
-cd backend && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
-
----
-
-## Run Tests
-
-```bash
-# All workspaces
-turbo test
-
-#NFC Testing
-python backend/scripts/nfc_relay_server.py
-
-
-# Frontend only
-pnpm --filter web test
-
-# Backend only (from backend/)
-cd backend && pytest tests --cov=app --cov-report=term-missing
-```
-
-### Backend intake tests (fast, isolated)
-
-```bash
-# Run intake form submission tests (10 tests, ~5 seconds)
-cd backend
-pytest tests/test_intake_submission.py -v
-```
-
-### Seed real test data into dev database (visible in frontend)
-
-```bash
-# Seeds 3 intake tokens + 3 intake applications into the dev DB
-# Run while the backend dev server is running
-cd backend
-python -m tests.seed_intake_test_data
-```
-
-After seeding, open these URLs in the browser:
-
-| Token | URL |
-|---|---|
-| Token 1 (full draft) | http://localhost:3000/intake/aaaaaaaa-1111-1111-1111-aaaaaaaaaaaa |
-| Token 2 (partial) | http://localhost:3000/intake/bbbbbbbb-2222-2222-2222-bbbbbbbbbbbb |
-| Token 3 (fresh) | http://localhost:3000/intake/cccccccc-3333-3333-3333-cccccccccccc |
-
-View seeded applications in the dashboard:
-- `/registrations` — Pre-visit Drafts tab (tokens 1 & 2)
-- `/settings/intake-applications` — Online Applications (all 3 applications)
-
-### Full backend test suite with coverage
-
-```bash
-cd backend
-pytest tests --cov=app --cov-report=term-missing
-```
+> No Cloudflare account is required for a temporary Quick Tunnel. The URL changes each time you restart the tunnel.
 
 ---
 
 ## Docker Compose (full stack)
 
-```bash
-# Start all services
-docker-compose -f infra/docker-compose.yml up --build
+To run everything in Docker (database, Redis, backend, Celery worker, Celery beat, and frontend):
 
-# Start only infrastructure
-docker-compose -f infra/docker-compose.yml up db redis -d
+```bash
+# First run (builds images):
+docker compose up --build
+
+# Subsequent runs:
+docker compose up
+
+# Background (detached):
+docker compose up -d
+
+# View logs:
+docker compose logs -f
+
+# Stop (keeps data):
+docker compose down
+```
+
+Run migrations inside the container after first start:
+```bash
+docker compose exec backend alembic upgrade head
+```
+
+---
+
+## Running Tests
+
+```bash
+# Full backend test suite with coverage:
+cd backend
+pytest tests --cov=app --cov-report=term-missing
+
+# Intake form tests only (fast, ~5 seconds):
+cd backend
+pytest tests/test_intake_submission.py -v
+
+# Frontend E2E tests (Playwright):
+cd frontend/web
+npx playwright test
 ```
 
 ---
@@ -198,43 +258,53 @@ docker-compose -f infra/docker-compose.yml up db redis -d
 
 ```
 smarthealth-hub/
-├── frontend/
-│   └── web/                  # Next.js 15 frontend (App Router)
-├── backend/                  # FastAPI backend
-│   ├── app/                  # Python package
-│   │   ├── api/v1/           # Route handlers
-│   │   ├── core/             # Config, security, logging
-│   │   ├── db/               # SQLAlchemy session & base
-│   │   ├── models/           # ORM models
-│   │   ├── schemas/          # Pydantic v2 schemas
-│   │   ├── services/         # Business logic
-│   │   ├── workers/          # Celery tasks
-│   │   └── utils/            # Shared utilities
-│   ├── alembic/              # DB migrations
-│   └── tests/                # Pytest test suite
-├── packages/
-│   └── shared-types/         # Shared TypeScript interfaces
+├── backend/                    # FastAPI application
+│   ├── app/
+│   │   ├── api/v1/endpoints/   # Route handlers (thin — no DB queries)
+│   │   ├── services/           # All business logic and DB queries
+│   │   ├── models/             # SQLAlchemy ORM models
+│   │   ├── schemas/            # Pydantic v2 request/response schemas
+│   │   ├── core/               # Config, security (JWT/AES), exceptions
+│   │   ├── workers/            # Celery app + scheduled tasks
+│   │   └── templates/          # Jinja2 HTML for WeasyPrint PDF
+│   ├── alembic/versions/       # 21 database migrations (0001–0021)
+│   ├── scripts/                # Seed, backup, restore, NFC relay, SMS test
+│   └── tests/                  # pytest test suite
+├── frontend/web/               # Next.js application
+│   ├── app/(dashboard)/        # All auth-gated pages (App Router)
+│   ├── components/             # Shared UI components
+│   ├── hooks/                  # Data-fetching and state hooks
+│   └── types/                  # TypeScript type definitions
 ├── infra/
-│   ├── docker/               # Dockerfiles
-│   ├── docker-compose.yml    # Local dev compose
-│   └── nginx/                # Nginx reverse proxy config
-├── docs/                     # System Development Plan & docs
-└── scripts/                  # Utility scripts
+│   ├── docker-compose.yml      # Legacy compose (infrastructure-only use)
+│   └── docker/                 # Dockerfiles
+├── docker-compose.yml          # Canonical root compose (all services)
+├── docker-compose.override.yml # Dev overrides (hot-reload bind mounts)
+└── docs/                       # Architecture, guides, and runbooks
 ```
-
----
-
-## Key Technologies
-
-- **Frontend:** React 19 + Next.js 15 (App Router) + TypeScript (strict) + Tailwind CSS v4
-- **Backend:** FastAPI + SQLAlchemy 2.0 (async) + Alembic + PostgreSQL
-- **Auth:** JWT (access + refresh) + SMS OTP MFA via Semaphore
-- **Health Cards:** WeasyPrint PDF + QR Code (HMAC-signed) + NFC (patient ID pointer only)
-- **Background Jobs:** Celery + Redis
-- **SMS:** Semaphore API
 
 ---
 
 ## Documentation
 
-See [`docs/SmartHealth_Hub_System_Development_Plan.md`](docs/SmartHealth_Hub_System_Development_Plan.md) for the authoritative system design, DB schema, and API contracts.
+| Document | Purpose |
+|----------|---------|
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | System architecture, data flows, security decisions |
+| [`docs/USER_FLOWS.md`](docs/USER_FLOWS.md) | Step-by-step explanation of every user flow |
+| [`docs/CLIENT_HANDOVER.md`](docs/CLIENT_HANDOVER.md) | Full setup and handover guide for new operators |
+| [`docs/DEMO_RUNBOOK.md`](docs/DEMO_RUNBOOK.md) | All terminal commands needed to run a demo |
+| [`docs/NFC_WiFi_Relay_Setup.md`](docs/NFC_WiFi_Relay_Setup.md) | NFC relay setup and Android app configuration |
+| [`docs/database.md`](docs/database.md) | Database schema reference |
+| [`docs/api-reference.md`](docs/api-reference.md) | API endpoint reference |
+| [`docs/SmartHealth_Hub_System_Development_Plan.md`](docs/SmartHealth_Hub_System_Development_Plan.md) | Authoritative system design, DB schema, API contracts |
+
+---
+
+## Key URLs (when running locally)
+
+| URL | Description |
+|-----|-------------|
+| http://localhost:3000 | Web application |
+| http://localhost:8000/docs | Swagger UI — interactive API documentation |
+| http://localhost:8000/health | Backend health check |
+| http://localhost:9000/status | NFC relay health check |
