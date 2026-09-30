@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { DM_Sans, DM_Serif_Display } from "next/font/google";
 import "./globals.css";
+import ToastContainer from "@/components/ui/toast-container";
 
 const dmSans = DM_Sans({
   subsets: ["latin"],
@@ -13,6 +14,7 @@ const dmSerifDisplay = DM_Serif_Display({
   subsets: ["latin"],
   variable: "--font-dm-serif",
   display: "swap",
+  preload: false,
 });
 
 export const metadata: Metadata = {
@@ -39,6 +41,7 @@ export default function RootLayout({ children }: RootLayoutProps) {
       <head />
       <body>
         {children}
+        <ToastContainer />
       </body>
     </html>
   );

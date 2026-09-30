@@ -11,8 +11,8 @@ Health card generation service — orchestrates the full card pipeline:
 Security invariant: PHI is used only for PDF rendering (server-side only).
 The QR payload and NFC payload contain ONLY patient_id + card_version + HMAC.
 
-Card number format: "BHC-{YEAR}-{6-digit-zero-padded-seq}"
-  e.g. BHC-2026-000001  (same MAX() sequential pattern as patient_code)
+Card number format: "SH-{YEAR}-{6-digit-zero-padded-seq}"
+  e.g. SH-2026-000001  (same MAX() sequential pattern as patient_code)
 
 Audit log actions written here:
   CARD_ISSUE  — on generate_card (new card or returning existing idempotent)
@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,7 +41,7 @@ from app.services.patient_service import get_patient
 logger = get_logger(__name__)
 
 # Pattern used to parse the sequence number out of an existing card_number.
-_CARD_NUMBER_RE = re.compile(r"^BHC-(\d{4})-(\d{6})$")
+_CARD_NUMBER_RE = re.compile(r"^SH-(\d{4})-(\d{6})$")
 
 
 # ---------------------------------------------------------------------------
@@ -56,10 +56,10 @@ async def _next_card_number(db: AsyncSession) -> str:
     Uses MAX() on existing card_numbers — same pattern as patient_code
     generation in patient_service.py.  Safe for single-BHC deployment.
 
-    Pattern: BHC-{YEAR}-{6-digit-seq}
+    Pattern: SH-{YEAR}-{6-digit-seq}
     """
     year = date.today().year
-    prefix = f"BHC-{year}-"
+    prefix = f"SH-{year}-"
 
     result = await db.execute(
         select(func.max(HealthCard.card_number)).where(
@@ -112,7 +112,7 @@ async def generate_card(
     Steps:
     1. Fetch patient — raise NotFoundError if not found or inactive.
     2. Check for an existing active card.  If found, return it (idempotent).
-    3. Generate card_number with sequential BHC-{YEAR}-{seq} format.
+    3. Generate card_number with sequential SH-{YEAR}-{seq} format.
     4. Set card_version = 1.
     5. Call qr_service.encode_qr_payload() to get (signed_url, qr_data_uri).
     6. Hash the signed_url for storage in qr_payload_hash.
@@ -150,6 +150,29 @@ async def generate_card(
     existing_card: HealthCard | None = existing_result.scalar_one_or_none()
 
     if existing_card is not None:
+        # If the existing card still has a PENDING- placeholder (written by the
+        # registration task), replace it with a real card number now.
+        if existing_card.card_number.startswith("PENDING-"):
+            existing_card.card_number = await _next_card_number(db)
+            signed_url, qr_data_uri = qr_service.encode_qr_payload(
+                str(patient_id), existing_card.card_version
+            )
+            existing_card.qr_payload_hash = qr_service.hash_qr_url(signed_url)
+            await db.commit()
+            await db.refresh(existing_card)
+            logger.info(
+                "Health card placeholder replaced with real card number",
+                extra={"patient_id": str(patient_id), "card_number": existing_card.card_number},
+            )
+            return {
+                "card": _card_to_response_dict(existing_card),
+                "signed_url": signed_url,
+                "qr_data_uri": qr_data_uri,
+                "nfc_payload": nfc_payload_service.build_nfc_payload(
+                    str(patient_id), existing_card.card_version, existing_card.card_number
+                ),
+            }
+
         logger.info(
             "Health card already active — returning existing card (idempotent)",
             extra={"patient_id": str(patient_id), "card_number": existing_card.card_number},
@@ -163,7 +186,7 @@ async def generate_card(
             "signed_url": _signed_url,
             "qr_data_uri": qr_data_uri,
             "nfc_payload": nfc_payload_service.build_nfc_payload(
-                str(patient_id), existing_card.card_version
+                str(patient_id), existing_card.card_version, existing_card.card_number
             ),
         }
 
@@ -182,7 +205,7 @@ async def generate_card(
         qr_payload_hash=qr_hash,
         card_version=card_version,
         status="active",
-        issued_at=datetime.utcnow(),
+        issued_at=datetime.now(timezone.utc),
         issued_by=issued_by_id,
     )
     db.add(new_card)
@@ -219,7 +242,7 @@ async def generate_card(
         "signed_url": signed_url,
         "qr_data_uri": qr_data_uri,
         "nfc_payload": nfc_payload_service.build_nfc_payload(
-            str(patient_id), card_version
+            str(patient_id), card_version, card_number
         ),
     }
 
@@ -297,7 +320,7 @@ async def reissue_card(
         qr_payload_hash=qr_hash,
         card_version=new_card_version,
         status="active",
-        issued_at=datetime.utcnow(),
+        issued_at=datetime.now(timezone.utc),
         issued_by=issued_by_id,
         # nfc_uid is None — staff must re-link via /nfc-link after reissue.
     )
@@ -354,6 +377,58 @@ async def reissue_card(
         "signed_url": signed_url,
         "qr_data_uri": qr_data_uri,
         "nfc_payload": nfc_payload_service.build_nfc_payload(
-            str(patient_id), new_card_version
+            str(patient_id), new_card_version, new_card_number
         ),
     }
+
+
+async def get_bulk_card_status(
+    patient_ids: list[uuid.UUID],
+    db: AsyncSession,
+) -> dict[str, dict]:
+    """
+    Return health card status metadata for a list of patient IDs in a single
+    SELECT ... WHERE patient_id IN (...) query, eliminating the N+1 pattern.
+
+    Returns a dict keyed by patient_id string.  Patients without a card row
+    receive {"status": "none", "card_number": None, "card_id": None}.
+
+    Only one row is returned per patient — the service layer guarantees at most
+    one active card per patient, but if multiple rows exist (e.g. after a
+    reissue) the last row encountered in the result set is used.  The caller
+    (GET /health-cards/{patient_id}) applies the same active-first fallback
+    logic; here we favour simplicity since this endpoint is for list-view
+    status badges only (no clinical data).
+
+    Args:
+        patient_ids: List of patient UUIDs to look up.  Empty list returns {}.
+        db:          Active async DB session.
+
+    Returns:
+        Dict[str(patient_id), {"status": str, "card_number": str|None, "card_id": str|None}]
+    """
+    if not patient_ids:
+        return {}
+
+    result = await db.execute(
+        select(HealthCard).where(HealthCard.patient_id.in_(patient_ids))
+    )
+    cards = result.scalars().all()
+
+    # Build a map of patient_id → card dict.  If a patient has multiple card
+    # rows, prefer the active one; otherwise use the most-recently-seen row.
+    card_map: dict[str, dict] = {}
+    for card in cards:
+        pid_str = str(card.patient_id)
+        existing = card_map.get(pid_str)
+        # Prefer active card over any non-active card already in the map.
+        if existing is None or (card.status == "active" and existing["status"] != "active"):
+            card_map[pid_str] = {
+                "status": card.status,
+                "card_number": card.card_number,
+                "card_id": str(card.id),
+                "card_version": card.card_version,
+            }
+
+    no_card: dict = {"status": "none", "card_number": None, "card_id": None, "card_version": None}
+    return {str(pid): card_map.get(str(pid), no_card) for pid in patient_ids}

@@ -4,10 +4,11 @@ User (staff account) management endpoints — Admin only (except /users/me).
 Routes:
   GET    /users/roles  — Any authenticated role. Returns role list for dropdowns.
   GET    /users/me     — Any authenticated role. Returns the caller's own profile.
+  GET    /users/{id}   — Admin only. Fetch a single staff account by UUID.
   GET    /users        — Admin only. Paginated staff list with filters.
   POST   /users        — Admin only. Create a new staff account.
   PUT    /users/{id}   — Admin only. Update a staff account.
-  DELETE /users/{id}   — Admin only. Deactivate (soft-delete) a staff account.
+  DELETE /users/{id}   — Admin only. Permanently delete a staff account.
 
 Auth: require_role("admin") on all routes except GET /users/me (CurrentUser)
 and GET /users/roles (CurrentUser).
@@ -24,7 +25,7 @@ import logging
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Query, Response
+from fastapi import APIRouter, HTTPException, Query, Response
 
 from app.core.security import CurrentUser, require_role
 from app.db.session import DbDep
@@ -92,6 +93,32 @@ async def get_me(
     No role restriction — every staff member can view their own profile.
     """
     user = await user_service.get_me(db, current_user.id)
+    return UserResponse.model_validate(user)
+
+
+# ---------------------------------------------------------------------------
+# GET /users/{id} — Admin only
+# MUST be registered after /me and /roles (fixed routes take priority).
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/{user_id}",
+    response_model=UserResponse,
+    summary="Get a single staff account (Admin only)",
+)
+async def get_user(
+    user_id: uuid.UUID,
+    current_user: Annotated[User, AdminOnly],
+    db: DbDep,
+) -> UserResponse:
+    """
+    Returns the full profile of any staff account by UUID.
+
+    Admin only — use GET /users/me for self-service profile access.
+    No audit log written (non-PHI read-only lookup).
+    """
+    user = await user_service.get_user(db, user_id)
     return UserResponse.model_validate(user)
 
 
@@ -167,12 +194,17 @@ async def create_user(
         data=body,
         created_by=current_user.id,
     )
-    # Log temp password to server console — never include in API response.
-    logger.info(
-        "New staff account created — temporary password for %s: %s",
-        user.email,
-        temp_pw,
-    )
+    # Log credential outcome to server console — never include in API response.
+    if temp_pw is not None:
+        logger.info(
+            "New staff account created (password mode) — password for %s logged for handoff.",
+            user.email,
+        )
+    else:
+        logger.info(
+            "New staff account created (passkey mode) — no password set for %s.",
+            user.email,
+        )
     return UserResponse.model_validate(user)
 
 
@@ -215,23 +247,34 @@ async def update_user(
 @router.delete(
     "/{user_id}",
     status_code=204,
-    summary="Deactivate a staff account (Admin only)",
+    summary="Permanently delete a staff account (Admin only)",
 )
-async def deactivate_user(
+async def delete_user(
     user_id: uuid.UUID,
     current_user: Annotated[User, AdminOnly],
     db: DbDep,
 ) -> Response:
     """
-    Soft-deactivates a staff account (sets is_active=False).
+    Permanently removes a staff account from the database.
 
-    The user's refresh token is cleared immediately, invalidating their current
-    session on the next access-token expiry.  This is a soft delete — the record
-    is retained in the database for audit trail continuity.
+    All directly-owned child records (MFA OTPs, passkey credentials, trusted
+    devices) are removed via ON DELETE CASCADE.  Historical references in
+    ``patients.created_by`` and ``visits.recorded_by`` are nulled out so
+    patient records are preserved.  Audit log entries retain the user's UUID
+    via ON DELETE SET NULL for traceability.
+
+    An admin cannot delete their own account — use another admin account if
+    self-removal is required.
     """
-    await user_service.deactivate_user(
+    if user_id == current_user.id:
+        raise HTTPException(
+            status_code=400,
+            detail="You cannot delete your own account.",
+        )
+
+    await user_service.delete_user(
         db,
         user_id=user_id,
-        deactivated_by=current_user.id,
+        deleted_by=current_user.id,
     )
     return Response(status_code=204)

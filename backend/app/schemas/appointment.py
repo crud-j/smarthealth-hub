@@ -86,6 +86,22 @@ class AppointmentUpdate(BaseSchema):
         return v.lower().strip() if v else v
 
 
+class AppointmentIntakeSummary(BaseSchema):
+    """
+    Nested summary of the linked intake token for an appointment.
+
+    Returned inside AppointmentResponse when the patient has submitted
+    the pre-visit intake form and a PatientIntakeToken row exists for
+    this appointment.
+    """
+
+    token: str
+    visit_purpose: str | None = None
+    purpose_details: dict | None = None
+    draft_submitted_at: datetime | None = None
+    patient_name_from_draft: str | None = None
+
+
 class AppointmentResponse(BaseSchema):
     """
     Full appointment detail, including denormalized patient fields from a JOIN.
@@ -108,6 +124,11 @@ class AppointmentResponse(BaseSchema):
     # updated_at is constructed by the service layer (falls back to created_at
     # since the Appointment model currently only tracks created_at).
     updated_at: datetime
+    # Intake tracking — set when the patient submits the pre-visit intake form
+    intake_completed: bool = False
+    intake_submitted_at: datetime | None = None
+    # Intake summary — populated by get_appointment() when a linked token exists
+    intake_summary: AppointmentIntakeSummary | None = None
 
 
 class PaginatedAppointments(BaseSchema):

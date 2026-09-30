@@ -101,6 +101,10 @@ export interface PatientApiResponse {
   updated_at: string;
   /** Root-relative URL to the patient's profile photo, or null. */
   photo_path?: string | null;
+  /** ISO datetime string when archived, or null. */
+  archived_at?: string | null;
+  archived_by?: string | null;
+  archive_reason?: string | null;
 }
 
 interface PatientSummaryApiResponse {
@@ -227,6 +231,9 @@ export function mapPatient(r: PatientApiResponse): Patient {
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     photoPath: r.photo_path ?? null,
+    archivedAt: r.archived_at ?? null,
+    archivedBy: r.archived_by ?? null,
+    archiveReason: r.archive_reason ?? null,
   };
 }
 
@@ -291,8 +298,29 @@ function mapVisit(r: VisitApiResponse): Visit {
   };
 }
 
-// Convert camelCase payload to snake_case for the backend
+// Convert camelCase payload to snake_case for the backend.
+// Coercion rules:
+//   - blood_type:        "" (empty string from <select>) → null
+//   - mobile_number:     "" → undefined (omit from payload, field is optional)
+//   - guardian_contact:  "" → undefined (omit from payload, field is optional)
+//   - emergency_contact_number: "" → undefined (backend will reject, Zod catches first)
 function toApiPayload(data: PatientCreatePayload): Record<string, unknown> {
+  // Coerce empty strings to null/undefined so the backend Literal validators
+  // don't receive "" (which is not a valid value for any enum/Literal field).
+  const bloodType = data.bloodType === "" ? null : (data.bloodType ?? null);
+  const mobileNumber =
+    data.mobileNumber && data.mobileNumber.trim() !== ""
+      ? data.mobileNumber
+      : undefined;
+  const guardianContact =
+    data.guardianContact && data.guardianContact.trim() !== ""
+      ? data.guardianContact
+      : undefined;
+  const emergencyContactNumber =
+    data.emergencyContactNumber && data.emergencyContactNumber.trim() !== ""
+      ? data.emergencyContactNumber
+      : undefined;
+
   return {
     first_name: data.firstName,
     middle_name: data.middleName,
@@ -306,12 +334,12 @@ function toApiPayload(data: PatientCreatePayload): Record<string, unknown> {
     municipality: data.municipality,
     province: data.province,
     occupation: data.occupation,
-    mobile_number: data.mobileNumber,
+    mobile_number: mobileNumber,
     address: data.address,
     guardian_name: data.guardianName,
-    guardian_contact: data.guardianContact,
+    guardian_contact: guardianContact,
     emergency_contact_name: data.emergencyContactName,
-    emergency_contact_number: data.emergencyContactNumber,
+    emergency_contact_number: emergencyContactNumber,
     philhealth_no: data.philhealthNo,
     philhealth_member_type: data.philhealthMemberType,
     philhealth_category: data.philhealthCategory,
@@ -335,7 +363,7 @@ function toApiPayload(data: PatientCreatePayload): Record<string, unknown> {
     registration_source: data.registrationSource,
     registration_data_source: data.registrationDataSource ?? "manual",
     data_privacy_consent: data.dataPrivacyConsent,
-    blood_type: data.bloodType ?? null,
+    blood_type: bloodType,
     confirm_duplicate: data.confirmDuplicate ?? false,
   };
 }
@@ -694,4 +722,63 @@ export function useUpdateVisit() {
   );
 
   return { updateVisit, loading, error };
+}
+
+// ---------------------------------------------------------------------------
+// useArchivePatient — mutation: POST /patients/{id}/archive (Admin only)
+// ---------------------------------------------------------------------------
+
+export function useArchivePatient() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const archivePatient = useCallback(
+    async (patientId: string, reason: string): Promise<boolean> => {
+      setLoading(true);
+      setError(null);
+      try {
+        await apiFetch(`/patients/${patientId}/archive`, {
+          method: "POST",
+          body: JSON.stringify({ reason }),
+        });
+        return true;
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : "Failed to archive patient.");
+        return false;
+      } finally {
+        setLoading(false);
+      }
+    },
+    []
+  );
+
+  return { archivePatient, loading, error };
+}
+
+// ---------------------------------------------------------------------------
+// useUnarchivePatient — mutation: POST /patients/{id}/unarchive (Admin only)
+// ---------------------------------------------------------------------------
+
+export function useUnarchivePatient() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const unarchivePatient = useCallback(
+    async (patientId: string): Promise<boolean> => {
+      setLoading(true);
+      setError(null);
+      try {
+        await apiFetch(`/patients/${patientId}/unarchive`, { method: "POST" });
+        return true;
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : "Failed to unarchive patient.");
+        return false;
+      } finally {
+        setLoading(false);
+      }
+    },
+    []
+  );
+
+  return { unarchivePatient, loading, error };
 }

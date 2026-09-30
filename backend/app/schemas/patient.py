@@ -40,10 +40,17 @@ _PH_MOBILE_RE = re.compile(r"^(\+63|0)(9\d{9})$")
 
 
 def _normalise_mobile(value: str | None) -> str | None:
-    """Normalize PH mobile number to +63xxxxxxxxxx form."""
+    """Normalize PH mobile number to +63xxxxxxxxxx form.
+
+    Empty strings are coerced to None (the field is optional — an empty
+    string from a form input means "not provided", not an invalid number).
+    """
     if value is None:
         return None
     stripped = value.strip().replace(" ", "").replace("-", "")
+    # Treat empty / whitespace-only strings as absent (not provided)
+    if not stripped:
+        return None
     match = _PH_MOBILE_RE.match(stripped)
     if not match:
         raise ValueError(
@@ -98,9 +105,14 @@ class PatientCreate(BaseSchema):
     # Guardian info (for minors, seniors, PWD)
     guardian_name: str | None = Field(None, max_length=150)
     guardian_contact: str | None = Field(None, max_length=20)
-    emergency_contact_name: str = Field(..., min_length=1, max_length=150)
-    emergency_contact_number: str = Field(
-        ...,
+    emergency_contact_name: str | None = Field(
+        None,
+        min_length=1,
+        max_length=150,
+        description="Primary emergency contact name (optional for legacy/partial records)",
+    )
+    emergency_contact_number: str | None = Field(
+        None,
         max_length=20,
         description="Primary emergency contact number (Philippine mobile)",
     )
@@ -143,7 +155,10 @@ class PatientCreate(BaseSchema):
         "walk_in",
         description="How the patient was registered",
     )
-    data_privacy_consent: bool = Field(..., description="Must be true to submit")
+    data_privacy_consent: bool = Field(
+        True,
+        description="Must be true to submit; defaults to true for legacy client payloads.",
+    )
 
     # ABO/Rh blood group — optional at registration; can be updated later.
     blood_type: Literal[
@@ -171,6 +186,12 @@ class PatientCreate(BaseSchema):
     registration_data_source: Literal["manual", "ocr", "pre_visit"] = Field(
         "manual",
         description="Data-entry source: 'manual' (typed), 'ocr' (ID scan), 'pre_visit' (patient self-entry link).",
+    )
+
+    # Preferred language for SMS reminders ('en' = English, 'fil' = Filipino).
+    preferred_language: Literal["en", "fil"] = Field(
+        "en",
+        description="Preferred language for SMS reminders: 'en' (English) or 'fil' (Filipino).",
     )
 
     @field_validator("birth_date")
@@ -229,6 +250,20 @@ class PatientCreate(BaseSchema):
     @classmethod
     def normalise_sex(cls, v: str) -> str:
         return v.lower().strip()
+
+    @field_validator("blood_type", mode="before")
+    @classmethod
+    def coerce_empty_blood_type(cls, v: object) -> object:
+        """Coerce empty-string blood_type to None.
+
+        HTML <select> elements emit an empty string when the placeholder
+        option ("— Unknown —", value="") is selected.  The Literal validator
+        on blood_type does not accept "", so we normalise it here to None
+        (meaning "not recorded") before the Literal check runs.
+        """
+        if isinstance(v, str) and v.strip() == "":
+            return None
+        return v
 
     @field_validator("data_privacy_consent")
     @classmethod
@@ -302,6 +337,12 @@ class PatientUpdate(BaseSchema):
         "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-", "Unknown"
     ] | None = Field(None, description="Patient's ABO/Rh blood group, or None if unknown")
 
+    # Preferred language for SMS reminders ('en' = English, 'fil' = Filipino).
+    preferred_language: Literal["en", "fil"] | None = Field(
+        None,
+        description="Preferred language for SMS reminders: 'en' (English) or 'fil' (Filipino).",
+    )
+
     @field_validator("birth_date")
     @classmethod
     def birth_date_must_be_past(cls, v: date | None) -> date | None:
@@ -358,6 +399,14 @@ class PatientUpdate(BaseSchema):
     @classmethod
     def normalise_sex(cls, v: str | None) -> str | None:
         return v.lower().strip() if v else None
+
+    @field_validator("blood_type", mode="before")
+    @classmethod
+    def coerce_empty_blood_type(cls, v: object) -> object:
+        """Coerce empty-string blood_type to None (same rationale as PatientCreate)."""
+        if isinstance(v, str) and v.strip() == "":
+            return None
+        return v
 
     @field_validator("data_privacy_consent")
     @classmethod
@@ -427,6 +476,10 @@ class PatientResponse(BaseSchema):
     data_privacy_consent_at: datetime | None
     is_active: bool
     blood_type: str | None = None
+    # Archive fields — None when the patient is not archived
+    archived_at: datetime | None = None
+    archived_by: str | None = None
+    archive_reason: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -643,3 +696,75 @@ class OcrExtractResponse(BaseSchema):
     blood_type: OcrFieldValue
     raw_text: str = ""              # full OCR output for debugging
     provider: str = "tesseract"    # "tesseract" | "azure"
+
+
+# ---------------------------------------------------------------------------
+# Archive / Unarchive schemas
+# ---------------------------------------------------------------------------
+
+
+class PatientArchiveRequest(BaseSchema):
+    """Body for POST /patients/{id}/archive."""
+
+    reason: str = Field(
+        ..., min_length=5, max_length=1000,
+        description="Reason for archiving this patient record (required)"
+    )
+
+
+class ArchivedPatientSummary(BaseSchema):
+    """
+    One row in the archived patients list.
+
+    Extends PatientSummary with archive-specific fields.
+    """
+
+    id: str
+    patient_code: str
+    first_name: str
+    middle_name: str | None
+    last_name: str
+    birth_date: date
+    sex: str
+    mobile_number: str | None
+    is_senior: bool
+    is_pwd: bool
+    is_pregnant: bool
+    is_active: bool
+    blood_type: str | None = None
+    created_at: datetime | None = None
+
+    # Archive-specific
+    archived_at: datetime
+    archived_by: str | None = None
+    archive_reason: str | None = None
+
+    # Computed
+    age: int = Field(default=0)
+    full_name: str = Field(default="")
+
+    @model_validator(mode="after")
+    def compute_derived_fields(self) -> "ArchivedPatientSummary":
+        today = date.today()
+        bd = self.birth_date
+        years = (
+            today.year
+            - bd.year
+            - ((today.month, today.day) < (bd.month, bd.day))
+        )
+        self.age = max(0, years)
+        parts = [self.first_name]
+        if self.middle_name:
+            parts.append(self.middle_name)
+        parts.append(self.last_name)
+        self.full_name = " ".join(parts)
+        return self
+
+
+class PaginatedArchivedPatients(BaseSchema):
+    """Paginated list of archived patient summaries."""
+
+    items: list[ArchivedPatientSummary]
+    total: int
+    page: int
+    page_size: int

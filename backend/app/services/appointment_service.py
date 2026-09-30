@@ -36,7 +36,14 @@ from app.core.exceptions import NotFoundError, ValidationError
 from app.core.logging import get_logger
 from app.models.appointment import Appointment
 from app.models.patient import Patient
-from app.schemas.appointment import AppointmentCreate, AppointmentResponse, AppointmentUpdate
+from app.models.intake_token import PatientIntakeToken
+from app.schemas.appointment import (
+    AppointmentCreate,
+    AppointmentIntakeSummary,
+    AppointmentResponse,
+    AppointmentUpdate,
+)
+from app.services.analytics_service import _invalidate_analytics_cache
 from app.services.audit_service import write_audit_log
 
 logger = get_logger(__name__)
@@ -74,6 +81,8 @@ def _appointment_to_response(appt: Appointment, patient: Patient) -> Appointment
         notes=appt.notes,
         created_at=appt.created_at,
         updated_at=appt.created_at,  # no updated_at column on Appointment yet
+        intake_completed=appt.intake_completed,
+        intake_submitted_at=appt.intake_submitted_at,
     )
 
 
@@ -249,6 +258,8 @@ async def create_appointment(
     )
     await db.commit()
 
+    await _invalidate_analytics_cache()
+
     # Enqueue the Celery task after the DB commit so the task will always
     # find the sms_log row when it executes.
     if sms_log_id is not None:
@@ -264,11 +275,43 @@ async def get_appointment(
     """
     Fetch a single appointment with its patient.
 
+    Also loads the linked PatientIntakeToken (if any) to populate
+    intake_summary with visit_purpose, purpose_details, and the
+    patient name extracted from the draft submission.
+
     Raises:
         NotFoundError: Appointment does not exist.
     """
     appt, patient = await _get_appointment_with_patient(db, appointment_id)
-    return _appointment_to_response(appt, patient)
+
+    # Build the base response using the existing helper.
+    response = _appointment_to_response(appt, patient)
+
+    # Fetch linked intake token summary if any.
+    token_result = await db.execute(
+        select(PatientIntakeToken)
+        .where(PatientIntakeToken.appointment_id == appt.id)
+        .order_by(PatientIntakeToken.created_at.desc())
+        .limit(1)
+    )
+    intake_token_row: PatientIntakeToken | None = token_result.scalar_one_or_none()
+
+    intake_summary: AppointmentIntakeSummary | None = None
+    if intake_token_row is not None:
+        draft = intake_token_row.draft_data or {}
+        first_name = draft.get("first_name") or draft.get("firstName") or ""
+        last_name = draft.get("last_name") or draft.get("lastName") or ""
+        patient_name = f"{first_name} {last_name}".strip() or None
+        intake_summary = AppointmentIntakeSummary(
+            token=str(intake_token_row.token),
+            visit_purpose=intake_token_row.visit_purpose,
+            purpose_details=intake_token_row.purpose_details,
+            draft_submitted_at=intake_token_row.created_at,
+            patient_name_from_draft=patient_name,
+        )
+
+    response.intake_summary = intake_summary
+    return response
 
 
 async def list_appointments(

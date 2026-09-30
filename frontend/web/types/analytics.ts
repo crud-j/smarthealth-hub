@@ -15,6 +15,9 @@ export interface DashboardOverview {
   visitsThisWeek: number;
   upcomingAppointments: number;
   immunizationsDue: number;
+  seniorCount: number;
+  pwdCount: number;
+  pregnantCount: number;
   /** Recent patients — last 5 registered. */
   recentPatients: RecentPatientRow[];
   /** Next 5 upcoming appointments. */
@@ -111,6 +114,23 @@ export interface VisitTrendPointApi {
 export interface VisitTrendsApiResponse {
   weeks: number;
   items: VisitTrendPointApi[];
+}
+
+// ---------------------------------------------------------------------------
+// Visit type breakdown (GET /analytics/visit-type-breakdown)
+// ---------------------------------------------------------------------------
+
+export interface VisitTypeBreakdownItem {
+  /** Visit type label as stored in visits.visit_type (e.g. "consultation"). */
+  visitType: string;
+  /** Number of visits of this type in the requested date range. */
+  count: number;
+}
+
+export interface VisitTypeBreakdownResponse {
+  items: VisitTypeBreakdownItem[];
+  from: string;
+  to: string;
 }
 
 // ---------------------------------------------------------------------------

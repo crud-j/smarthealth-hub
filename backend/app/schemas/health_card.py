@@ -20,7 +20,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from app.schemas._base import BaseSchema
 
@@ -165,9 +165,13 @@ class CardGenerateResponse(BaseSchema):
     qr_data_uri: str = Field(
         description="data:image/png;base64,... — QR code for the card front"
     )
-    # Minimal JSON to write to the NFC chip
+    # JSON to write to the NFC chip + NDEF URI record for NFC Tools
     nfc_payload: dict[str, str | int] = Field(
-        description="{'patient_id': str, 'card_version': int} — write to NFC chip NDEF record"
+        description=(
+            "{'patient_id': str, 'card_number': str, 'card_version': int, "
+            "'view_url': str} — write view_url as the NFC chip NDEF URI record "
+            "so NFC Tools triggers GET /view/{card_number} on tap."
+        )
     )
 
 
@@ -232,6 +236,42 @@ class PatientVerifySummaryFull(PatientVerifySummary):
     )
 
 
+class CardGenerationAccepted(BaseSchema):
+    """
+    Returned by POST /health-cards/{patient_id}/generate when the PDF
+    generation task is dispatched to Celery (HTTP 202 Accepted).
+
+    The caller should poll GET /health-cards/generation-status/{card_id}
+    until status transitions to "ready" or "failed".
+    """
+
+    card_id: str = Field(description="UUID of the newly created or existing HealthCard row.")
+    task_id: str = Field(description="Celery task ID — for monitoring via Flower or the status endpoint.")
+    status: str = Field(default="pending", description="Always 'pending' at dispatch time.")
+
+
+class CardGenerationStatus(BaseSchema):
+    """
+    Returned by GET /health-cards/generation-status/{card_id}.
+
+    status values:
+      "pending" — task queued or in progress.
+      "ready"   — PDF is on disk; pdf_url points to the relative file path.
+      "failed"  — PDF generation failed; retry by calling generate again.
+    """
+
+    card_id: str = Field(description="UUID of the HealthCard row.")
+    status: str = Field(description="'pending' | 'ready' | 'failed'")
+    pdf_url: str | None = Field(
+        None,
+        description=(
+            "Relative path to the rendered PDF (e.g. 'health_cards/<card_id>.pdf'). "
+            "Populated only when status='ready'.  Prefix with the API host to "
+            "form an absolute download URL."
+        ),
+    )
+
+
 class PublicVerifyResponse(BaseSchema):
     """
     Returned by GET /health-cards/verify/public — the unauthenticated endpoint
@@ -245,3 +285,197 @@ class PublicVerifyResponse(BaseSchema):
     full_name: str | None = Field(None, description="Patient name — only set when valid=True.")
     patient_code: str | None = Field(None, description="e.g. BHC-2026-000042 — only set when valid=True.")
     card_status: str | None = Field(None, description="'active', 'reissued', etc. — only set when valid=True.")
+
+
+# ---------------------------------------------------------------------------
+# NFC Batch Export schemas (GET /health-cards/nfc-batch)
+# ---------------------------------------------------------------------------
+
+
+class NfcBatchItem(BaseSchema):
+    """
+    A single entry in the NFC batch export payload.
+
+    Security invariant: ``nfc_uri`` is the NDEF URI record string written
+    to the physical chip.  It contains ONLY the health card view URL
+    (card_number pointer) — no PHI such as name, birth date, or diagnosis.
+
+    The ``patient_id`` field is included so the Android batch-write app can
+    correlate the write result back to a patient row without re-fetching the
+    full patient list.  The app MUST NOT display ``patient_id`` on any
+    patient-facing screen.
+    """
+
+    patient_id: uuid.UUID = Field(description="Patient UUID — for correlation only; do not display to patients.")
+    card_version: int = Field(description="Current card version integer matching the HMAC used in the QR code.")
+    nfc_uri: str = Field(
+        description=(
+            "NDEF URI string to write to the physical NFC chip, e.g. "
+            "'http://192.168.100.6:9000/view/BHC-2026-000001'.  "
+            "Contains only the card_number pointer — no PHI."
+        )
+    )
+
+
+class NfcBatchResponse(BaseSchema):
+    """
+    Returned by GET /health-cards/nfc-batch.
+
+    Provides all NDEF URI payloads needed for a batch NFC chip-writing
+    session (e.g. a health drive with 50+ patients).  An Android batch-write
+    app fetches this once, caches it locally, and writes chips sequentially
+    without further network calls during the write session.
+    """
+
+    items: list[NfcBatchItem] = Field(description="Ordered list of NFC payloads to write.")
+    total: int = Field(description="Number of items returned (len(items)).")
+    barangay_filter: str | None = Field(
+        None,
+        description="The barangay filter applied to this batch, or None if no filter was requested.",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Bulk card status schemas (POST /health-cards/status-bulk)
+# ---------------------------------------------------------------------------
+
+
+class CardStatusItem(BaseSchema):
+    """
+    Status summary for a single patient's health card.
+
+    Contains only card metadata (status, card_number, card_id, card_version) —
+    no PHI beyond what is already visible in the card management list view.
+    Used by POST /health-cards/status-bulk to return per-patient card
+    status in a single bulk response, eliminating the N+1 fetch pattern.
+    """
+
+    patient_id: uuid.UUID = Field(description="Patient UUID this status item belongs to.")
+    status: str = Field(description="Card status: 'active', 'lost', 'reissued', 'revoked', or 'none'.")
+    card_number: str | None = Field(None, description="Card number (e.g. SH-2026-000001), or None if no card exists.")
+    card_id: uuid.UUID | None = Field(None, description="Health card UUID, or None if no card exists.")
+    card_version: int | None = Field(None, description="Card version integer, or None if no card exists.")
+
+
+class BulkCardStatusRequest(BaseSchema):
+    """
+    Request body for POST /health-cards/status-bulk.
+
+    Limited to 100 patient IDs per call to bound query size and response
+    payload.  A standard page of 15 rows is well within this limit.
+    """
+
+    patient_ids: list[uuid.UUID] = Field(
+        ...,
+        description="List of patient UUIDs to look up.  1–100 entries.",
+    )
+
+    @field_validator("patient_ids")
+    @classmethod
+    def validate_patient_ids(cls, v: list[uuid.UUID]) -> list[uuid.UUID]:
+        if len(v) > 100:
+            raise ValueError("Cannot request status for more than 100 patients at once.")
+        return v
+
+
+class BulkCardStatusResponse(BaseSchema):
+    """
+    Response body for POST /health-cards/status-bulk.
+
+    One CardStatusItem is returned per patient_id in the request.
+    Patients without a card row receive status='none'.
+    """
+
+    items: list[CardStatusItem] = Field(
+        description="One status entry per requested patient_id."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Batch card generation schemas (POST /health-cards/batch-generate,
+#                                 GET  /health-cards/batch-status/{batch_id})
+# ---------------------------------------------------------------------------
+
+
+class BatchGenerateRequest(BaseSchema):
+    """
+    POST /health-cards/batch-generate
+
+    Enqueues a Celery card-generation task for each patient_id.
+    Capped at 100 to bound Redis key fan-out and Celery queue pressure.
+
+    Security note: Only BHW+ roles may call this endpoint.
+    One audit_log row per batch request is written by the endpoint.
+    Task args contain ONLY UUIDs — no PHI in Celery task arguments.
+    """
+
+    patient_ids: list[uuid.UUID] = Field(
+        ...,
+        description=(
+            "List of patient UUIDs to generate cards for.  "
+            "Must contain 1–100 entries.  Patients who already have an active "
+            "card will have it regenerated (idempotent — same card_number "
+            "returned by generate_card())."
+        ),
+    )
+
+    @field_validator("patient_ids")
+    @classmethod
+    def validate_patient_ids(cls, v: list[uuid.UUID]) -> list[uuid.UUID]:
+        if len(v) == 0:
+            raise ValueError("At least one patient_id must be supplied.")
+        if len(v) > 100:
+            raise ValueError("Cannot generate more than 100 cards in a single batch.")
+        return v
+
+
+class BatchGenerateResponse(BaseSchema):
+    """
+    Returned by POST /health-cards/batch-generate immediately after all
+    Celery tasks have been enqueued (HTTP 202 Accepted).
+
+    The caller should poll GET /health-cards/batch-status/{batch_id} every
+    2 seconds until completed + failed == total.
+    """
+
+    batch_id: str = Field(
+        description="UUID string identifying this batch run — use to poll batch-status."
+    )
+    total: int = Field(
+        description="Number of card-generation tasks enqueued (one per patient_id)."
+    )
+
+
+class BatchStatusResult(BaseSchema):
+    """
+    Per-patient result item returned inside BatchStatusResponse.
+
+    status is either 'success' or 'failed'.  When failed, the error field
+    contains a short (≤100 char) description of what went wrong.  When the
+    task has not yet completed, the entry will not appear in the results list
+    (only completed tasks are included).
+    """
+
+    patient_id: uuid.UUID = Field(description="Patient UUID this result belongs to.")
+    status: str = Field(description="'success' or 'failed'.")
+    error: str | None = Field(
+        None,
+        description="Short error description — only set when status='failed'.",
+    )
+
+
+class BatchStatusResponse(BaseSchema):
+    """
+    Returned by GET /health-cards/batch-status/{batch_id}.
+
+    Poll this endpoint every 2 seconds until completed + failed == total,
+    at which point all tasks have finished and the batch is complete.
+    """
+
+    batch_id: str = Field(description="The batch identifier.")
+    total: int = Field(description="Total number of tasks in the batch.")
+    completed: int = Field(description="Number of tasks that completed successfully.")
+    failed: int = Field(description="Number of tasks that failed.")
+    results: list[BatchStatusResult] = Field(
+        description="Per-patient results for tasks that have completed or failed."
+    )

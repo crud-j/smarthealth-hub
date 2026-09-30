@@ -62,11 +62,13 @@ class AuditLog(Base):
     )
     user_id: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
-        sa.ForeignKey(
-            "users.id",
-            name="fk_audit_logs_user_id_users",
-            ondelete="SET NULL",
-        ),
+        # NOTE: No FK constraint on this column.  The audit_no_delete and
+        # audit_no_update PostgreSQL RULES (migration 0008) make the table
+        # append-only, which breaks ON DELETE SET NULL enforcement (the DB
+        # FK referential integrity check is intercepted by the rule).
+        # The FK was dropped in migration 0024.  user_id is retained as a
+        # plain nullable UUID — the historical actor UUID is preserved in
+        # audit rows even after the user account is deleted.
         nullable=True,
     )
     action: Mapped[str] = mapped_column(sa.String(50), nullable=False)
@@ -87,12 +89,9 @@ class AuditLog(Base):
         server_default=sa.text("now()"),
     )
 
-    # Relationships
-    user: Mapped["User | None"] = relationship(
-        "User",
-        back_populates="audit_logs",
-        lazy="noload",
-    )
+    # NOTE: No ORM relationship to User — the FK was dropped in migration 0024
+    # (the audit_no_delete rule made ON DELETE SET NULL unworkable).
+    # user_id is a plain UUID column; load the acting user separately if needed.
 
     def __repr__(self) -> str:
         return (

@@ -31,16 +31,49 @@ from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
 
-celery_engine = create_async_engine(
-    settings.DATABASE_URL,
-    echo=False,
-    poolclass=NullPool,
-)
+_active_test_session: AsyncSession | None = None
 
-CelerySessionLocal = async_sessionmaker(
-    bind=celery_engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-    autoflush=False,
-    autocommit=False,
-)
+
+def set_test_session(session: AsyncSession | None) -> None:
+    """Bind the active in-process test session to Celery worker helpers.
+
+    This is used by the pytest savepoint fixture to let a direct task helper
+    read rows created in the same test transaction without opening a second
+    database connection (which would not see the savepoint-scoped rows).
+    """
+    global _active_test_session
+    _active_test_session = session
+
+
+class CelerySessionLocal:
+    """Create a fresh async session bound to the current DATABASE_URL for each task."""
+
+    def __init__(self) -> None:
+        self._engine = create_async_engine(
+            settings.DATABASE_URL,
+            echo=False,
+            poolclass=NullPool,
+        )
+        self._session_factory = async_sessionmaker(
+            bind=self._engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+            autoflush=False,
+            autocommit=False,
+        )
+        self._session: AsyncSession | None = None
+
+    async def __aenter__(self) -> AsyncSession:
+        global _active_test_session
+        if _active_test_session is not None:
+            self._session = _active_test_session
+            return self._session
+
+        self._session = self._session_factory()
+        await self._session.__aenter__()
+        return self._session
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        if self._session is not None and self._session is not _active_test_session:
+            await self._session.__aexit__(exc_type, exc_val, exc_tb)
+            await self._engine.dispose()

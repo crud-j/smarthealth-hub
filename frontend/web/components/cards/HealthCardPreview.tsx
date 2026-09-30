@@ -2,14 +2,14 @@
 
 /**
  * HealthCardPreview — CR80 health card front & back visual preview.
+ * Mirrors card_front.html / card_back.html + card_styles.css exactly.
  *
- * Uses NFC-FRONT-DESIGN.svg / NFC-BACKDESIGN.svg (public/) as full-bleed
- * backgrounds, matching the WeasyPrint card_front.html / card_back.html
- * templates exactly. Toggle buttons switch between faces with a CSS 3-D flip.
+ * Front: BHC seal · 15×17mm photo · 5-row info · PhilHealth + badges · QR
+ * Back:  Full medical summary — address · blood type + allergies · vitals ·
+ *        emergency · PhilHealth · flags. Dark red/rose (#8b1a1a) theme.
  *
- * Security invariant: QR encodes only patient_id + card_version + HMAC sig.
- * No PHI appears in the QR payload. Photo URL is constructed client-side from
- * the API host so the chip/QR never carry medical data.
+ * No NFC icons on either face.
+ * Security invariant: QR encodes only patient_id + card_version + HMAC.
  */
 
 import { useEffect, useState } from "react";
@@ -18,18 +18,19 @@ import type { Patient } from "@/types/patient";
 import { generateQrDataUri } from "@/lib/qr";
 
 // ---------------------------------------------------------------------------
-// Layout constants — CR80 card (85.6 mm × 54 mm) at display scale
+// Layout constants — CR80 (85.6 × 54 mm) at display scale
 // ---------------------------------------------------------------------------
 
 const CARD_W = 456;
-const CARD_H = Math.round(54 * (CARD_W / 85.6)); // 288 px
-const PX_PER_MM = CARD_W / 85.6; // ≈ 5.327 px / mm
+const CARD_H = Math.round(54 * (CARD_W / 85.6));
+const PX_PER_MM = CARD_W / 85.6;
 
-/** mm → px (integer) */
-const mm = (v: number): number => Math.round(v * PX_PER_MM);
+const mm = (v: number) => Math.round(v * PX_PER_MM);
+const pt = (v: number) => Math.round(v * 0.3528 * PX_PER_MM);
 
-/** pt → px  (1 pt = 0.3528 mm) */
-const pt = (v: number): number => Math.round(v * 0.3528 * PX_PER_MM);
+const RED = "#8b1a1a";
+const RED_BORDER = "rgba(139,26,26,0.15)";
+const RED_BG = "rgba(139,26,26,0.04)";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -38,35 +39,15 @@ const pt = (v: number): number => Math.round(v * 0.3528 * PX_PER_MM);
 interface HealthCardPreviewProps {
   patient: Pick<
     Patient,
-    | "id"
-    | "patientCode"
-    | "firstName"
-    | "middleName"
-    | "lastName"
-    | "sex"
-    | "birthDate"
-    | "age"
-    | "address"
-    | "barangay"
-    | "municipality"
-    | "province"
-    | "sitioPurok"
-    | "bloodType"
-    | "allergies"
-    | "heightCm"
-    | "weightKg"
-    | "guardianName"
-    | "guardianContact"
-    | "emergencyContactName"
-    | "emergencyContactNumber"
-    | "isSenior"
-    | "isPwd"
-    | "isPregnant"
-    | "mobileNumber"
-    | "philhealthNo"
-    | "philhealthMemberType"
-    | "photoPath"
-    | "knownConditions"
+    | "id" | "patientCode" | "firstName" | "middleName" | "lastName"
+    | "sex" | "birthDate" | "age"
+    | "address" | "barangay" | "municipality" | "province" | "sitioPurok"
+    | "bloodType" | "allergies" | "heightCm" | "weightKg"
+    | "guardianName" | "guardianContact"
+    | "emergencyContactName" | "emergencyContactNumber"
+    | "isSenior" | "isPwd" | "isPregnant"
+    | "mobileNumber" | "philhealthNo" | "philhealthMemberType"
+    | "photoPath" | "knownConditions"
   >;
   card: HealthCardData;
 }
@@ -75,717 +56,329 @@ interface HealthCardPreviewProps {
 // Component
 // ---------------------------------------------------------------------------
 
-export default function HealthCardPreview({
-  patient,
-  card,
-}: HealthCardPreviewProps) {
+export default function HealthCardPreview({ patient, card }: HealthCardPreviewProps) {
   const [side, setSide] = useState<"front" | "back">("front");
   const [qrDataUri, setQrDataUri] = useState<string | null>(null);
   const [qrError, setQrError] = useState(false);
 
-  // Build QR — prefer the server-generated URI (contains HMAC sig)
   useEffect(() => {
     let cancelled = false;
     async function buildQr() {
-      const url =
-        `https://smarthealthhub.local/verify` +
-        `?pid=${encodeURIComponent(patient.id)}&v=${card.card_version}`;
+      const url = `https://smarthealthhub.local/verify?pid=${encodeURIComponent(patient.id)}&v=${card.card_version}`;
       try {
         const uri = await generateQrDataUri(url);
         if (!cancelled) setQrDataUri(uri);
-      } catch {
-        if (!cancelled) setQrError(true);
-      }
+      } catch { if (!cancelled) setQrError(true); }
     }
-    if (card.qr_data_uri) {
-      setQrDataUri(card.qr_data_uri);
-    } else {
-      void buildQr();
-    }
-    return () => {
-      cancelled = true;
-    };
+    if (card.qr_data_uri) setQrDataUri(card.qr_data_uri);
+    else void buildQr();
+    return () => { cancelled = true; };
   }, [patient.id, card.card_version, card.qr_data_uri]);
 
-  // Derived display values
-  const middleInitial = patient.middleName ? ` ${patient.middleName[0]}.` : "";
-  const displayName = `${patient.lastName.toUpperCase()}, ${patient.firstName}${middleInitial}`;
+  // Derived
+  const fullName = [patient.firstName, patient.middleName, patient.lastName]
+    .filter(Boolean).join(" ").toUpperCase();
 
-  const birthDateDisplay = patient.birthDate
-    ? new Date(patient.birthDate).toLocaleDateString("en-PH", {
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-      })
+  const dob = patient.birthDate
+    ? new Date(patient.birthDate).toLocaleDateString("en-PH", { year: "numeric", month: "long", day: "numeric" })
     : "—";
 
   const issuedDate = card.issued_at
-    ? new Date(card.issued_at).toLocaleDateString("en-PH", {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-      })
+    ? new Date(card.issued_at).toLocaleDateString("en-PH", { year: "numeric", month: "short", day: "numeric" })
     : "";
 
   const addressDisplay = (() => {
-    const parts = [
-      patient.sitioPurok,
-      patient.barangay,
-      patient.municipality,
-      patient.province,
-    ].filter(Boolean);
-    return parts.length > 0 ? parts.join(", ") : patient.address || "—";
+    const p = [patient.sitioPurok, patient.barangay, patient.municipality, patient.province].filter(Boolean);
+    return p.length ? p.join(", ") : (patient.address || "—");
   })();
 
-  const hasAllergies =
-    !!patient.allergies &&
-    patient.allergies !== "None on record" &&
-    patient.allergies !== "None" &&
-    patient.allergies !== "—";
+  const hasAllergies = !!patient.allergies &&
+    !["None on record", "None", "—"].includes(patient.allergies ?? "");
 
-  const emergencyName =
-    patient.emergencyContactName ?? patient.guardianName ?? null;
-  const emergencyNumber =
-    patient.emergencyContactNumber ?? patient.guardianContact ?? null;
+  const ecName = (patient.emergencyContactName && patient.emergencyContactName !== "—")
+    ? patient.emergencyContactName : (patient.guardianName ?? null);
+  const ecNum = (patient.emergencyContactNumber && patient.emergencyContactNumber !== "—")
+    ? patient.emergencyContactNumber : (patient.guardianContact ?? null);
 
-  const apiHost = (
-    process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000"
-  ).replace(/\/api\/v1\/?$/, "");
+  const philhealthPresent = !!patient.philhealthNo && patient.philhealthNo !== "—";
+  const is4ps = patient.philhealthMemberType?.toLowerCase() === "4ps";
+  const hasBadges = is4ps || patient.isPwd || patient.isSenior || patient.isPregnant;
+
+  const apiHost = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000").replace(/\/api\/v1\/?$/, "");
   const photoUrl = patient.photoPath ? `${apiHost}${patient.photoPath}` : null;
 
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        gap: 12,
-        fontFamily: "'Helvetica Neue', Arial, Helvetica, sans-serif",
-      }}
-    >
-      {/* ── 3-D flip container ─────────────────────────────────────────── */}
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12,
+      fontFamily: "'Helvetica Neue', Arial, Helvetica, sans-serif" }}>
+
       <div style={{ perspective: 1200 }}>
-        <div
-          style={{
-            width: CARD_W,
-            height: CARD_H,
-            position: "relative",
-            transformStyle: "preserve-3d",
-            transition: "transform 0.55s cubic-bezier(0.4,0,0.2,1)",
-            transform:
-              side === "back" ? "rotateY(180deg)" : "rotateY(0deg)",
-          }}
-        >
-          {/* ═══════════════════════════════════════════════════════════
-              FRONT FACE
-          ═══════════════════════════════════════════════════════════ */}
+        <div style={{
+          width: CARD_W, height: CARD_H, position: "relative",
+          transformStyle: "preserve-3d",
+          transition: "transform 0.55s cubic-bezier(0.4,0,0.2,1)",
+          transform: side === "back" ? "rotateY(180deg)" : "rotateY(0deg)",
+        }}>
+
+          {/* ═══════════════════════════════════════════════════
+              FRONT
+          ═══════════════════════════════════════════════════ */}
           <div style={faceBase}>
-            {/* Full-bleed SVG background — no other background applied */}
-            <img
-              src="/card-bg-front.svg"
-              alt=""
-              aria-hidden
-              style={bgImgStyle}
-            />
+            <img src="/card-bg-front.svg" alt="" aria-hidden style={bgFull} />
 
-            {/* BHC Seal — top-left */}
-            <img
-              src="/BHCFINALLOGO.svg"
-              alt="BHC Seal"
-              style={{
-                position: "absolute",
-                top: mm(2),
-                left: mm(2),
-                width: mm(16),
-                height: mm(16),
-                zIndex: 2,
-                display: "block",
-              }}
-            />
+            {/* BHC Seal — top:2.5mm left:2.5mm 15mm */}
+            <img src="/BHCFINALLOGO.svg" alt="BHC Seal" style={{
+              position: "absolute", top: mm(2.5), left: mm(2.5),
+              width: mm(15), height: mm(15), zIndex: 2,
+            }} />
 
-            {/* Patient photo — white-backed card, left center */}
-            <div
-              style={{
-                position: "absolute",
-                top: mm(19),
-                left: mm(3),
-                zIndex: 2,
-                background: "rgba(255,255,255,0.92)",
-                borderRadius: 6,
-                padding: mm(1),
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: mm(0.5),
-              }}
-            >
+            {/* Photo — top:21mm left:14mm 15×17mm */}
+            <div style={{ position: "absolute", top: mm(21), left: mm(14), width: mm(15), zIndex: 2 }}>
               {photoUrl ? (
-                <img
-                  src={photoUrl}
-                  alt="Patient Photo"
-                  style={{
-                    width: mm(14),
-                    height: mm(16),
-                    objectFit: "cover",
-                    borderRadius: 5,
-                    border: "0.5px solid #cbd5e1",
-                    display: "block",
-                  }}
-                />
+                <img src={photoUrl} alt="Patient Photo" style={{
+                  width: mm(15), height: mm(17), objectFit: "cover",
+                  borderRadius: mm(1), border: "0.7px solid #5f6368", display: "block",
+                }} />
               ) : (
-                <div
-                  style={{
-                    width: mm(14),
-                    height: mm(16),
-                    background: "#f1f5f9",
-                    border: "1px dashed #94a3b8",
-                    borderRadius: 5,
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: mm(0.8),
-                  }}
-                >
-                  <svg
-                    width={mm(3.5)}
-                    height={mm(3.5)}
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="#94a3b8"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
+                <div style={{
+                  width: mm(15), height: mm(17), background: "rgba(226,232,240,0.90)",
+                  border: "0.5px dashed #94a3b8", borderRadius: mm(1),
+                  display: "flex", flexDirection: "column", alignItems: "center",
+                  justifyContent: "center", gap: mm(0.8),
+                }}>
+                  <svg width={mm(4)} height={mm(4)} viewBox="0 0 24 24" fill="none"
+                    stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
                     <circle cx="12" cy="7" r="4" />
                   </svg>
-                  <span
-                    style={{
-                      fontSize: pt(3.8),
-                      fontWeight: "bold",
-                      color: "#94a3b8",
-                      letterSpacing: "0.04em",
-                    }}
-                  >
+                  <span style={{ fontSize: pt(3.8), fontWeight: 700, color: "#64748b", letterSpacing: "0.03em" }}>
                     PHOTO
                   </span>
                 </div>
               )}
-              <div
-                style={{
-                  fontSize: pt(3.2),
-                  fontFamily: "monospace",
-                  color: "#475569",
-                  fontWeight: 600,
-                  lineHeight: 1,
-                  textAlign: "center",
-                  maxWidth: mm(14),
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {card.card_number}
-              </div>
             </div>
 
-            {/* Patient info table — center */}
-            <div
-              style={{
-                position: "absolute",
-                top: mm(19),
-                left: mm(21),
-                right: mm(22),
-                zIndex: 2,
-                display: "flex",
-                flexDirection: "column",
-                gap: mm(1.2),
-              }}
-            >
-              {(
-                [
-                  ["FULLNAME:", displayName],
-                  ["PATIENTCODE:", patient.patientCode],
-                  [
-                    "AGE & GENDER:",
-                    `${patient.age} / ${patient.sex.toUpperCase()}`,
-                  ],
-                  ["DATE OF BIRTH:", birthDateDisplay],
-                  ["CONTACT:", patient.mobileNumber ?? "—"],
-                ] as [string, string][]
-              ).map(([label, value]) => (
-                <div
-                  key={label}
-                  style={{
-                    display: "flex",
-                    alignItems: "baseline",
-                    gap: mm(1.5),
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: pt(5.5),
-                      fontWeight: 800,
-                      color: "#1e293b",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.01em",
-                      flexShrink: 0,
-                      minWidth: mm(17),
-                    }}
-                  >
+            {/* Info rows — top:21mm left:31mm right:3mm */}
+            <div style={{
+              position: "absolute", top: mm(21), left: mm(31), right: mm(3),
+              zIndex: 2, display: "flex", flexDirection: "column", gap: mm(1.2),
+            }}>
+              {([
+                ["FULLNAME:", fullName],
+                ["PATIENTCODE:", patient.patientCode],
+                ["AGE & GENDER:", `${patient.age} / ${patient.sex.toUpperCase()}`],
+                ["DATE OF BIRTH:", dob],
+                ["CONTACT:", patient.mobileNumber ?? "—"],
+              ] as [string, string][]).map(([label, value]) => (
+                <div key={label} style={{ display: "flex", alignItems: "baseline", gap: mm(2), whiteSpace: "nowrap" }}>
+                  <span style={{
+                    fontSize: pt(5.5), fontWeight: 700, color: "#111111",
+                    textTransform: "uppercase", letterSpacing: "0.005em",
+                    flexShrink: 0, minWidth: mm(13.5), lineHeight: 1.2,
+                  }}>
                     {label}
                   </span>
-                  <span
-                    style={{
-                      fontSize: pt(5.5),
-                      fontWeight: 500,
-                      color: "#0f172a",
-                    }}
-                  >
+                  <span style={{
+                    fontSize: pt(5.5), fontWeight: 400, color: "#111111",
+                    lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  }}>
                     {value}
                   </span>
                 </div>
               ))}
             </div>
 
-            {/* PhilHealth — white-backed pill, bottom-left */}
-            <div
-              style={{
-                position: "absolute",
-                bottom: mm(7),
-                left: mm(3),
-                zIndex: 2,
-                background: "rgba(255,255,255,0.90)",
-                borderRadius: 5,
-                padding: `${mm(0.6)}px ${mm(1.2)}px`,
-                display: "flex",
-                flexDirection: "row",
-                alignItems: "center",
-                gap: mm(1.2),
-              }}
-            >
-              <img
-                src="/philhealth-logo.svg"
-                alt="PhilHealth"
-                style={{
-                  width: mm(3.5),
-                  height: mm(5.5),
-                  objectFit: "contain",
-                  flexShrink: 0,
-                  display: "block",
-                }}
-              />
-              <div style={{ display: "flex", flexDirection: "column" }}>
-                <span
-                  style={{
-                    fontSize: pt(4),
-                    fontWeight: 800,
-                    color: "#065f46",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.03em",
-                    lineHeight: 1,
-                  }}
-                >
-                  PhilHealth
-                </span>
-                <span
-                  style={{
-                    fontSize: pt(4.5),
-                    fontWeight: 700,
-                    color: "#1e293b",
-                    fontFamily: "monospace",
-                    lineHeight: 1.2,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: mm(0.8),
-                  }}
-                >
-                  {patient.philhealthNo ?? "—"}
-                  {patient.philhealthMemberType && (
-                    <span
-                      style={{
-                        fontSize: pt(3),
-                        fontWeight: "bold",
-                        color: "#ffffff",
-                        background: "#059669",
-                        padding: `1px ${mm(0.8)}px`,
-                        borderRadius: 1,
-                        textTransform: "uppercase",
-                      }}
-                    >
-                      {patient.philhealthMemberType}
-                    </span>
-                  )}
-                </span>
+            {/* Beneficiary section — top:39.5mm left:14mm */}
+            {(philhealthPresent || hasBadges) && (
+              <div style={{
+                position: "absolute", top: mm(39.5), left: mm(14), zIndex: 2,
+                display: "flex", flexDirection: "column", gap: mm(1.2), maxWidth: mm(54),
+              }}>
+                {philhealthPresent && (
+                  <div style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: mm(1.5) }}>
+                    <div style={{
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      width: mm(6.5), height: mm(6.5), background: "rgba(255,255,255,0.90)",
+                      borderRadius: mm(1), border: "0.3px solid #d1d5db", flexShrink: 0,
+                    }}>
+                      <svg width={mm(3.5)} height={mm(3.5)} viewBox="0 0 28 28" fill="none">
+                        <circle cx="8" cy="6" r="4.5" fill="#c8a200" />
+                        <path d="M0 24 Q0 14 8 14 Q16 14 16 24Z" fill="#c8a200" />
+                        <circle cx="20" cy="6" r="4.5" fill="#059669" />
+                        <path d="M12 24 Q12 14 20 14 Q28 14 28 24Z" fill="#059669" />
+                      </svg>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column" }}>
+                      <span style={{ fontSize: pt(5.5), fontWeight: 700, color: "#111111", lineHeight: 1.15 }}>
+                        PhilHealth
+                      </span>
+                      <span style={{
+                        fontSize: pt(5), fontWeight: 500, color: "#111111",
+                        fontFamily: "monospace", lineHeight: 1.15,
+                        display: "flex", alignItems: "center", gap: mm(1),
+                      }}>
+                        {patient.philhealthNo}
+                        {patient.philhealthMemberType && !is4ps && (
+                          <span style={{
+                            fontSize: pt(3.5), fontWeight: 800, color: "#fff",
+                            background: "#059669", padding: `1px ${mm(1)}px`,
+                            borderRadius: 1, textTransform: "uppercase",
+                          }}>
+                            {patient.philhealthMemberType}
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                  </div>
+                )}
+                {hasBadges && (
+                  <div style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: mm(1) }}>
+                    {is4ps && <span style={{ ...benBadge, background: "#0891b2" }}>4Ps</span>}
+                    {patient.isPwd && <span style={{ ...benBadge, background: "#1d4ed8" }}>PWD</span>}
+                    {patient.isSenior && <span style={{ ...benBadge, background: "#7c3aed" }}>Senior</span>}
+                    {patient.isPregnant && <span style={{ ...benBadge, background: "#be185d" }}>Pregnant</span>}
+                  </div>
+                )}
               </div>
-            </div>
+            )}
 
-            {/* QR code — bottom-right */}
-            <div
-              style={{
-                position: "absolute",
-                bottom: mm(2),
-                right: mm(2),
-                zIndex: 2,
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: mm(0.5),
-              }}
-            >
+            {/* QR — bottom:2.5mm right:2.5mm 13mm */}
+            <div style={{
+              position: "absolute", bottom: mm(2.5), right: mm(2.5), zIndex: 2,
+              display: "flex", flexDirection: "column", alignItems: "center", gap: mm(0.7),
+            }}>
               {qrDataUri ? (
-                <img
-                  src={qrDataUri}
-                  alt="QR code — scan to verify"
-                  style={{
-                    width: mm(17),
-                    height: mm(17),
-                    background: "#ffffff",
-                    padding: mm(0.4),
-                    borderRadius: 1.5,
-                    border: "0.4px solid #e2e8f0",
-                    display: "block",
-                  }}
-                />
+                <img src={qrDataUri} alt="QR" style={{
+                  width: mm(13), height: mm(13), background: "#fff",
+                  padding: mm(0.3), border: "0.3px solid #e2e8f0", display: "block",
+                }} />
               ) : qrError ? (
-                <div
-                  style={{
-                    width: mm(17),
-                    height: mm(17),
-                    border: "1px dashed #94a3b8",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: pt(3.5),
-                    color: "#94a3b8",
-                    textAlign: "center",
-                    background: "rgba(255,255,255,0.8)",
-                    borderRadius: 1.5,
-                  }}
-                >
-                  QR unavailable
-                </div>
+                <div style={{ ...qrPlaceholderStyle }}>QR unavailable</div>
               ) : (
-                <div
-                  style={{
-                    width: mm(17),
-                    height: mm(17),
-                    border: "1px dashed #0d9488",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    background: "rgba(255,255,255,0.8)",
-                    borderRadius: 1.5,
-                  }}
-                  aria-label="Loading QR code…"
-                  role="status"
-                >
-                  <span style={{ fontSize: pt(3.5), color: "#0d9488" }}>
-                    Generating…
-                  </span>
+                <div style={{ ...qrPlaceholderStyle }} role="status">
+                  <span style={{ fontSize: pt(3.5), color: "#94a3b8" }}>…</span>
                 </div>
               )}
-              <div
-                style={{
-                  fontSize: pt(4),
-                  color: "#334155",
-                  textAlign: "center",
-                  fontWeight: 500,
-                }}
-              >
+              <span style={{ fontSize: pt(3.8), color: "#111111", fontWeight: 400, lineHeight: 1 }}>
                 Scan to verify
-              </div>
+              </span>
             </div>
 
-            {/* Footer — bottom-left */}
-            <div
-              style={{
-                position: "absolute",
-                bottom: mm(1.5),
-                left: mm(3),
-                zIndex: 2,
-                display: "flex",
-                flexDirection: "column",
-                gap: mm(0.3),
-              }}
-            >
-              <span style={{ fontSize: pt(3.8), color: "#64748b" }}>
+            {/* Footer — bottom:1.5mm left:2mm */}
+            <div style={{
+              position: "absolute", bottom: mm(1.5), left: mm(2), zIndex: 2,
+              display: "flex", flexDirection: "column", gap: mm(0.4),
+            }}>
+              <span style={{ fontSize: pt(3.5), color: "rgba(255,255,255,0.80)", fontWeight: 400 }}>
                 Issued: {issuedDate}
               </span>
-              <span
-                style={{
-                  fontSize: pt(3.8),
-                  color: "#475569",
-                  fontWeight: 700,
-                  letterSpacing: "0.02em",
-                }}
-              >
+              <span style={{ fontSize: pt(3.5), color: "rgba(255,255,255,0.80)", fontWeight: 600 }}>
                 CARD: V{card.card_version}
               </span>
             </div>
           </div>
 
-          {/* ═══════════════════════════════════════════════════════════
-              BACK FACE
-          ═══════════════════════════════════════════════════════════ */}
+          {/* ═══════════════════════════════════════════════════
+              BACK — comprehensive, dark red theme, no NFC icon
+          ═══════════════════════════════════════════════════ */}
           <div style={{ ...faceBase, transform: "rotateY(180deg)" }}>
-            {/* Full-bleed SVG background */}
-            <img
-              src="/card-bg-back.svg"
-              alt=""
-              aria-hidden
-              style={bgImgStyle}
-            />
+            <img src="/card-bg-back.svg" alt="" aria-hidden style={bgFull} />
 
-            {/* ── Header bar: logo + title stack + optional photo ─────── */}
-            <div
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                right: 0,
-                height: mm(13),
-                zIndex: 2,
-                display: "flex",
-                flexDirection: "row",
-                alignItems: "center",
-                padding: `0 ${mm(2)}px`,
-                gap: mm(1.5),
-              }}
-            >
-              <img
-                src="/BHCFINALLOGO.svg"
-                alt="BHC Seal"
-                style={{
-                  width: mm(9),
-                  height: mm(9),
-                  flexShrink: 0,
-                  display: "block",
-                }}
-              />
+            {/* BHC Logo */}
+            <img src="/BHCFINALLOGO.svg" alt="BHC Seal" style={{
+              position: "absolute", top: mm(1.5), left: mm(2),
+              width: mm(9), height: mm(9), zIndex: 2,
+            }} />
 
-              <div
-                style={{
-                  flex: 1,
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: mm(0.5),
-                  minWidth: 0,
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: pt(5),
-                    fontWeight: 800,
-                    color: "#0f172a",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.05em",
-                    background: "rgba(255,255,255,0.85)",
-                    padding: `${mm(0.3)}px ${mm(0.8)}px`,
-                    borderRadius: 3,
-                    display: "inline-block",
-                    lineHeight: 1,
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  Medical Summary
-                </span>
-                <span
-                  style={{
-                    fontSize: pt(3.8),
-                    fontWeight: 600,
-                    color: "#334155",
-                    background: "rgba(255,255,255,0.70)",
-                    padding: `${mm(0.2)}px ${mm(0.8)}px`,
-                    borderRadius: 2,
-                    display: "inline-block",
-                    lineHeight: 1,
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  Emergency &amp; Health Information
-                </span>
-              </div>
-
-              {photoUrl && (
-                <img
-                  src={photoUrl}
-                  alt=""
-                  style={{
-                    width: mm(8),
-                    height: mm(8),
-                    objectFit: "cover",
-                    borderRadius: "50%",
-                    border: `1.5px solid rgba(255,255,255,0.70)`,
-                    flexShrink: 0,
-                  }}
-                />
-              )}
+            {/* Header */}
+            <div style={{
+              position: "absolute", top: mm(2.5), left: mm(13), right: mm(3),
+              zIndex: 2, display: "flex", flexDirection: "column",
+            }}>
+              <span style={{
+                fontSize: pt(5), fontWeight: 800, color: RED,
+                textTransform: "uppercase", letterSpacing: "0.04em", lineHeight: 1.2,
+              }}>
+                SmartHealth Hub
+              </span>
+              <span style={{
+                fontSize: pt(4), fontWeight: 600, color: "#5a5a5a",
+                fontFamily: "monospace", letterSpacing: "0.02em", lineHeight: 1.2,
+              }}>
+                {card.card_number} · V{card.card_version}
+              </span>
             </div>
 
-            {/* ── Main data panel ─────────────────────────────────────── */}
-            <div
-              style={{
-                position: "absolute",
-                top: mm(13),
-                left: mm(2),
-                right: mm(2),
-                bottom: mm(8),
-                zIndex: 2,
-                background: "rgba(255,255,255,0.90)",
-                borderRadius: 3,
-                overflow: "hidden",
-                display: "flex",
-                flexDirection: "column",
-              }}
-            >
+            {/* Main panel — right:22mm to expose SVG emblem */}
+            <div style={{
+              position: "absolute", top: mm(12), left: mm(2), right: mm(22), bottom: mm(8),
+              zIndex: 2, background: "rgba(255,255,255,0.82)", borderRadius: 2,
+              overflow: "hidden", display: "flex", flexDirection: "column",
+            }}>
+
               {/* Address */}
-              <div style={bpRow}>
-                <span style={bpLabel}>Address</span>
-                <span
-                  style={{
-                    ...bpValue,
-                    fontSize: pt(5),
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
+              <div style={backRow}>
+                <span style={backLabel}>Address</span>
+                <span style={{
+                  ...backValue, fontSize: pt(4.3),
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                }}>
                   {addressDisplay}
                 </span>
               </div>
 
-              {/* Blood type + Allergies */}
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "row",
-                  alignItems: "stretch",
-                  borderBottom: "0.5px solid rgba(203,213,225,0.7)",
-                  flexShrink: 0,
-                }}
-              >
-                {/* Blood type column */}
-                <div
-                  style={{
-                    flexShrink: 0,
-                    width: mm(15),
-                    display: "flex",
-                    flexDirection: "column",
-                    justifyContent: "center",
-                    alignItems: "center",
-                    padding: `${mm(0.5)}px ${mm(1)}px`,
-                    borderRight: "0.5px solid rgba(203,213,225,0.7)",
-                    gap: mm(0.3),
-                  }}
-                >
-                  <span
-                    style={{
-                      fontSize: pt(3.5),
-                      fontWeight: 800,
-                      color: "#0d7c6e",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.04em",
-                    }}
-                  >
+              {/* Blood type + Allergies — two columns */}
+              <div style={{ display: "flex", flexDirection: "row", alignItems: "stretch",
+                borderBottom: `0.3px solid ${RED_BORDER}`, flexShrink: 0 }}>
+                {/* Blood type */}
+                <div style={{
+                  flexShrink: 0, width: mm(15),
+                  display: "flex", flexDirection: "column", alignItems: "center",
+                  justifyContent: "center", padding: `${mm(0.5)}px ${mm(1.5)}px`,
+                  borderRight: `0.3px solid ${RED_BORDER}`, gap: mm(0.2),
+                }}>
+                  <span style={{ fontSize: pt(3.8), fontWeight: 800, color: RED,
+                    textTransform: "uppercase", letterSpacing: "0.02em" }}>
                     Blood Type
                   </span>
-                  <span
-                    style={{
-                      fontSize: pt(10),
-                      fontWeight: 900,
-                      color: "#0f172a",
-                      lineHeight: 1,
-                    }}
-                  >
+                  <span style={{ fontSize: pt(10), fontWeight: 900, color: RED, lineHeight: 1 }}>
                     {patient.bloodType ?? "—"}
                   </span>
                 </div>
-
-                {/* Allergies column */}
-                <div
-                  style={{
-                    flex: 1,
-                    display: "flex",
-                    flexDirection: "column",
-                    justifyContent: "center",
-                    padding: `${mm(0.5)}px ${mm(1.2)}px`,
-                    ...(hasAllergies
-                      ? {
-                          background: "rgba(254,242,242,0.95)",
-                          borderLeft: `2px solid #dc2626`,
-                        }
-                      : {}),
-                  }}
-                >
-                  <span
-                    style={{
-                      ...bpLabel,
-                      color: hasAllergies ? "#b91c1c" : "#0d7c6e",
-                    }}
-                  >
+                {/* Allergies */}
+                <div style={{
+                  flex: 1, display: "flex", flexDirection: "column", justifyContent: "center",
+                  padding: `${mm(0.5)}px ${mm(1.5)}px`,
+                  ...(hasAllergies ? { background: "rgba(254,242,242,0.92)", borderLeft: "2px solid #dc2626" } : {}),
+                }}>
+                  <span style={{
+                    fontSize: pt(3.8), fontWeight: 800, textTransform: "uppercase",
+                    letterSpacing: "0.02em", color: hasAllergies ? "#b91c1c" : RED,
+                  }}>
                     Allergies / Alerts
                   </span>
-                  <span
-                    style={{
-                      ...bpValue,
-                      color: hasAllergies ? "#991b1b" : "#334155",
-                      fontWeight: hasAllergies ? 700 : 500,
-                      fontSize: pt(5),
-                    }}
-                  >
+                  <span style={{
+                    fontSize: pt(4.8), fontWeight: hasAllergies ? 700 : 500,
+                    color: hasAllergies ? "#991b1b" : "#1e293b", lineHeight: 1.2,
+                  }}>
                     {patient.allergies ?? "None on record"}
                   </span>
                 </div>
               </div>
 
               {/* Vitals */}
-              <div
-                style={{
-                  ...bpRow,
-                  alignItems: "center",
-                  gap: mm(2),
-                }}
-              >
-                <span style={bpLabel}>Vitals</span>
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "row",
-                    gap: mm(4),
-                    flex: 1,
-                  }}
-                >
-                  {(
-                    [
-                      ["Wt", patient.weightKg ? `${patient.weightKg} kg` : "—"],
-                      ["Ht", patient.heightCm ? `${patient.heightCm} cm` : "—"],
-                    ] as [string, string][]
-                  ).map(([lbl, val]) => (
-                    <div
-                      key={lbl}
-                      style={{ display: "flex", flexDirection: "column", gap: 1 }}
-                    >
-                      <span
-                        style={{
-                          fontSize: pt(3.5),
-                          fontWeight: 700,
-                          color: "#64748b",
-                          textTransform: "uppercase",
-                          letterSpacing: "0.04em",
-                        }}
-                      >
+              <div style={{ ...backRow, alignItems: "center", gap: mm(1.5) }}>
+                <span style={backLabel}>Last Vitals</span>
+                <div style={{ display: "flex", flexDirection: "row", gap: mm(3.5), flex: 1 }}>
+                  {([
+                    ["Weight", patient.weightKg ? `${patient.weightKg} kg` : "—"],
+                    ["Height", patient.heightCm ? `${patient.heightCm} cm` : "—"],
+                  ] as [string, string][]).map(([lbl, val]) => (
+                    <div key={lbl} style={{ display: "flex", flexDirection: "column", gap: mm(0.2) }}>
+                      <span style={{ fontSize: pt(3.2), fontWeight: 800, color: RED,
+                        textTransform: "uppercase", letterSpacing: "0.02em" }}>
                         {lbl}
                       </span>
-                      <span
-                        style={{
-                          fontSize: pt(6),
-                          fontWeight: 700,
-                          color: "#0f172a",
-                          lineHeight: 1,
-                        }}
-                      >
+                      <span style={{ fontSize: pt(5), fontWeight: 700, color: "#0f172a", lineHeight: 1 }}>
                         {val}
                       </span>
                     </div>
@@ -793,101 +386,60 @@ export default function HealthCardPreview({
                 </div>
               </div>
 
-              {/* Clinical notes */}
-              <div
-                style={{
-                  ...bpRow,
-                  alignItems: "flex-start",
-                  flex: 1,
-                  borderBottom: "none",
-                }}
-              >
-                <span style={bpLabel}>Notes</span>
-                <span
-                  style={{
-                    fontSize: pt(5),
-                    color: "#475569",
-                    fontStyle: "italic",
-                    lineHeight: 1.35,
-                  }}
-                >
-                  {patient.knownConditions ?? "No additional notes."}
-                </span>
-              </div>
-
               {/* Emergency contact */}
-              {emergencyName && (
-                <div
-                  style={{
-                    ...bpRow,
-                    background: "rgba(240,253,244,0.95)",
-                    borderTop: "0.5px solid rgba(209,250,229,0.9)",
-                  }}
-                >
-                  <span style={{ ...bpLabel, color: "#065f46" }}>
-                    Emergency
+              {ecName && (
+                <div style={{ ...backRow, background: RED_BG }}>
+                  <span style={backLabel}>Emergency</span>
+                  <span style={{
+                    ...backValue, fontWeight: 700, color: "#1e293b",
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  }}>
+                    {ecName}{ecNum ? ` · ${ecNum}` : ""}
                   </span>
-                  <span
-                    style={{
-                      ...bpValue,
-                      fontWeight: 700,
-                      color: "#064e3b",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {emergencyName}
-                    {emergencyNumber ? ` · ${emergencyNumber}` : ""}
+                </div>
+              )}
+
+              {/* PhilHealth */}
+              {philhealthPresent && (
+                <div style={backRow}>
+                  <span style={backLabel}>PhilHealth</span>
+                  <span style={{ ...backValue, fontFamily: "monospace", fontSize: pt(4.5),
+                    display: "flex", alignItems: "center", gap: mm(1) }}>
+                    {patient.philhealthNo}
+                    {patient.philhealthMemberType && (
+                      <span style={{
+                        fontSize: pt(3.2), fontWeight: 800, color: "#fff",
+                        background: "#059669", padding: `1px ${mm(1)}px`,
+                        borderRadius: 1, textTransform: "uppercase",
+                      }}>
+                        {patient.philhealthMemberType}
+                      </span>
+                    )}
                   </span>
                 </div>
               )}
 
               {/* Priority flags */}
               {(patient.isSenior || patient.isPwd || patient.isPregnant) && (
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "row",
-                    gap: mm(1),
-                    padding: `${mm(0.6)}px ${mm(2)}px`,
-                    flexShrink: 0,
-                    borderTop: "0.5px solid rgba(203,213,225,0.6)",
-                  }}
-                >
+                <div style={{
+                  display: "flex", flexDirection: "row", gap: mm(1),
+                  padding: `${mm(0.5)}px ${mm(2)}px`, flexShrink: 0,
+                }}>
                   {patient.isSenior && (
-                    <span
-                      style={{
-                        ...flagBadge,
-                        background: "#fef9c3",
-                        color: "#854d0e",
-                        border: "0.5px solid #fde047",
-                      }}
-                    >
+                    <span style={{ ...backFlag, background: "rgba(139,26,26,0.10)",
+                      color: RED, border: "0.3px solid rgba(139,26,26,0.35)" }}>
                       Senior Citizen
                     </span>
                   )}
                   {patient.isPwd && (
-                    <span
-                      style={{
-                        ...flagBadge,
-                        background: "#dbeafe",
-                        color: "#1e3a8a",
-                        border: "0.5px solid #93c5fd",
-                      }}
-                    >
+                    <span style={{ ...backFlag, background: "rgba(29,78,216,0.08)",
+                      color: "#1d4ed8", border: "0.3px solid rgba(29,78,216,0.30)" }}>
                       PWD
                     </span>
                   )}
                   {patient.isPregnant && (
-                    <span
-                      style={{
-                        ...flagBadge,
-                        background: "#fce7f3",
-                        color: "#9d174d",
-                        border: "0.5px solid #f9a8d4",
-                      }}
-                    >
+                    <span style={{ ...backFlag, background: "rgba(190,24,93,0.08)",
+                      color: "#be185d", border: "0.3px solid rgba(190,24,93,0.30)" }}>
                       Pregnant
                     </span>
                   )}
@@ -895,71 +447,37 @@ export default function HealthCardPreview({
               )}
             </div>
 
-            {/* ── Back footer ──────────────────────────────────────────── */}
-            <div
-              style={{
-                position: "absolute",
-                bottom: 0,
-                left: 0,
-                right: 0,
-                height: mm(7),
-                zIndex: 2,
-                background: "rgba(8,92,81,0.88)",
-                display: "flex",
-                flexDirection: "row",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: `0 ${mm(2.5)}px`,
-              }}
-            >
-              <span
-                style={{
-                  fontSize: pt(4),
-                  color: "#ccfbf1",
-                  lineHeight: 1.2,
-                  flex: 1,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                Property of {patient.barangay ?? "Barangay Health Center"} —
-                please return if found.
+            {/* Footer — dark red bar */}
+            <div style={{
+              position: "absolute", bottom: 0, left: 0, right: 0, height: mm(7), zIndex: 2,
+              background: "rgba(139,26,26,0.84)",
+              display: "flex", flexDirection: "column", alignItems: "flex-start",
+              justifyContent: "center", padding: `0 ${mm(3)}px`,
+            }}>
+              <span style={{ fontSize: pt(3.8), color: "rgba(255,235,235,0.95)",
+                lineHeight: 1.2, fontWeight: 400 }}>
+                Property of {patient.barangay ?? "Barangay Health Center"}. If found, return to nearest BHC.
               </span>
-              <span
-                style={{
-                  fontSize: pt(3.5),
-                  color: "rgba(204,251,241,0.60)",
-                  letterSpacing: "0.01em",
-                  flexShrink: 0,
-                  marginLeft: mm(2),
-                }}
-              >
-                SmartHealth Hub
+              <span style={{ fontSize: pt(3.2), color: "rgba(255,220,220,0.65)",
+                marginTop: mm(0.3), letterSpacing: "0.01em", fontFamily: "monospace" }}>
+                SmartHealth Hub · Thesis 2026 · {card.card_number}
               </span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* ── Front / Back toggle ─────────────────────────────────────────── */}
+      {/* Toggle */}
       <div style={{ display: "flex", gap: 8 }}>
         {(["front", "back"] as const).map((s) => (
-          <button
-            key={s}
-            onClick={() => setSide(s)}
-            style={{
-              padding: "6px 20px",
-              borderRadius: 6,
-              border: `1px solid ${side === s ? "#0d9488" : "#e2e8f0"}`,
-              cursor: "pointer",
-              fontSize: 13,
-              fontWeight: 600,
-              background: side === s ? "#0d9488" : "#ffffff",
-              color: side === s ? "#ffffff" : "#64748b",
-              transition: "all 0.15s",
-            }}
-          >
+          <button key={s} onClick={() => setSide(s)} style={{
+            padding: "6px 20px", borderRadius: 6,
+            border: `1px solid ${side === s ? RED : "#e2e8f0"}`,
+            cursor: "pointer", fontSize: 13, fontWeight: 600,
+            background: side === s ? RED : "#ffffff",
+            color: side === s ? "#ffffff" : "#64748b",
+            transition: "all 0.15s",
+          }}>
             {s === "front" ? "Front" : "Back"}
           </button>
         ))}
@@ -969,59 +487,48 @@ export default function HealthCardPreview({
 }
 
 // ---------------------------------------------------------------------------
-// Module-level style fragments (evaluated once at load)
+// Shared styles
 // ---------------------------------------------------------------------------
 
 const faceBase: React.CSSProperties = {
-  position: "absolute",
-  width: "100%",
-  height: "100%",
-  borderRadius: 8,
-  overflow: "hidden",
-  backfaceVisibility: "hidden",
+  position: "absolute", width: "100%", height: "100%",
+  borderRadius: 8, overflow: "hidden", backfaceVisibility: "hidden",
 };
 
-const bgImgStyle: React.CSSProperties = {
-  position: "absolute",
-  top: 0,
-  left: 0,
-  width: "100%",
-  height: "100%",
-  display: "block",
+const bgFull: React.CSSProperties = {
+  position: "absolute", top: 0, left: 0, width: "100%", height: "100%", display: "block",
 };
 
-const bpRow: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "row",
-  alignItems: "baseline",
-  padding: `${mm(0.8)}px ${mm(2)}px`,
-  borderBottom: "0.5px solid rgba(203,213,225,0.7)",
-  gap: mm(2),
-  flexShrink: 0,
+const qrPlaceholderStyle: React.CSSProperties = {
+  width: mm(13), height: mm(13),
+  border: "1px dashed #94a3b8", display: "flex", alignItems: "center",
+  justifyContent: "center", fontSize: pt(3.5), color: "#94a3b8",
+  textAlign: "center", background: "rgba(255,255,255,0.8)", borderRadius: 1,
 };
 
-const bpLabel: React.CSSProperties = {
-  fontSize: pt(4.5),
-  fontWeight: 800,
-  color: "#0d7c6e",
-  textTransform: "uppercase",
-  letterSpacing: "0.03em",
-  flexShrink: 0,
-  minWidth: mm(13),
+const benBadge: React.CSSProperties = {
+  fontSize: pt(3.8), fontWeight: 800, padding: `${mm(0.4)}px ${mm(1.3)}px`,
+  borderRadius: 1.5, textTransform: "uppercase", letterSpacing: "0.015em", color: "#ffffff",
 };
 
-const bpValue: React.CSSProperties = {
-  fontSize: pt(5.5),
-  fontWeight: 500,
-  color: "#1e293b",
-  lineHeight: 1.25,
+const backRow: React.CSSProperties = {
+  display: "flex", flexDirection: "row", alignItems: "baseline",
+  padding: `${mm(0.6)}px ${mm(2)}px`,
+  borderBottom: `0.3px solid rgba(139,26,26,0.12)`,
+  gap: mm(1.5), flexShrink: 0,
 };
 
-const flagBadge: React.CSSProperties = {
-  fontSize: pt(4),
-  fontWeight: 700,
-  padding: `${mm(0.4)}px ${mm(1.5)}px`,
-  borderRadius: 3,
-  textTransform: "uppercase",
-  letterSpacing: "0.02em",
+const backLabel: React.CSSProperties = {
+  fontSize: pt(3.8), fontWeight: 800, color: "#8b1a1a",
+  textTransform: "uppercase", letterSpacing: "0.02em",
+  flexShrink: 0, minWidth: mm(13),
+};
+
+const backValue: React.CSSProperties = {
+  fontSize: pt(4.8), fontWeight: 500, color: "#1e293b", lineHeight: 1.2,
+};
+
+const backFlag: React.CSSProperties = {
+  fontSize: pt(3.5), fontWeight: 800, padding: `${mm(0.3)}px ${mm(1.2)}px`,
+  borderRadius: 1.5, textTransform: "uppercase", letterSpacing: "0.015em",
 };

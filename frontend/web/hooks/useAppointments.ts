@@ -20,6 +20,7 @@ import { apiFetch, ApiError } from "@/lib/api-client";
 import type {
   Appointment,
   AppointmentCreatePayload,
+  AppointmentIntakeSummary,
   AppointmentListParams,
   AppointmentUpdatePayload,
   PaginatedAppointments,
@@ -29,17 +30,28 @@ import type {
 // Wire types (snake_case from backend)
 // ---------------------------------------------------------------------------
 
+interface IntakeSummaryApiResponse {
+  token: string;
+  visit_purpose: string | null;
+  purpose_details: Record<string, unknown> | null;
+  draft_submitted_at: string | null;
+  patient_name_from_draft: string | null;
+}
+
 interface AppointmentApiResponse {
   id: string;
   patient_id: string;
-  patient_name?: string | null;
-  patient_code?: string | null;
+  full_name: string;
+  patient_code: string;
   appointment_type: string;
   scheduled_at: string;
   status: string;
   notes?: string | null;
   created_by?: string | null;
   created_at: string;
+  intake_completed: boolean;
+  intake_submitted_at: string | null;
+  intake_summary?: IntakeSummaryApiResponse | null;
 }
 
 interface PaginatedAppointmentsApiResponse {
@@ -53,11 +65,23 @@ interface PaginatedAppointmentsApiResponse {
 // Mapping helpers (snake_case → camelCase)
 // ---------------------------------------------------------------------------
 
+function mapIntakeSummary(
+  raw: IntakeSummaryApiResponse
+): AppointmentIntakeSummary {
+  return {
+    token: raw.token,
+    visitPurpose: raw.visit_purpose,
+    purposeDetails: raw.purpose_details,
+    draftSubmittedAt: raw.draft_submitted_at,
+    patientNameFromDraft: raw.patient_name_from_draft,
+  };
+}
+
 function mapAppointment(r: AppointmentApiResponse): Appointment {
   return {
     id: r.id,
     patientId: r.patient_id,
-    patientName: r.patient_name,
+    patientName: r.full_name,
     patientCode: r.patient_code,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     appointmentType: r.appointment_type as any,
@@ -67,6 +91,9 @@ function mapAppointment(r: AppointmentApiResponse): Appointment {
     notes: r.notes,
     createdBy: r.created_by,
     createdAt: r.created_at,
+    intakeCompleted: r.intake_completed ?? false,
+    intakeSubmittedAt: r.intake_submitted_at ?? null,
+    intakeSummary: r.intake_summary ? mapIntakeSummary(r.intake_summary) : null,
   };
 }
 

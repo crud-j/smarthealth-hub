@@ -26,6 +26,7 @@ import type {
   ExportParams,
   TimeSeriesPoint,
   VisitTrendsApiResponse,
+  VisitTypeBreakdownResponse,
 } from "@/types/analytics";
 
 // ---------------------------------------------------------------------------
@@ -39,6 +40,9 @@ interface DashboardOverviewApiResponse {
   visits_this_month: number;
   upcoming_appointments_count: number;
   immunizations_due_this_week: number;
+  senior_count: number;
+  pwd_count: number;
+  pregnant_count: number;
   // These fields are NOT returned by the backend overview endpoint.
   // They are fetched separately if needed; default to empty arrays.
   recent_patients?: Array<{
@@ -122,6 +126,9 @@ export function useDashboardOverview() {
         visitsThisWeek: raw.visits_this_week,
         upcomingAppointments: raw.upcoming_appointments_count,
         immunizationsDue: raw.immunizations_due_this_week,
+        seniorCount: raw.senior_count ?? 0,
+        pwdCount: raw.pwd_count ?? 0,
+        pregnantCount: raw.pregnant_count ?? 0,
         recentPatients: (raw.recent_patients ?? []).map((p) => ({
           id: p.id,
           patientCode: p.patient_code,
@@ -350,6 +357,68 @@ export function useVisitTrends(weeks = 12) {
   }, [fetchTrends]);
 
   return { data, loading, error, refetch: fetchTrends };
+}
+
+// ---------------------------------------------------------------------------
+// useVisitTypeBreakdown — visit count per type for donut chart
+// ---------------------------------------------------------------------------
+
+/** Wire shape from GET /api/v1/analytics/visit-type-breakdown */
+interface VisitTypeBreakdownApiResponse {
+  items: Array<{
+    visit_type: string;
+    count: number;
+  }>;
+  from_date: string;
+  to_date: string;
+}
+
+/**
+ * Fetches the visit-type distribution for the given date range.
+ *
+ * @param from  ISO date string (YYYY-MM-DD). Defaults to 30 days ago when absent.
+ * @param to    ISO date string (YYYY-MM-DD). Defaults to today when absent.
+ */
+export function useVisitTypeBreakdown(from?: string, to?: string) {
+  const [data, setData] = useState<VisitTypeBreakdownResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<ApiError | null>(null);
+
+  const fetchBreakdown = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const qs = new URLSearchParams();
+      if (from) qs.set("from_date", from);
+      if (to) qs.set("to_date", to);
+      const qsStr = qs.toString();
+      const raw = await apiFetch<VisitTypeBreakdownApiResponse>(
+        `/analytics/visit-type-breakdown${qsStr ? `?${qsStr}` : ""}`
+      );
+      setData({
+        items: raw.items.map((item) => ({
+          visitType: item.visit_type,
+          count: item.count,
+        })),
+        from: raw.from_date,
+        to: raw.to_date,
+      });
+    } catch (err) {
+      setError(
+        err instanceof ApiError
+          ? err
+          : new ApiError(String(err), 0, "unknown")
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [from, to]);
+
+  useEffect(() => {
+    void fetchBreakdown();
+  }, [fetchBreakdown]);
+
+  return { data, loading, error, refetch: fetchBreakdown };
 }
 
 // ---------------------------------------------------------------------------

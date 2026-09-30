@@ -23,15 +23,19 @@ import uuid
 
 from fastapi import APIRouter, File, HTTPException, Query, Request, Response, UploadFile, status
 
+from app.core.exceptions import NotFoundError
 from app.core.rate_limit import limiter
 from app.core.security import CurrentUser, require_role
 from app.db.session import DbDep
 from app.models.patient import Patient
 from app.schemas.intake import IntakeTokenResponse
 from app.schemas.patient import (
+    ArchivedPatientSummary,
     OcrExtractResponse,
     OcrFieldValue,
+    PaginatedArchivedPatients,
     PaginatedPatients,
+    PatientArchiveRequest,
     PatientCreate,
     PatientCreateResult,
     PatientDuplicateMatch,
@@ -134,6 +138,9 @@ def _build_patient_response(patient: Patient) -> PatientResponse:
         data_privacy_consent=patient.data_privacy_consent,
         data_privacy_consent_at=patient.data_privacy_consent_at,
         is_active=patient.is_active,
+        archived_at=patient.archived_at,
+        archived_by=str(patient.archived_by) if patient.archived_by else None,
+        archive_reason=patient.archive_reason,
         created_at=patient.created_at,
         updated_at=patient.updated_at,
         photo_path=photo_path_url,
@@ -165,6 +172,11 @@ async def list_patients(
         description="Sort order: 'created_at' for newest-first (dashboard panel); "
         "omitted defaults to alphabetical by name",
     ),
+    include_archived: bool = Query(
+        False,
+        description="If True, include archived patients in results (Admin only). "
+        "Default False — archived patients are hidden.",
+    ),
 ) -> PaginatedPatients:
     """
     Return a paginated, searchable list of active patients.
@@ -193,6 +205,7 @@ async def list_patients(
         is_pwd=is_pwd,
         is_pregnant=is_pregnant,
         sort=sort,
+        include_archived=include_archived,
     )
 
     items = [
@@ -520,6 +533,74 @@ async def generate_intake_token(
 
 
 # ---------------------------------------------------------------------------
+# GET /patients/archived  — Admin / Physician only
+# IMPORTANT: This MUST be registered before /{patient_id} so FastAPI does not
+# attempt to coerce the string "archived" to a UUID path parameter.
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/archived",
+    response_model=PaginatedArchivedPatients,
+    summary="List archived patients (Admin / Physician only)",
+    dependencies=[require_role("admin", "physician")],
+)
+async def list_archived_patients(
+    request: Request,
+    db: DbDep,
+    current_user: CurrentUser,
+    q: str | None = Query(None, description="Search by name, patient code, or mobile"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+) -> PaginatedArchivedPatients:
+    """
+    Return a paginated list of archived patients.
+
+    Archived patients are hidden from the default patient list.  This endpoint
+    provides the archive browser for Admin/Physician review and unarchive
+    actions.  A VIEW_PHI audit log is written for the list access.
+    """
+    patients, total = await patient_service.list_archived_patients(
+        db, q=q, page=page, page_size=page_size
+    )
+
+    await write_audit_log(
+        db=db,
+        user_id=current_user.id,
+        action="VIEW_PHI",
+        entity_type="patient_archive_list",
+        metadata={"q": q, "page": page},
+        ip_address=_get_client_ip(request),
+    )
+    await db.commit()
+
+    items = [
+        ArchivedPatientSummary(
+            id=str(p.id),
+            patient_code=p.patient_code,
+            first_name=p.first_name,
+            middle_name=p.middle_name,
+            last_name=p.last_name,
+            birth_date=p.birth_date,
+            sex=p.sex,
+            mobile_number=p.mobile_number,
+            is_senior=p.is_senior,
+            is_pwd=p.is_pwd,
+            is_pregnant=p.is_pregnant,
+            is_active=p.is_active,
+            blood_type=p.blood_type,
+            created_at=p.created_at,
+            archived_at=p.archived_at,  # type: ignore[arg-type]  # never None here
+            archived_by=str(p.archived_by) if p.archived_by else None,
+            archive_reason=p.archive_reason,
+        )
+        for p in patients
+    ]
+
+    return PaginatedArchivedPatients(items=items, total=total, page=page, page_size=page_size)
+
+
+# ---------------------------------------------------------------------------
 # GET /patients/{id}
 # ---------------------------------------------------------------------------
 
@@ -840,3 +921,90 @@ async def patient_summary_pdf(
             )
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# POST /patients/{id}/archive  — Admin only
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/{patient_id}/archive",
+    response_model=PatientResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Archive a patient (Admin only)",
+    dependencies=[_ADMIN_ONLY],
+)
+async def archive_patient(
+    patient_id: uuid.UUID,
+    request: Request,
+    db: DbDep,
+    current_user: CurrentUser,
+    body: PatientArchiveRequest,
+) -> PatientResponse:
+    """
+    Archive a patient record.
+
+    Sets ``archived_at``, ``archived_by``, and ``archive_reason``.  The patient
+    is hidden from the default list and search but all clinical records are
+    preserved.  Only Admins may archive a patient.
+
+    Raises 404 if the patient does not exist, 409 if already archived.
+    """
+    ip = _get_client_ip(request)
+    try:
+        patient = await patient_service.archive_patient(
+            db=db,
+            patient_id=patient_id,
+            archived_by_id=current_user.id,
+            reason=body.reason,
+            ip_address=ip,
+        )
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    return _build_patient_response(patient)
+
+
+# ---------------------------------------------------------------------------
+# POST /patients/{id}/unarchive  — Admin only
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/{patient_id}/unarchive",
+    response_model=PatientResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Unarchive (restore) a patient (Admin only)",
+    dependencies=[_ADMIN_ONLY],
+)
+async def unarchive_patient(
+    patient_id: uuid.UUID,
+    request: Request,
+    db: DbDep,
+    current_user: CurrentUser,
+) -> PatientResponse:
+    """
+    Unarchive (restore) a previously archived patient.
+
+    Clears ``archived_at``, ``archived_by``, and ``archive_reason``.  The
+    patient becomes visible again in the normal list and search.
+
+    Raises 404 if the patient does not exist, 409 if not currently archived.
+    """
+    ip = _get_client_ip(request)
+    try:
+        patient = await patient_service.unarchive_patient(
+            db=db,
+            patient_id=patient_id,
+            unarchived_by_id=current_user.id,
+            ip_address=ip,
+        )
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+    return _build_patient_response(patient)

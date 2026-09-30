@@ -21,7 +21,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const { user } = useCurrentUser();
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#f2ece5]">
+    <div className="flex h-screen overflow-hidden bg-[var(--color-bg-canvas)]">
       <Sidebar
         user={user}
         isOpen={sidebarOpen}

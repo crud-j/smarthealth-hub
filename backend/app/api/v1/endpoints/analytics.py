@@ -52,6 +52,8 @@ from app.schemas.analytics import (
     VaccinationCoverageResponse,
     VisitTrendPoint,
     VisitTrendsResponse,
+    VisitTypeBreakdownItem,
+    VisitTypeBreakdownResponse,
 )
 from app.services import analytics_service
 
@@ -278,6 +280,60 @@ async def visit_trends(
     return VisitTrendsResponse(
         weeks=weeks,
         items=[VisitTrendPoint(**item) for item in items],
+    )
+
+
+@router.get(
+    "/visit-type-breakdown",
+    response_model=VisitTypeBreakdownResponse,
+    summary="Visit count breakdown by visit type",
+    description=(
+        "Returns the count of visits grouped by visit_type for the given "
+        "date range, ordered by count descending (most common first).  "
+        "Useful for a donut/pie chart showing the distribution of visit categories.  "
+        "Filter with from_date and to_date (both inclusive, applied to visit_date).  "
+        "Defaults to the last 30 days."
+    ),
+)
+async def visit_type_breakdown(
+    db: DbDep,
+    _current_user: CurrentUser,
+    from_date: Annotated[
+        date | None,
+        Query(
+            description=(
+                "Start of the date range (inclusive).  "
+                "Defaults to 30 days ago.  Format: YYYY-MM-DD."
+            )
+        ),
+    ] = None,
+    to_date: Annotated[
+        date | None,
+        Query(
+            description=(
+                "End of the date range (inclusive).  "
+                "Defaults to today.  Format: YYYY-MM-DD."
+            )
+        ),
+    ] = None,
+) -> VisitTypeBreakdownResponse:
+    """
+    Return visit distribution by visit_type for pie/donut chart rendering.
+
+    Auth: Any authenticated user.
+    """
+    resolved_from = from_date or _default_from_date()
+    resolved_to = to_date or _default_to_date()
+
+    items = await analytics_service.get_visit_type_breakdown(
+        db,
+        from_date=resolved_from,
+        to_date=resolved_to,
+    )
+    return VisitTypeBreakdownResponse(
+        items=[VisitTypeBreakdownItem(**item) for item in items],
+        from_date=resolved_from,
+        to_date=resolved_to,
     )
 
 

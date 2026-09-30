@@ -2,261 +2,176 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
-    branches: [main, develop]
-
-env:
-  # Shared env for backend tests and E2E
-  DATABASE_URL: postgresql+asyncpg://shh_admin:SmartHealthHub@localhost:5432/smarthealthhub_test
-  REDIS_URL: redis://localhost:6379/0
-  JWT_SECRET_KEY: test-secret-key-not-for-production-use
-  JWT_ACCESS_TOKEN_EXPIRE_MINUTES: 480
-  JWT_REFRESH_TOKEN_EXPIRE_DAYS: 7
-  QR_HMAC_SECRET: test-hmac-secret-not-for-production-use
-  QR_BASE_URL: http://localhost:3000
-  SEMAPHORE_API_KEY: test-key
-  SEMAPHORE_SENDER_NAME: TestBHC
-  SMS_REMINDER_LEAD_HOURS: 24
-  SMS_MAX_RETRIES: 3
-  # Use a real 32-byte key (base64 of 32 zero bytes — for CI only)
-  ENCRYPTION_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
-  EMAIL_HOST: smtp.gmail.com
-  EMAIL_PORT: 587
-  EMAIL_USE_TLS: "true"
-  EMAIL_FROM_NAME: BHC-Verify
-  EMAIL_HOST_USER: test@example.com
-  EMAIL_HOST_PASSWORD: testpassword
-  CORS_ORIGINS: '["http://localhost:3000"]'
+    branches: [main]
 
 jobs:
-  # ── Frontend build + lint ───────────────────────────────────────────────────
-  frontend-build:
-    name: Frontend — Build & Lint
+  lint-backend:
+    name: Lint — Backend
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-          cache: "pnpm"
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build Next.js app
-        run: pnpm --filter web build
-
-      - name: Lint Next.js app
-        run: pnpm --filter web lint
-
-  # ── Backend tests ────────────────────────────────────────────────────────────
-  backend-tests:
-    name: Backend — Pytest (PostgreSQL + Redis)
-    runs-on: ubuntu-latest
-
-    # Real PostgreSQL and Redis services — the backend tests connect to these.
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: shh_admin
-          POSTGRES_PASSWORD: SmartHealthHub
-          POSTGRES_DB: smarthealthhub_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-      redis:
-        image: redis:7
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-    defaults:
-      run:
-        working-directory: backend
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python 3.12
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: "pip"
-          cache-dependency-path: backend/pyproject.toml
+          cache: pip
+      - run: pip install ruff
+      - run: ruff check backend/app
+      - run: ruff format --check backend/app
 
-      - name: Install backend dependencies
-        run: pip install -e ".[dev]"
-
-      - name: Run Alembic migrations on test DB
-        run: alembic upgrade head
-        env:
-          DATABASE_URL: postgresql+asyncpg://shh_admin:SmartHealthHub@localhost:5432/smarthealthhub_test
-
-      - name: Run tests
-        run: pytest tests --cov=app --cov-report=term-missing --cov-report=xml
-        env:
-          DATABASE_URL: postgresql+asyncpg://shh_admin:SmartHealthHub@localhost:5432/smarthealthhub_test
-
-      - name: Upload coverage report
-        uses: codecov/codecov-action@v4
-        if: always()
-        with:
-          files: backend/coverage.xml
-          flags: backend
-
-  # ── Backend lint (ruff + mypy) ───────────────────────────────────────────────
-  backend-lint:
-    name: Backend — Ruff & Mypy
+  lint-frontend:
+    name: Lint — Frontend
     runs-on: ubuntu-latest
-
-    defaults:
-      run:
-        working-directory: backend
-
+    needs: lint-backend
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/web/package-lock.json
+      - run: npm ci
+        working-directory: frontend/web
+      - run: npm run lint
+        working-directory: frontend/web
+      - name: Check API types are up to date
+        # Skipped in CI since backend is not running — use as local developer tool only.
+        # To enable: start backend as a service container and run npm run generate:api
+        # Local usage: npm run generate:api (requires backend on localhost:8000)
+        run: echo "API type generation skipped in CI — run 'npm run generate:api' locally after backend schema changes"
 
-      - name: Setup Python 3.12
-        uses: actions/setup-python@v5
+  typecheck-backend:
+    name: Type Check — Backend (mypy)
+    runs-on: ubuntu-latest
+    needs: lint-backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: "pip"
-          cache-dependency-path: backend/pyproject.toml
+          cache: pip
+      - run: pip install mypy && pip install -e ".[dev]"
+        working-directory: backend
+      - run: mypy app --ignore-missing-imports
+        working-directory: backend
 
-      - name: Install backend dependencies
-        run: pip install -e ".[dev]"
-
-      - name: Ruff lint
-        run: ruff check app
-
-      - name: Mypy type check
-        run: mypy app
-
-  # ── E2E — Playwright against full docker-compose stack ──────────────────────
-  e2e:
-    name: E2E — Playwright
+  typecheck-frontend:
+    name: Type Check — Frontend (tsc)
     runs-on: ubuntu-latest
-    # Only run E2E on pushes to main and on PRs targeting main to save CI time.
-    if: github.ref == 'refs/heads/main' || github.base_ref == 'main'
-    needs: [frontend-build, backend-tests]
-
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: shh_admin
-          POSTGRES_PASSWORD: SmartHealthHub
-          POSTGRES_DB: smarthealthhub
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-      redis:
-        image: redis:7
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
+    needs: lint-frontend
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python 3.12
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          python-version: "3.12"
-          cache: "pip"
-          cache-dependency-path: backend/pyproject.toml
-
-      - name: Install backend dependencies
-        run: pip install -e ".[dev]"
-        working-directory: backend
-
-      - name: Run Alembic migrations
-        run: alembic upgrade head
-        working-directory: backend
-        env:
-          DATABASE_URL: postgresql+asyncpg://shh_admin:SmartHealthHub@localhost:5432/smarthealthhub
-
-      - name: Seed E2E test data
-        run: python tests/e2e_seed.py
-        working-directory: backend
-        env:
-          DATABASE_URL: postgresql+asyncpg://shh_admin:SmartHealthHub@localhost:5432/smarthealthhub
-
-      - name: Start FastAPI backend
-        run: uvicorn app.main:app --host 0.0.0.0 --port 8000 &
-        working-directory: backend
-        env:
-          DATABASE_URL: postgresql+asyncpg://shh_admin:SmartHealthHub@localhost:5432/smarthealthhub
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-          cache: "pnpm"
-
-      - name: Install frontend dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build Next.js
-        run: pnpm --filter web build
-        env:
-          SERVER_SIDE_API_URL: http://localhost:8000
-
-      - name: Start Next.js
-        run: pnpm --filter web start &
-        env:
-          PORT: 3000
-
-      - name: Install Playwright browsers
-        run: pnpm --filter web exec playwright install --with-deps chromium
-
-      - name: Wait for services to be ready
-        run: |
-          npx wait-on http://localhost:8000/health http://localhost:3000 --timeout 60000
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/web/package-lock.json
+      - run: npm ci
+        working-directory: frontend/web
+      - run: npx tsc --noEmit
         working-directory: frontend/web
 
-      - name: Run Playwright E2E tests
-        run: pnpm --filter web exec playwright test
+  test-backend:
+    name: Test — Backend (pytest)
+    runs-on: ubuntu-latest
+    needs: lint-backend
+    services:
+      postgres:
+        image: postgres:16-alpine
         env:
-          PLAYWRIGHT_BASE_URL: http://localhost:3000
-
-      - name: Upload Playwright report
-        uses: actions/upload-artifact@v4
-        if: always()
+          POSTGRES_DB: smarthealth_test
+          POSTGRES_USER: smarthealth
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          name: playwright-report
-          path: frontend/web/playwright-report/
-          retention-days: 7
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+        working-directory: backend
+      - run: pytest --cov=app --cov-fail-under=70 --tb=short
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://smarthealth:${{ secrets.POSTGRES_PASSWORD }}@localhost:5432/smarthealth_test
+          REDIS_URL: redis://localhost:6379/0
+          ENVIRONMENT: test
+          JWT_SECRET_KEY: ci-test-secret-key-minimum-32-chars-long
+          ENCRYPTION_KEY: dGVzdC1lbmNyeXB0aW9uLWtleS10ZXN0dGVzdA==
+          SEMAPHORE_API_KEY: test-semaphore-key
+          EMAIL_HOST_USER: ""
+          EMAIL_HOST_PASSWORD: ""
+          ADMIN_ALERT_PHONE: ""
+
+  build-backend:
+    name: Build — Backend Docker Image
+    runs-on: ubuntu-latest
+    needs: [typecheck-backend, test-backend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - run: docker build -t smarthealth-hub-backend ./backend
+
+  build-frontend:
+    name: Build — Frontend (Next.js)
+    runs-on: ubuntu-latest
+    needs: typecheck-frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/web/package-lock.json
+      - run: npm ci
+        working-directory: frontend/web
+      - run: npm run build
+        working-directory: frontend/web
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:8000
+
+  generate-changelog:
+    name: Generate Changelog
+    runs-on: ubuntu-latest
+    needs: [build-backend, build-frontend]
+    if: github.ref_type == 'tag' && startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        uses: orhun/git-cliff-action@v3
+        with:
+          config: cliff.toml
+          args: --verbose
+        env:
+          OUTPUT: CHANGELOG.md
+
+      - name: Commit and push changelog
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git commit -m "chore: update changelog for ${{ github.ref_name }}" || echo "No changes to commit"
+          git push

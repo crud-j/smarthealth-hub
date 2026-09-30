@@ -76,6 +76,12 @@ export interface Patient {
    * Null/undefined if no photo has been uploaded yet.
    */
   photoPath?: string | null;
+  /** ISO datetime string when the patient was archived, or null if not archived. */
+  archivedAt?: string | null;
+  /** UUID of the user who archived this patient, or null. */
+  archivedBy?: string | null;
+  /** Reason given for archiving, or null. */
+  archiveReason?: string | null;
 }
 
 // ---------------------------------------------------------------------------

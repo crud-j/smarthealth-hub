@@ -139,6 +139,33 @@ export interface PatientVerifySummaryFull extends PatientVerifySummary {
 }
 
 // ---------------------------------------------------------------------------
+// Async PDF generation types (mirrors CardGenerationAccepted and
+// CardGenerationStatus schemas in health_card.py)
+// ---------------------------------------------------------------------------
+
+/**
+ * Returned by POST /health-cards/{patient_id}/generate (HTTP 202 Accepted).
+ * The caller polls GET /health-cards/generation-status/{card_id} until
+ * status transitions to "ready" or "failed".
+ */
+export interface CardGenerationAccepted {
+  card_id: string;
+  task_id: string;
+  status: "pending";
+}
+
+/**
+ * Returned by GET /health-cards/generation-status/{card_id}.
+ * pdf_url is set only when status === "ready".
+ */
+export type GenerationStatus = {
+  card_id: string;
+  task_id?: string;
+  status: "pending" | "ready" | "failed";
+  pdf_url?: string | null;
+};
+
+// ---------------------------------------------------------------------------
 // NFC link request
 // ---------------------------------------------------------------------------
 

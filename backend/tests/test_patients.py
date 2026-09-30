@@ -314,14 +314,13 @@ async def test_create_patient_missing_required_field_returns_422(
     client: AsyncClient,
     bhw_user: tuple[User, str],
 ) -> None:
-    """POST /patients without address (required) → 422 validation error."""
+    """POST /patients without sex (required Literal field) → 422 validation error."""
     _, token = bhw_user
     payload = {
         "first_name": "Noa",
         "last_name": "Missing",
         "birth_date": "2000-01-01",
-        "sex": "female",
-        # address deliberately omitted
+        # sex deliberately omitted — it is Literal["male","female"] with no default
         "is_pwd": False,
         "is_pregnant": False,
     }

@@ -97,10 +97,35 @@ function IconSecurity() {
     </svg>
   );
 }
+function IconQrCode() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+      <rect x="3" y="14" width="7" height="7" rx="1"/>
+      <path d="M14 14h3v3"/><path d="M17 21v-3h3"/><path d="M14 21h3"/>
+    </svg>
+  );
+}
+function IconInbox() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
+      <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+    </svg>
+  );
+}
 function IconImmunization() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22,4 12,14.01 9,11.01" />
+    </svg>
+  );
+}
+function IconSettings() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
     </svg>
   );
 }
@@ -131,10 +156,11 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: "Patient Care",
     items: [
-      { href: "/patients",      label: "Patients",      icon: <IconPatients />,     roles: [] },
-      { href: "/appointments",  label: "Appointments",  icon: <IconAppointments />, roles: [] },
-      { href: "/immunizations", label: "Immunizations", icon: <IconImmunization />, roles: [] },
-      { href: "/health-cards",  label: "Health Cards",  icon: <IconCards />,        roles: [] },
+      { href: "/patients",       label: "Patients",       icon: <IconPatients />,     roles: [] },
+      { href: "/appointments",   label: "Appointments",   icon: <IconAppointments />, roles: [] },
+      { href: "/registrations",  label: "Registrations",  icon: <IconInbox />,        roles: ["admin", "bhw", "admin_staff", "physician"] },
+      { href: "/immunizations",  label: "Immunizations",  icon: <IconImmunization />, roles: [] },
+      { href: "/health-cards",   label: "Health Cards",   icon: <IconCards />,        roles: [] },
     ],
   },
   {
@@ -145,10 +171,19 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    label: "Settings",
+    items: [
+      { href: "/settings", label: "Settings", icon: <IconSettings />, roles: [] },
+    ],
+  },
+  {
     label: "Administration",
     items: [
-      { href: "/settings/users",     label: "Users",     icon: <IconUsers />, roles: ["admin"] },
-      { href: "/settings/audit-log", label: "Audit Log", icon: <IconAudit />, roles: ["admin"] },
+      { href: "/settings/users",               label: "Users",                icon: <IconUsers />,   roles: ["admin"] },
+      { href: "/settings/audit-log",           label: "Audit Log",            icon: <IconAudit />,   roles: ["admin"] },
+      { href: "/settings/intake-applications", label: "Online Registrations", icon: <IconPatients />, roles: ["admin"] },
+      { href: "/settings/registration-qr",     label: "Registration QR",      icon: <IconQrCode />,  roles: ["admin", "bhw", "admin_staff"] },
+      { href: "/patients/archived",            label: "Patient Archive",      icon: <IconPatients />, roles: ["admin", "physician"] },
     ],
   },
   {
@@ -182,11 +217,11 @@ function NavTooltip({ label }: { label: string }) {
       className="
         pointer-events-none absolute left-full top-1/2 z-50 ml-3 -translate-y-1/2
         rounded-md px-2.5 py-1.5 text-xs font-semibold text-white whitespace-nowrap
-        shadow-lg opacity-0 group-hover:opacity-100
-        transition-opacity duration-150
+        shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150
+        bg-[#1e1e1e] border border-[#353535]
       "
-      style={{ background: "#1e1e1e", border: "1px solid #353535" }}
     >
+      {/* Caret — CSS border triangle, border-color trick cannot be expressed without inline */}
       <span
         className="absolute right-full top-1/2 -translate-y-1/2 border-[5px] border-transparent"
         style={{ borderRightColor: "#353535" }}
@@ -239,24 +274,24 @@ export default function Sidebar({ user, isOpen, onClose, isCollapsed }: SidebarP
 
       {/* Sidebar panel */}
       <aside
+        data-theme="dark-shell"
         className={[
           "fixed inset-y-0 left-0 z-30 flex flex-col",
+          "bg-[var(--shell-bg)] border-r border-[var(--shell-border)]",
           "transition-all duration-300 ease-in-out",
           "lg:static lg:h-full lg:translate-x-0",
           isOpen ? "translate-x-0" : "-translate-x-full",
           isCollapsed ? "w-16" : "w-64",
         ].join(" ")}
-        style={{ background: "#1a1a1a", borderRight: "1px solid #2a2a2a" }}
         aria-label="Main navigation"
       >
 
         {/* ── Brand / Logo ─────────────────────────────────────────────── */}
         <div
           className={[
-            "flex h-16 shrink-0 items-center gap-3 px-3",
+            "flex h-16 shrink-0 items-center gap-3 px-3 border-b border-[var(--shell-border)]",
             isCollapsed ? "justify-center" : "",
           ].join(" ")}
-          style={{ borderBottom: "1px solid #2a2a2a" }}
         >
           <div className={["flex items-center gap-3 min-w-0", isCollapsed ? "justify-center" : ""].join(" ")}>
             <Image
@@ -272,7 +307,7 @@ export default function Sidebar({ user, isOpen, onClose, isCollapsed }: SidebarP
                 <p className="truncate text-sm font-bold leading-tight text-white">
                   SmartHealth Hub
                 </p>
-                <p className="truncate text-[11px] font-medium leading-tight mt-0.5" style={{ color: "#D36969" }}>
+                <p className="truncate text-[11px] font-medium leading-tight mt-0.5 text-[var(--shell-accent)]">
                   Barangay Health Center
                 </p>
               </div>
@@ -294,7 +329,7 @@ export default function Sidebar({ user, isOpen, onClose, isCollapsed }: SidebarP
                   </p>
                 )}
                 {isCollapsed && (
-                  <div className="mb-2 mx-3 h-px" style={{ background: "#2a2a2a" }} />
+                  <div className="mb-2 mx-3 h-px bg-[var(--shell-border)]" />
                 )}
 
                 <ul className="space-y-0.5" role="list">
@@ -316,40 +351,23 @@ export default function Sidebar({ user, isOpen, onClose, isCollapsed }: SidebarP
                           }}
                           className={[
                             "relative flex min-h-[40px] items-center gap-3 rounded-lg text-sm font-medium",
-                            "transition-all duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#D36969]",
+                            "transition-all duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--shell-accent)]",
                             isCollapsed
                               ? "justify-center px-0 py-2 mx-1"
                               : "px-3 py-2",
                             isActive
-                              ? "text-white shadow-sm"
-                              : "text-gray-400 hover:text-gray-200",
+                              ? "text-white shadow-sm bg-[var(--shell-accent-subtle)]"
+                              : "text-gray-400 hover:text-gray-200 hover:bg-[#242424]",
                           ].join(" ")}
-                          style={
-                            isActive
-                              ? { background: "rgba(211,105,105,0.15)" }
-                              : undefined
-                          }
-                          onMouseEnter={(e) => {
-                            if (!isActive)
-                              (e.currentTarget as HTMLAnchorElement).style.background = "#242424";
-                          }}
-                          onMouseLeave={(e) => {
-                            if (!isActive)
-                              (e.currentTarget as HTMLAnchorElement).style.background = "";
-                          }}
                         >
                           {isActive && !isCollapsed && (
                             <span
-                              className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-full"
-                              style={{ background: "#D36969" }}
+                              className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-full bg-[var(--shell-accent)]"
                               aria-hidden="true"
                             />
                           )}
 
-                          <span
-                            className="shrink-0"
-                            style={{ color: isActive ? "#D36969" : undefined }}
-                          >
+                          <span className={["shrink-0", isActive ? "text-[var(--shell-accent)]" : ""].join(" ")}>
                             {item.icon}
                           </span>
 
@@ -372,10 +390,9 @@ export default function Sidebar({ user, isOpen, onClose, isCollapsed }: SidebarP
         {user && (
           <div
             className={[
-              "shrink-0 px-3 py-3",
+              "shrink-0 px-3 py-3 border-t border-[var(--shell-border)]",
               isCollapsed ? "relative group" : "",
             ].join(" ")}
-            style={{ borderTop: "1px solid #2a2a2a" }}
           >
             <div
               className={[
@@ -385,8 +402,7 @@ export default function Sidebar({ user, isOpen, onClose, isCollapsed }: SidebarP
               ].join(" ")}
             >
               <div
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold border"
-                style={{ background: "#353535", color: "#D36969", borderColor: "#444" }}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold border bg-[#353535] text-[var(--shell-accent)] border-[#444]"
                 aria-hidden="true"
               >
                 {initials}
@@ -402,14 +418,7 @@ export default function Sidebar({ user, isOpen, onClose, isCollapsed }: SidebarP
                       {ROLE_LABELS[role] ?? role}
                     </p>
                   </div>
-                  <span
-                    className="shrink-0 rounded-md px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider border"
-                    style={{
-                      background: "rgba(211,105,105,0.1)",
-                      color: "#D36969",
-                      borderColor: "rgba(211,105,105,0.2)",
-                    }}
-                  >
+                  <span className="shrink-0 rounded-md px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider border bg-[rgba(211,105,105,0.1)] text-[var(--shell-accent)] border-[rgba(211,105,105,0.2)]">
                     {role}
                   </span>
                 </>
@@ -419,8 +428,7 @@ export default function Sidebar({ user, isOpen, onClose, isCollapsed }: SidebarP
             {isCollapsed && (
               <span
                 role="tooltip"
-                className="pointer-events-none absolute left-full top-1/2 z-50 ml-3 -translate-y-1/2 rounded-md px-2.5 py-2 text-xs whitespace-nowrap shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150"
-                style={{ background: "#1e1e1e", border: "1px solid #353535" }}
+                className="pointer-events-none absolute left-full top-1/2 z-50 ml-3 -translate-y-1/2 rounded-md px-2.5 py-2 text-xs whitespace-nowrap shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 bg-[#1e1e1e] border border-[#353535]"
               >
                 <span
                   className="absolute right-full top-1/2 -translate-y-1/2 border-[5px] border-transparent"

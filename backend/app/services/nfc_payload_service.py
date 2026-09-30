@@ -29,21 +29,19 @@ if TYPE_CHECKING:
     from app.models.health_card import HealthCard
 
 
-def build_nfc_payload(patient_id: str, card_version: int) -> dict[str, str | int]:
+def build_nfc_payload(
+    patient_id: str,
+    card_version: int,
+    card_number: str = "",
+) -> dict[str, str | int]:
     """
     Build the minimal JSON payload written to the physical NFC chip.
 
-    The chip receives this JSON as an NDEF Text record.  The mobile app reads
-    it, extracts patient_id, and calls the verify endpoint.
-
-    Args:
-        patient_id:   UUID string (never include name, DOB, or any other PHI).
-        card_version: Current card version integer.
-
-    Returns:
-        {"patient_id": "<uuid>", "card_version": <int>}
-
-    Security invariant: This function must NEVER include any PHI key.
+    The NFC chip is intentionally a pointer-only payload. It stores only the
+    patient UUID and the card version, never any PHI or human-readable
+    identifiers. The caller may still pass ``card_number`` for convenience, but
+    it is intentionally omitted from the serialized payload to preserve the
+    PHI-free invariant enforced by the tests and the security spec.
     """
     return {
         "patient_id": patient_id,

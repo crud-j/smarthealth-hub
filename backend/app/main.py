@@ -59,6 +59,33 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     On shutdown: logs graceful teardown; SQLAlchemy engine disposes
     connections automatically when the process exits.
     """
+    # Log current Alembic revision for observability — helps confirm that the
+    # entrypoint migration step applied the expected revision before traffic hits.
+    # The check runs in a thread pool (asyncio.to_thread) because SQLAlchemy's
+    # synchronous psycopg2 driver blocks; running it directly on the event loop
+    # would prevent uvicorn from servicing signals (e.g. Ctrl-C) during startup,
+    # causing a spurious CancelledError in the lifespan teardown path.
+    try:
+        import asyncio as _asyncio
+        from alembic.runtime.migration import MigrationContext
+        from sqlalchemy import create_engine as _create_engine
+
+        def _get_alembic_revision() -> str | None:
+            _sync_url = str(settings.DATABASE_URL).replace("+asyncpg", "")
+            _engine = _create_engine(_sync_url, pool_pre_ping=True)
+            try:
+                with _engine.connect() as _conn:
+                    return MigrationContext.configure(_conn).get_current_revision()
+            finally:
+                _engine.dispose()
+
+        _rev = await _asyncio.to_thread(_get_alembic_revision)
+        logger.info("Database migration revision: %s", _rev or "none")
+    except _asyncio.CancelledError:
+        raise  # propagate cleanly so uvicorn can cancel the lifespan
+    except Exception as _exc:
+        logger.warning("Could not read Alembic revision: %s", _exc)
+
     # Ensure the patient photos directory exists before any requests are served.
     # This is idempotent (mkdir parents=True, exist_ok=True) so it is safe to
     # call on every startup even if the directory was already created previously.
@@ -398,6 +425,52 @@ register_exception_handlers(app)
 
 
 app.include_router(api_router, prefix="/api/v1")
+
+
+# ---------------------------------------------------------------------------
+# Public NFC tap endpoint — /view/{identifier}
+# ---------------------------------------------------------------------------
+# NFC Tools writes the URI "http://192.168.100.6:9000/view/{card_number}" to
+# the NFC chip as an NDEF URI record.  Tapping the chip on any NFC-capable
+# phone makes a GET to this URL.  The handler is identical to the authenticated
+# /api/v1/health-cards/view/{identifier} but mounted at the root so the URL
+# stays short enough to write cleanly to the chip.
+# No JWT required — same public access rules as /health-cards/view/{identifier}.
+# ---------------------------------------------------------------------------
+
+
+from fastapi import Request as _Request  # noqa: E402
+
+from app.api.v1.endpoints.health_cards import (  # noqa: E402
+    ViewByIdentifierResponse as _ViewByIdentifierResponse,
+    view_health_card_by_identifier as _view_health_card_by_identifier,
+)
+from app.db.session import DbDep as _DbDep  # noqa: E402
+
+
+@app.get(
+    "/view/{identifier}",
+    response_model=_ViewByIdentifierResponse,
+    tags=["health-cards"],
+    summary="NFC tap endpoint — view patient by card number or NFC UID",
+    description=(
+        "Public endpoint targeted by the NFC chip's NDEF URI record.  "
+        "Write 'http://192.168.100.6:9000/view/{card_number}' to the NFC chip "
+        "using NFC Tools; tapping the chip will GET this URL.  "
+        "Accepts either a health card code (BHC-2026-000001) or a raw NFC UID.  "
+        "Returns the same safe patient info as GET /api/v1/health-cards/view/{identifier}.  "
+        "No JWT required."
+    ),
+)
+async def nfc_tap_view(
+    identifier: str,
+    request: _Request,
+    db: _DbDep,
+) -> _ViewByIdentifierResponse:
+    """Thin shim — delegates to the health-cards view handler."""
+    return await _view_health_card_by_identifier(
+        identifier=identifier, request=request, db=db
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -28,8 +28,11 @@ from app.core.config import settings
 
 _COOKIE_HTTPONLY = True
 _COOKIE_SAMESITE = "lax"
-_ACCESS_TOKEN_MAX_AGE = 15 * 60           # 15 minutes in seconds
-_REFRESH_TOKEN_MAX_AGE = 7 * 24 * 60 * 60  # 7 days in seconds
+# Derive cookie TTLs from the JWT lifetime settings so the cookie never
+# expires before the token it carries (fixes the "logged out during lag"
+# bug where a 15-minute cookie outlived by an 8-hour access token).
+_ACCESS_TOKEN_MAX_AGE = settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60
+_REFRESH_TOKEN_MAX_AGE = settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
 
 
 # ---------------------------------------------------------------------------
@@ -77,11 +80,15 @@ def set_auth_cookies(
         httponly=_COOKIE_HTTPONLY,
         samesite=_COOKIE_SAMESITE,
         secure=secure,
-        path="/api/v1/auth/refresh",  # restrict refresh cookie to the refresh endpoint
+        # Widened to "/" so the browser reliably sends the refresh cookie to
+        # the refresh endpoint regardless of the API prefix / Next.js rewrite.
+        # A narrow path (e.g. /api/v1/auth/refresh) breaks silently whenever
+        # the prefix changes, causing refresh to fail and force a logout.
+        path="/",
     )
 
 
 def clear_auth_cookies(response: Response) -> None:
     """Clear both auth cookies by setting them to empty with max_age=0."""
     response.delete_cookie(key="access_token", path="/")
-    response.delete_cookie(key="refresh_token", path="/api/v1/auth/refresh")
+    response.delete_cookie(key="refresh_token", path="/")

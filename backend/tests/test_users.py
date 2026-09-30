@@ -2,11 +2,14 @@
 Tests for the /users endpoints.
 
 Covers:
-  - Admin can create a staff user (POST /users).
+  - Admin can create a staff user (password mode) (POST /users → 201).
+  - Admin can create a staff user (passkey mode) (POST /users → 201, has_password=False).
+  - POST /users with credential_mode="password" and no password returns 422.
   - BHW cannot create a staff user (→ 403).
   - Any authenticated role can GET /users/me.
-  - Admin can deactivate a user (DELETE /users/{id} → 204).
-  - Deactivated user's refresh_token_hash is cleared.
+  - Admin can hard-delete a user (DELETE /users/{id} → 204; row gone from DB).
+  - Admin cannot delete their own account (→ 400).
+  - BHW cannot delete a user (→ 403).
 
 Fixtures from conftest.py:
   client, admin_token, bhw_token, make_user, make_role, db_session
@@ -25,13 +28,12 @@ from app.models.user import User
 
 
 @pytest.mark.asyncio
-async def test_admin_can_create_user(
+async def test_admin_can_create_user_password_mode(
     client: AsyncClient,
     admin_token: str,
     make_role,
 ) -> None:
-    """Admin can POST /users and receive a UserResponse with an id."""
-    # Ensure a non-admin role exists so role_id is valid
+    """Admin can POST /users with credential_mode='password' and get a UserResponse."""
     role = await make_role("bhw")
 
     payload = {
@@ -40,6 +42,8 @@ async def test_admin_can_create_user(
         "mobile_number": "+639171234567",
         "role_id": str(role.id),
         "send_welcome_sms": False,
+        "credential_mode": "password",
+        "password": "SecurePass1!",
     }
 
     response = await client.post(
@@ -55,6 +59,67 @@ async def test_admin_can_create_user(
     assert body["role"] == "bhw"
     assert body["is_active"] is True
     assert body["mfa_enabled"] is True
+    assert body["has_password"] is True
+
+
+@pytest.mark.asyncio
+async def test_admin_can_create_user_passkey_mode(
+    client: AsyncClient,
+    admin_token: str,
+    make_role,
+) -> None:
+    """Admin can POST /users with credential_mode='passkey'; has_password is False."""
+    role = await make_role("bhw")
+
+    payload = {
+        "full_name": "Passkey Only Staff",
+        "email": f"passkey_{uuid.uuid4().hex[:6]}@bhc.local",
+        "mobile_number": "+639171234560",
+        "role_id": str(role.id),
+        "send_welcome_sms": False,
+        "credential_mode": "passkey",
+    }
+
+    response = await client.post(
+        "/api/v1/users",
+        json=payload,
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert "id" in body
+    assert body["role"] == "bhw"
+    assert body["is_active"] is True
+    assert body["has_password"] is False
+
+
+@pytest.mark.asyncio
+async def test_create_user_password_mode_without_password_returns_422(
+    client: AsyncClient,
+    admin_token: str,
+    make_role,
+) -> None:
+    """POST /users with credential_mode='password' but no password field returns 422."""
+    role = await make_role("bhw")
+
+    payload = {
+        "full_name": "Missing Password Staff",
+        "email": f"missingpw_{uuid.uuid4().hex[:6]}@bhc.local",
+        "mobile_number": "+639171234561",
+        "role_id": str(role.id),
+        "send_welcome_sms": False,
+        "credential_mode": "password",
+        # password intentionally omitted
+    }
+
+    response = await client.post(
+        "/api/v1/users",
+        json=payload,
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert response.status_code == 422, response.text
 
 
 @pytest.mark.asyncio
@@ -72,6 +137,7 @@ async def test_bhw_cannot_create_user(
         "mobile_number": "+639171234568",
         "role_id": str(role.id),
         "send_welcome_sms": False,
+        "credential_mode": "passkey",
     }
 
     response = await client.post(
@@ -112,63 +178,78 @@ async def test_any_role_can_get_me(
 
 
 @pytest.mark.asyncio
-async def test_admin_can_deactivate_user(
+async def test_admin_can_delete_user(
     client: AsyncClient,
     admin_token: str,
     make_user,
     db_session: AsyncSession,
 ) -> None:
-    """Admin can DELETE /users/{id} which soft-deactivates the user (is_active=False)."""
-    # Create a BHW user to deactivate
-    bhw_user: User = await make_user("bhw", email=f"deactivate_{uuid.uuid4().hex[:6]}@test.local")
+    """Admin can DELETE /users/{id} — user row is permanently removed (204, then 404)."""
+    target: User = await make_user("bhw", email=f"delete_{uuid.uuid4().hex[:6]}@test.local")
+    target_id = target.id
 
     response = await client.delete(
-        f"/api/v1/users/{bhw_user.id}",
+        f"/api/v1/users/{target_id}",
         headers={"Authorization": f"Bearer {admin_token}"},
     )
-
     assert response.status_code == 204, response.text
 
-    # Verify is_active is now False in the DB
+    # Row must be gone from the database
+    db_session.expire_all()
     result = await db_session.execute(
-        sa.select(User).where(User.id == bhw_user.id)
+        sa.select(User).where(User.id == target_id)
     )
-    updated_user: User | None = result.scalar_one_or_none()
-    assert updated_user is not None
-    assert updated_user.is_active is False
+    deleted_user: User | None = result.scalar_one_or_none()
+    assert deleted_user is None, "User row must be fully removed after hard delete."
+
+    # Follow-up GET must return 404
+    get_response = await client.get(
+        f"/api/v1/users/{target_id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert get_response.status_code == 404, get_response.text
 
 
 @pytest.mark.asyncio
-async def test_deactivated_user_session_cleared(
+async def test_admin_cannot_delete_own_account(
     client: AsyncClient,
     admin_token: str,
-    make_user,
     db_session: AsyncSession,
 ) -> None:
-    """Deactivating a user clears their refresh_token_hash immediately."""
-    # Create a BHW user and manually set a refresh token hash
-    bhw_user: User = await make_user("bhw", email=f"session_{uuid.uuid4().hex[:6]}@test.local")
-
-    # Simulate an active session by setting a refresh_token_hash
-    await db_session.execute(
-        sa.update(User)
-        .where(User.id == bhw_user.id)
-        .values(refresh_token_hash="somefakehash1234567890abcdef")
-    )
-    await db_session.commit()
-
-    # Deactivate the user
-    response = await client.delete(
-        f"/api/v1/users/{bhw_user.id}",
+    """Admin cannot delete their own account — returns 400."""
+    # Resolve the admin's own user ID from /users/me
+    me_response = await client.get(
+        "/api/v1/users/me",
         headers={"Authorization": f"Bearer {admin_token}"},
     )
-    assert response.status_code == 204, response.text
+    assert me_response.status_code == 200, me_response.text
+    admin_id = me_response.json()["id"]
 
-    # Verify refresh_token_hash is None (session invalidated)
-    result = await db_session.execute(
-        sa.select(User).where(User.id == bhw_user.id)
+    response = await client.delete(
+        f"/api/v1/users/{admin_id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
     )
-    updated_user: User | None = result.scalar_one_or_none()
-    assert updated_user is not None
-    assert updated_user.is_active is False
-    assert updated_user.refresh_token_hash is None
+    assert response.status_code == 400, response.text
+    assert "cannot delete your own account" in response.json()["detail"].lower()
+
+    # Admin row must still exist
+    result = await db_session.execute(
+        sa.select(User).where(User.id == uuid.UUID(admin_id))
+    )
+    assert result.scalar_one_or_none() is not None
+
+
+@pytest.mark.asyncio
+async def test_non_admin_cannot_delete_user(
+    client: AsyncClient,
+    bhw_token: str,
+    make_user,
+) -> None:
+    """BHW role cannot delete staff accounts — returns 403."""
+    target: User = await make_user("bhw", email=f"bhw_nodelete_{uuid.uuid4().hex[:6]}@test.local")
+
+    response = await client.delete(
+        f"/api/v1/users/{target.id}",
+        headers={"Authorization": f"Bearer {bhw_token}"},
+    )
+    assert response.status_code == 403, response.text

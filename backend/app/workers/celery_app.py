@@ -22,10 +22,29 @@ Run both worker and beat in one process (dev convenience only — NOT for prod):
   celery -A app.workers.celery_app worker --beat --loglevel=info -P solo
 """
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from celery import Celery
 from celery.schedules import crontab
 
 from app.core.config import settings
+
+# Asia/Manila timezone used to pin crontab evaluation for schedules that must
+# fire at a fixed local wall-clock time regardless of the worker's system TZ.
+_MANILA_TZ = ZoneInfo("Asia/Manila")
+
+
+def manila_now() -> datetime:
+    """Return the current time in Asia/Manila.
+
+    Used as the ``nowfun`` for crontab schedules that must fire at an exact
+    Philippine local time. Defined at module level (not a lambda) so that
+    Celery Beat's PersistentScheduler can pickle the beat_schedule into its
+    shelve file — lambdas are not picklable and crash beat at startup.
+    """
+    return datetime.now(tz=_MANILA_TZ)
+
 
 celery_app = Celery(
     "smarthealthhub",
@@ -36,6 +55,11 @@ celery_app = Celery(
         "app.workers.reminder_scheduler",
         "app.workers.ai_tasks",
         "app.workers.registration_tasks",
+        "app.workers.monitoring_tasks",
+        "app.workers.health_card_tasks",
+        "app.workers.card_tasks",
+        "app.workers.audit_tasks",
+        "app.workers.report_tasks",
     ],
 )
 
@@ -83,6 +107,45 @@ celery_app.conf.beat_schedule = {
     "run-ai-anomaly-detection": {
         "task": "ai_tasks.run_anomaly_detection",
         "schedule": crontab(hour=1, minute=30),
+    },
+    # Hourly at :30 — check SMS task failure rate and alert admin if threshold hit.
+    "check-sms-failure-rate": {
+        "task": "monitoring.check_sms_failure_rate",
+        "schedule": crontab(minute=30),
+    },
+    # Hourly at :30 — scan audit_logs for suspicious access patterns and alert admin.
+    # Offset matches check-sms-failure-rate intentionally: both run at :30 but are
+    # independent tasks; Celery Beat enqueues them concurrently with no conflict.
+    "audit-scan-anomalies": {
+        "task": "audit.scan_anomalies",
+        "schedule": crontab(minute=30),
+    },
+    # Weekly report: every Friday at 09:00 UTC = 17:00 PHT.
+    # Emails aggregate counts (patients, appointments, SMS stats) to all active
+    # admin users.  Controlled by REPORT_EMAIL_ENABLED in .env.
+    "send-weekly-report": {
+        "task": "reports.send_weekly",
+        "schedule": crontab(hour=9, minute=0, day_of_week="friday"),
+    },
+    # Monthly report: last Friday of the month at 09:15 UTC = 17:15 PHT.
+    # "Last Friday" is approximated by day_of_month=22-31 AND day_of_week=friday
+    # (any month's last Friday always falls on day 22–31 because no month has
+    # more than 31 days).  The 15-minute offset avoids DB contention with the
+    # weekly report which fires at 09:00 on the same Friday.
+    "send-monthly-report": {
+        "task": "reports.send_monthly",
+        "schedule": crontab(hour=9, minute=15, day_of_week="friday", day_of_month="22-31"),
+    },
+    # Nightly 23:00 Asia/Manila — mark past-due appointments as 'missed'.
+    # nowfun pins the crontab evaluation to Asia/Manila so the task fires at
+    # exactly 23:00 PHT regardless of the Celery worker's system timezone.
+    "mark-missed-appointments-daily": {
+        "task": "workers.mark_missed_appointments",
+        "schedule": crontab(
+            hour=23,
+            minute=0,
+            nowfun=manila_now,
+        ),
     },
 }
 celery_app.conf.timezone = "Asia/Manila"

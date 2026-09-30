@@ -1,16 +1,5 @@
 "use client";
 
-/**
- * AI Analytics dedicated page.
- *
- * Shows the full no-show risk table (up to 50 rows) with risk-level filter
- * tabs and anomaly alert banners. Linked from NoShowRiskPanel's "View all N
- * scored appointments" footer link.
- *
- * Visual language: matches analytics/page.tsx exactly — gradient header panel,
- * inline styles, same color palette, no Tailwind, no new CSS files.
- */
-
 import Link from "next/link";
 import React, { useState, useMemo } from "react";
 import { useNoShowRisk, useAnomalyAlerts } from "@/hooks/useAiAnalytics";
@@ -21,191 +10,76 @@ import type { AppointmentRiskScore, RiskLevel } from "@/types/aiAnalytics";
 // Constants
 // ---------------------------------------------------------------------------
 
-const RISK_COLORS: Record<RiskLevel, { bg: string; text: string; border: string }> = {
-  high: { bg: "#fef2f2", text: "#991b1b", border: "#fca5a5" },
-  medium: { bg: "#fffbeb", text: "#92400e", border: "#fcd34d" },
-  low: { bg: "#f0fdf4", text: "#166534", border: "#86efac" },
+const RISK_BADGE: Record<RiskLevel, string> = {
+  high:   "bg-red-50 text-red-800 ring-1 ring-inset ring-red-600/20",
+  medium: "bg-yellow-50 text-yellow-800 ring-1 ring-inset ring-yellow-600/20",
+  low:    "bg-green-50 text-green-800 ring-1 ring-inset ring-green-600/20",
 };
 
 type FilterTab = "all" | RiskLevel;
 
 const TABS: { key: FilterTab; label: string }[] = [
-  { key: "all", label: "All" },
-  { key: "high", label: "High" },
+  { key: "all",    label: "All"    },
+  { key: "high",   label: "High"   },
   { key: "medium", label: "Medium" },
-  { key: "low", label: "Low" },
+  { key: "low",    label: "Low"    },
 ];
 
+const TAB_ACTIVE_TEXT: Record<FilterTab, string> = {
+  all:    "text-slate-800",
+  high:   "text-red-700",
+  medium: "text-yellow-700",
+  low:    "text-green-700",
+};
+
 // ---------------------------------------------------------------------------
-// KPI stat card — matches analytics/page.tsx KpiCard
+// KPI card (no decorations — data is the focus)
 // ---------------------------------------------------------------------------
 
-function MiniStatCard({
-  label,
-  value,
-  accentColor,
-  loading,
-}: {
-  label: string;
-  value: number;
-  accentColor: string;
-  loading?: boolean;
-}) {
+function KpiCard({ label, value, loading }: { label: string; value: number; loading?: boolean }) {
   return (
-    <div
-      style={{
-        background: "#fff",
-        borderRadius: 16,
-        padding: "18px 20px 16px",
-        border: "1px solid rgba(0,0,0,0.06)",
-        boxShadow:
-          "0 0 0 1px rgba(0,0,0,0.02), 0 4px 16px rgba(0,0,0,0.05)",
-        position: "relative",
-        overflow: "hidden",
-        display: "flex",
-        flexDirection: "column",
-        gap: 0,
-        flex: 1,
-        minWidth: 0,
-      }}
-    >
-      {/* Decorative radial blob */}
-      <div
-        style={{
-          position: "absolute",
-          top: -24,
-          right: -24,
-          width: 88,
-          height: 88,
-          borderRadius: "50%",
-          background: `radial-gradient(circle, ${accentColor}22 0%, transparent 70%)`,
-          pointerEvents: "none",
-        }}
-      />
-
+    <div className="flex min-w-0 flex-1 flex-col rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <p className="text-sm font-medium text-slate-500">{label}</p>
       {loading ? (
-        <>
-          <div
-            style={{
-              height: 32,
-              width: 64,
-              borderRadius: 8,
-              background: "#f1f5f9",
-              marginBottom: 8,
-            }}
-          />
-          <div
-            style={{ height: 12, width: 100, borderRadius: 5, background: "#f1f5f9" }}
-          />
-        </>
+        <div className="mt-4 h-9 w-16 animate-pulse rounded-lg bg-slate-100" aria-hidden="true" />
       ) : (
-        <>
-          <div
-            style={{
-              fontSize: 30,
-              fontWeight: 800,
-              color: "#0f172a",
-              letterSpacing: "-0.04em",
-              lineHeight: 1,
-              fontVariantNumeric: "tabular-nums",
-              marginBottom: 6,
-            }}
-          >
-            {value.toLocaleString()}
-          </div>
-          <div
-            style={{ fontSize: 12, color: "#64748b", fontWeight: 500, lineHeight: 1.35 }}
-          >
-            {label}
-          </div>
-        </>
+        <p className="mt-4 text-3xl font-semibold tracking-tight tabular-nums text-slate-900">
+          {value.toLocaleString()}
+        </p>
       )}
-
-      {/* Bottom accent stripe */}
-      <div
-        style={{
-          position: "absolute",
-          bottom: 0,
-          left: 0,
-          right: 0,
-          height: 3,
-          background: `linear-gradient(90deg, ${accentColor} 0%, ${accentColor}40 100%)`,
-          borderRadius: "0 0 16px 16px",
-        }}
-      />
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Filter tabs
+// Filter tabs — segmented control
 // ---------------------------------------------------------------------------
 
-function FilterTabs({
-  active,
-  onChange,
-  counts,
-}: {
+function FilterTabs({ active, onChange, counts }: {
   active: FilterTab;
   onChange: (tab: FilterTab) => void;
   counts: Record<FilterTab, number>;
 }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        gap: 4,
-        padding: "4px",
-        background: "#f8fafc",
-        borderRadius: 12,
-        border: "1px solid rgba(0,0,0,0.06)",
-        width: "fit-content",
-      }}
-    >
+    <div className="flex gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1" role="tablist" aria-label="Filter by risk level">
       {TABS.map(({ key, label }) => {
         const isActive = active === key;
-        const accent =
-          key === "high"
-            ? "#991b1b"
-            : key === "medium"
-            ? "#92400e"
-            : key === "low"
-            ? "#166534"
-            : "#7c3aed";
-
         return (
           <button
             key={key}
+            role="tab"
+            aria-selected={isActive}
             onClick={() => onChange(key)}
-            style={{
-              padding: "6px 14px",
-              borderRadius: 8,
-              border: isActive ? `1px solid ${accent}28` : "1px solid transparent",
-              background: isActive ? "#fff" : "transparent",
-              color: isActive ? accent : "#64748b",
-              fontWeight: isActive ? 700 : 500,
-              fontSize: 12,
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              boxShadow: isActive ? "0 1px 4px rgba(0,0,0,0.06)" : "none",
-              transition: "all 0.12s",
-            }}
+            className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all duration-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-rose-500 ${
+              isActive
+                ? `bg-white shadow-sm ${TAB_ACTIVE_TEXT[key]}`
+                : "text-slate-500 hover:text-slate-700"
+            }`}
           >
             {label}
-            <span
-              style={{
-                fontSize: 11,
-                fontWeight: 700,
-                minWidth: 18,
-                textAlign: "center",
-                padding: "1px 5px",
-                borderRadius: 5,
-                background: isActive ? `${accent}14` : "#e2e8f0",
-                color: isActive ? accent : "#94a3b8",
-              }}
-            >
+            <span className={`rounded px-1.5 py-0.5 text-[0.625rem] font-bold tabular-nums ${
+              isActive ? "bg-slate-100 text-slate-600" : "bg-slate-200 text-slate-500"
+            }`}>
               {counts[key]}
             </span>
           </button>
@@ -216,79 +90,18 @@ function FilterTabs({
 }
 
 // ---------------------------------------------------------------------------
-// Table skeleton rows
-// ---------------------------------------------------------------------------
-
-function TableSkeletonRows({ count = 8 }: { count?: number }) {
-  return (
-    <>
-      {Array.from({ length: count }).map((_, i) => (
-        <tr key={i}>
-          {[90, 56, 64, 110, 72, 160, 48].map((w, j) => (
-            <td
-              key={j}
-              style={{
-                padding: "14px 16px",
-                borderBottom: "1px solid #f1f5f9",
-              }}
-            >
-              <div
-                style={{
-                  height: 13,
-                  width: w,
-                  borderRadius: 5,
-                  background: "#f1f5f9",
-                }}
-              />
-            </td>
-          ))}
-        </tr>
-      ))}
-    </>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Risk score bar
 // ---------------------------------------------------------------------------
 
 function RiskScoreBar({ score }: { score: number }) {
   const pct = Math.round(score * 100);
-  const color =
-    pct >= 70 ? "#dc2626" : pct >= 40 ? "#d97706" : "#16a34a";
-
+  const color = pct >= 70 ? "#dc2626" : pct >= 40 ? "#d97706" : "#16a34a";
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-      <div
-        style={{
-          flex: 1,
-          height: 6,
-          background: "#f1f5f9",
-          borderRadius: 3,
-          overflow: "hidden",
-          minWidth: 48,
-        }}
-      >
-        <div
-          style={{
-            width: `${pct}%`,
-            height: "100%",
-            background: color,
-            borderRadius: 3,
-          }}
-        />
+    <div className="flex items-center gap-2">
+      <div className="h-1.5 min-w-[48px] flex-1 overflow-hidden rounded-full bg-slate-100">
+        <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: color }} />
       </div>
-      <span
-        style={{
-          fontSize: 11,
-          fontWeight: 700,
-          color,
-          fontVariantNumeric: "tabular-nums",
-          flexShrink: 0,
-          minWidth: 32,
-          textAlign: "right",
-        }}
-      >
+      <span className="w-9 text-right text-xs font-semibold tabular-nums" style={{ color }}>
         {pct}%
       </span>
     </div>
@@ -299,11 +112,9 @@ function RiskScoreBar({ score }: { score: number }) {
 // Lead time formatter
 // ---------------------------------------------------------------------------
 
-function formatLeadTime(computedAt: string, expiresAt: string | null): string {
+function formatLeadTime(_computedAt: string, expiresAt: string | null): string {
   if (!expiresAt) return "—";
-  const now = Date.now();
-  const expiry = new Date(expiresAt).getTime();
-  const diffMs = expiry - now;
+  const diffMs = new Date(expiresAt).getTime() - Date.now();
   if (diffMs <= 0) return "Expired";
   const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
   if (diffDays === 0) return "Today";
@@ -312,123 +123,63 @@ function formatLeadTime(computedAt: string, expiresAt: string | null): string {
 }
 
 // ---------------------------------------------------------------------------
-// Main table row
+// Table skeleton
 // ---------------------------------------------------------------------------
 
-function RiskTableRow({
-  item,
-  isLast,
-}: {
-  item: AppointmentRiskScore;
-  isLast: boolean;
-}) {
-  const colors = RISK_COLORS[item.riskLevel];
-
+function TableSkeletonRows({ count = 8 }: { count?: number }) {
   return (
-    <tr
-      style={{
-        borderBottom: isLast ? "none" : "1px solid #f8fafc",
-      }}
-    >
-      {/* Patient Code */}
-      <td
-        style={{
-          padding: "13px 16px",
-          fontSize: 12,
-          fontWeight: 700,
-          color: "#475569",
-          fontFamily: "monospace",
-          whiteSpace: "nowrap",
-        }}
-      >
+    <>
+      {Array.from({ length: count }).map((_, i) => (
+        <tr key={i} className="border-b border-slate-100">
+          {[90, 56, 64, 110, 72, 160, 48].map((w, j) => (
+            <td key={j} className="px-4 py-3.5">
+              <div className="h-3.5 animate-pulse rounded bg-slate-100" style={{ width: w }} />
+            </td>
+          ))}
+        </tr>
+      ))}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Table row
+// ---------------------------------------------------------------------------
+
+function RiskTableRow({ item, isLast }: { item: AppointmentRiskScore; isLast: boolean }) {
+  return (
+    <tr className={`transition-colors duration-100 hover:bg-slate-50 ${!isLast ? "border-b border-slate-100" : ""}`}>
+      <td className="px-4 py-3.5 font-mono text-xs font-semibold text-slate-600 whitespace-nowrap">
         {item.patientCode}
       </td>
-
-      {/* Risk Level badge */}
-      <td style={{ padding: "13px 16px", whiteSpace: "nowrap" }}>
-        <span
-          style={{
-            fontSize: 10,
-            fontWeight: 700,
-            color: colors.text,
-            background: colors.bg,
-            border: `1px solid ${colors.border}`,
-            borderRadius: 6,
-            padding: "3px 8px",
-            textTransform: "uppercase",
-            letterSpacing: "0.04em",
-          }}
-        >
+      <td className="px-4 py-3.5 whitespace-nowrap">
+        <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-semibold capitalize ${RISK_BADGE[item.riskLevel]}`}>
           {item.riskLevel}
         </span>
       </td>
-
-      {/* Risk Score bar */}
-      <td style={{ padding: "13px 16px", minWidth: 120 }}>
+      <td className="px-4 py-3.5 min-w-[120px]">
         <RiskScoreBar score={item.riskScore} />
       </td>
-
-      {/* Appointment Type — derived from reasoning snippet if present */}
-      <td
-        style={{
-          padding: "13px 16px",
-          fontSize: 12,
-          color: "#374151",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {item.reasoning
-          ? item.reasoning.split(" ").slice(0, 3).join(" ")
-          : "Follow-up"}
+      <td className="px-4 py-3.5 text-xs text-slate-600 whitespace-nowrap">
+        {item.reasoning ? item.reasoning.split(" ").slice(0, 3).join(" ") : "Follow-up"}
       </td>
-
-      {/* Lead Time */}
-      <td
-        style={{
-          padding: "13px 16px",
-          fontSize: 12,
-          color: "#64748b",
-          whiteSpace: "nowrap",
-          fontVariantNumeric: "tabular-nums",
-        }}
-      >
+      <td className="px-4 py-3.5 text-xs text-slate-500 whitespace-nowrap tabular-nums">
         {formatLeadTime(item.computedAt, item.expiresAt)}
       </td>
-
-      {/* Recommendation */}
-      <td
-        style={{
-          padding: "13px 16px",
-          fontSize: 12,
-          color: "#374151",
-          lineHeight: 1.45,
-          maxWidth: 260,
-        }}
-      >
-        <span
-          style={{
-            display: "-webkit-box",
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: "vertical",
-            overflow: "hidden",
-          } as React.CSSProperties}
+      <td className="max-w-[260px] px-4 py-3.5 text-xs text-slate-600 leading-relaxed">
+        <p
+          className="overflow-hidden"
+          style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" } as React.CSSProperties}
         >
           {item.recommendation}
-        </span>
+        </p>
       </td>
-
-      {/* View link */}
-      <td style={{ padding: "13px 16px", whiteSpace: "nowrap" }}>
+      <td className="px-4 py-3.5 whitespace-nowrap">
         <Link
           href={`/patients/${item.patientId}`}
-          style={{
-            fontSize: 12,
-            color: "#7c3aed",
-            textDecoration: "none",
-            fontWeight: 600,
-          }}
+          className="text-xs font-semibold text-violet-600 hover:text-violet-800 transition-colors focus-visible:outline-none focus-visible:underline"
         >
-          View &rarr;
+          View
         </Link>
       </td>
     </tr>
@@ -442,321 +193,122 @@ function RiskTableRow({
 export default function AiAnalyticsPage() {
   const { data: noShowData, loading: noShowLoading } = useNoShowRisk(50);
   const { data: anomalyData, loading: anomalyLoading } = useAnomalyAlerts();
-
   const [activeTab, setActiveTab] = useState<FilterTab>("all");
 
-  // Filtered + sorted items (highest risk score first within each tab)
   const filteredItems = useMemo<AppointmentRiskScore[]>(() => {
     const items = noShowData?.items ?? [];
-    const filtered =
-      activeTab === "all" ? items : items.filter((i) => i.riskLevel === activeTab);
+    const filtered = activeTab === "all" ? items : items.filter((i) => i.riskLevel === activeTab);
     return [...filtered].sort((a, b) => b.riskScore - a.riskScore);
   }, [noShowData, activeTab]);
 
-  // Tab counts
   const counts = useMemo<Record<FilterTab, number>>(() => {
     const items = noShowData?.items ?? [];
     return {
-      all: items.length,
-      high: items.filter((i) => i.riskLevel === "high").length,
+      all:    items.length,
+      high:   items.filter((i) => i.riskLevel === "high").length,
       medium: items.filter((i) => i.riskLevel === "medium").length,
-      low: items.filter((i) => i.riskLevel === "low").length,
+      low:    items.filter((i) => i.riskLevel === "low").length,
     };
   }, [noShowData]);
 
-  const highCount = noShowData?.highRiskCount ?? 0;
+  const highCount   = noShowData?.highRiskCount ?? 0;
   const mediumCount = counts.medium;
-  const totalCount = noShowData?.total ?? 0;
+  const totalCount  = noShowData?.total ?? 0;
 
   return (
-    <div style={{ minHeight: "100vh" }}>
-
-      {/* Anomaly alert banner — rendered above the header, same as analytics/page */}
+    <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
       <AnomalyAlertBanner data={anomalyData} loading={anomalyLoading} />
 
-      {/* ── Gradient header panel ────────────────────────────────────────── */}
-      <div
-        style={{
-          background:
-            "linear-gradient(135deg, rgba(124,58,237,0.07) 0%, rgba(124,58,237,0.02) 45%, rgba(255,255,255,0) 100%)",
-          borderRadius: 20,
-          padding: "28px 32px",
-          border: "1px solid rgba(124,58,237,0.09)",
-          marginBottom: 24,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          flexWrap: "wrap",
-          gap: 16,
-          position: "relative",
-          overflow: "hidden",
-        }}
-      >
-        {/* Decorative arcs */}
-        <div
-          style={{
-            position: "absolute",
-            top: -60,
-            right: -60,
-            width: 200,
-            height: 200,
-            borderRadius: "50%",
-            border: "1px solid rgba(124,58,237,0.06)",
-            pointerEvents: "none",
-          }}
-        />
-        <div
-          style={{
-            position: "absolute",
-            top: -30,
-            right: -30,
-            width: 120,
-            height: 120,
-            borderRadius: "50%",
-            border: "1px solid rgba(124,58,237,0.06)",
-            pointerEvents: "none",
-          }}
-        />
-
+      {/* Header */}
+      <header className="mb-8 flex flex-wrap items-start justify-between gap-4">
         <div>
-          {/* Back link */}
-          <Link
-            href="/analytics"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 5,
-              fontSize: 12,
-              color: "#7c3aed",
-              textDecoration: "none",
-              fontWeight: 600,
-              marginBottom: 10,
-              opacity: 0.85,
-            }}
-          >
-            <svg
-              width="14"
-              height="14"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
+          <div className="mb-2">
+            <Link
+              href="/analytics"
+              className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-900 transition-colors focus-visible:outline-none focus-visible:underline"
             >
-              <polyline points="15,18 9,12 15,6" />
-            </svg>
-            Analytics
-          </Link>
-
-          <h1
-            style={{
-              fontSize: 28,
-              fontWeight: 800,
-              color: "#0f172a",
-              letterSpacing: "-0.03em",
-              margin: 0,
-              lineHeight: 1.1,
-            }}
-          >
-            AI Analytics
-          </h1>
-          <p style={{ fontSize: 13, color: "#64748b", marginTop: 6, margin: "6px 0 0" }}>
-            No-show risk scoring &amp; illness trend anomaly detection
-          </p>
-        </div>
-
-        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 7,
-              padding: "7px 14px",
-              background: "rgba(124,58,237,0.08)",
-              border: "1px solid rgba(124,58,237,0.2)",
-              borderRadius: 20,
-              fontSize: 12,
-              color: "#7c3aed",
-              fontWeight: 700,
-            }}
-          >
-            <svg
-              width="14"
-              height="14"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z" />
-              <path d="M12 6v6l4 2" />
-            </svg>
-            AI-powered
+              <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polyline points="15,18 9,12 15,6" />
+              </svg>
+              Analytics
+            </Link>
           </div>
+          <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">AI Analytics</h1>
+          <p className="mt-2 text-sm text-slate-500">No-show risk scoring and illness trend anomaly detection.</p>
         </div>
-      </div>
+        <div className="inline-flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-3.5 py-1.5 text-xs font-semibold text-violet-700">
+          <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <polygon points="13,2 3,14 12,14 11,22 21,10 12,10 13,2" />
+          </svg>
+          AI-powered
+        </div>
+      </header>
 
-      {/* ── Summary KPI cards ────────────────────────────────────────────── */}
-      <div
-        style={{
-          display: "flex",
-          gap: 16,
-          marginBottom: 24,
-          flexWrap: "wrap",
-        }}
-      >
-        <MiniStatCard
-          label="Total Scored Appointments"
-          value={totalCount}
-          accentColor="#7c3aed"
-          loading={noShowLoading}
-        />
-        <MiniStatCard
-          label="High-Risk Appointments"
-          value={highCount}
-          accentColor="#dc2626"
-          loading={noShowLoading}
-        />
-        <MiniStatCard
-          label="Medium-Risk Appointments"
-          value={mediumCount}
-          accentColor="#d97706"
-          loading={noShowLoading}
-        />
-      </div>
+      {/* KPI strip */}
+      <section className="mb-8 flex flex-wrap gap-4" aria-label="AI analytics summary">
+        <KpiCard label="Total Scored Appointments" value={totalCount}  loading={noShowLoading} />
+        <KpiCard label="High-Risk Appointments"    value={highCount}   loading={noShowLoading} />
+        <KpiCard label="Medium-Risk Appointments"  value={mediumCount} loading={noShowLoading} />
+      </section>
 
-      {/* ── Full risk table card ─────────────────────────────────────────── */}
-      <div
-        style={{
-          background: "#fff",
-          borderRadius: 20,
-          border: "1px solid rgba(0,0,0,0.06)",
-          boxShadow:
-            "0 0 0 1px rgba(0,0,0,0.02), 0 8px 24px rgba(0,0,0,0.06)",
-          overflow: "hidden",
-        }}
-      >
-        {/* Top accent stripe — purple to match AI theme */}
-        <div
-          style={{
-            height: 3,
-            background:
-              "linear-gradient(90deg, #7c3aed 0%, #7c3aed40 100%)",
-          }}
-        />
-
-        <div style={{ padding: "20px 24px 0" }}>
-          {/* Card header */}
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "flex-start",
-              marginBottom: 18,
-              flexWrap: "wrap",
-              gap: 12,
-            }}
-          >
-            <div>
-              <h2
-                style={{
-                  fontSize: 15,
-                  fontWeight: 700,
-                  color: "#0f172a",
-                  margin: "0 0 4px",
-                  letterSpacing: "-0.01em",
-                }}
-              >
-                No-Show Risk Table
-              </h2>
-              <p style={{ fontSize: 12, color: "#94a3b8", margin: 0, lineHeight: 1.4 }}>
-                All scored upcoming appointments, sorted by risk score (highest first)
-              </p>
-            </div>
-
-            <FilterTabs
-              active={activeTab}
-              onChange={setActiveTab}
-              counts={counts}
-            />
+      {/* Risk table */}
+      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        {/* Card header */}
+        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 bg-slate-50 px-5 py-4">
+          <div>
+            <h2 className="text-base font-semibold text-slate-900">No-Show Risk Table</h2>
+            <p className="mt-0.5 text-sm text-slate-500">
+              All scored upcoming appointments, sorted by risk score — highest first.
+            </p>
           </div>
+          <FilterTabs active={activeTab} onChange={setActiveTab} counts={counts} />
         </div>
 
         {/* Table */}
-        <div style={{ overflowX: "auto" }}>
-          <table
-            style={{
-              width: "100%",
-              borderCollapse: "collapse",
-              fontSize: 13,
-            }}
-          >
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-sm" aria-label="No-show risk scores">
             <thead>
-              <tr
-                style={{
-                  background: "#f8fafc",
-                  borderTop: "1px solid #f1f5f9",
-                  borderBottom: "1px solid #f1f5f9",
-                }}
-              >
+              <tr className="border-b border-slate-200 bg-slate-50">
                 {[
-                  { label: "Patient Code", width: 110 },
-                  { label: "Risk Level", width: 90 },
-                  { label: "Risk Score", width: 140 },
-                  { label: "Appt. Type", width: 120 },
-                  { label: "Lead Time", width: 90 },
-                  { label: "Recommendation", width: "auto" as const },
-                  { label: "", width: 60 },
+                  { label: "Patient Code", w: 110 },
+                  { label: "Risk Level",   w: 90  },
+                  { label: "Risk Score",   w: 140 },
+                  { label: "Appt. Type",   w: 120 },
+                  { label: "Lead Time",    w: 90  },
+                  { label: "Recommendation"       },
+                  { label: "",             w: 60  },
                 ].map((col, i) => (
                   <th
                     key={i}
-                    style={{
-                      padding: "10px 16px",
-                      textAlign: "left",
-                      fontSize: 11,
-                      fontWeight: 700,
-                      color: "#94a3b8",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.06em",
-                      whiteSpace: "nowrap",
-                      width: col.width,
-                    }}
+                    className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 whitespace-nowrap"
+                    style={col.w ? { width: col.w } : {}}
                   >
                     {col.label}
                   </th>
                 ))}
               </tr>
             </thead>
-
             <tbody>
               {noShowLoading ? (
                 <TableSkeletonRows count={8} />
               ) : filteredItems.length === 0 ? (
                 <tr>
-                  <td
-                    colSpan={7}
-                    style={{
-                      padding: "48px 24px",
-                      textAlign: "center",
-                      color: "#94a3b8",
-                    }}
-                  >
-                    <div style={{ fontSize: 32, marginBottom: 10 }}>&#x2713;</div>
-                    <p style={{ margin: "0 0 4px", fontWeight: 600, fontSize: 14, color: "#64748b" }}>
-                      {activeTab === "all"
-                        ? "No scored appointments found"
-                        : `No ${activeTab}-risk appointments`}
-                    </p>
-                    <p style={{ margin: 0, fontSize: 12 }}>
-                      {activeTab === "all"
-                        ? "Run the risk scoring task to populate this table."
-                        : `Switch to the "All" tab to see appointments of other risk levels.`}
-                    </p>
+                  <td colSpan={7}>
+                    <div role="status" className="flex flex-col items-center justify-center py-16 text-center">
+                      <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400">
+                        <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <polyline points="20,6 9,17 4,12" />
+                        </svg>
+                      </div>
+                      <p className="text-sm font-medium text-slate-700">
+                        {activeTab === "all" ? "No scored appointments found" : `No ${activeTab}-risk appointments`}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {activeTab === "all"
+                          ? "Run the risk scoring task to populate this table."
+                          : `Switch to "All" to see appointments at other risk levels.`}
+                      </p>
+                    </div>
                   </td>
                 </tr>
               ) : (
@@ -772,35 +324,23 @@ export default function AiAnalyticsPage() {
           </table>
         </div>
 
-        {/* Card footer */}
+        {/* Footer */}
         {!noShowLoading && filteredItems.length > 0 && (
-          <div
-            style={{
-              padding: "12px 24px",
-              borderTop: "1px solid #f1f5f9",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-            }}
-          >
-            <span style={{ fontSize: 12, color: "#94a3b8" }}>
-              Showing {filteredItems.length} of {totalCount} scored appointment
-              {totalCount !== 1 ? "s" : ""}
+          <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-5 py-3">
+            <span className="text-xs text-slate-500">
+              Showing {filteredItems.length} of {totalCount} scored appointment{totalCount !== 1 ? "s" : ""}
             </span>
             {noShowData?.generatedAt && (
-              <span style={{ fontSize: 11, color: "#cbd5e1" }}>
+              <span className="text-xs text-slate-400">
                 Scored{" "}
                 {new Date(noShowData.generatedAt).toLocaleString("en-PH", {
-                  month: "short",
-                  day: "numeric",
-                  hour: "2-digit",
-                  minute: "2-digit",
+                  month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
                 })}
               </span>
             )}
           </div>
         )}
-      </div>
-    </div>
+      </section>
+    </main>
   );
 }

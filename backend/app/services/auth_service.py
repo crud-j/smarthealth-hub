@@ -139,17 +139,31 @@ async def login(
 
     # Use a generic error message for both "not found" and "wrong password"
     # to prevent email enumeration.
-    if user is None or not verify_password(password, user.password_hash):
+    #
+    # Passkey-only accounts have password_hash=None.  Calling verify_password
+    # with a None hash would raise an exception, so we short-circuit first:
+    # if the account has no password set, password-based login is blocked.
+    password_ok = (
+        user is not None
+        and user.password_hash is not None
+        and verify_password(password, user.password_hash)
+    )
+    if not password_ok:
         # Only log the attempt when a user record exists to avoid log spam
         # from random probes.
         if user is not None:
+            reason = (
+                "passkey_only_account"
+                if user.password_hash is None
+                else "wrong_password"
+            )
             await audit_service.write_audit_log(
                 db=db,
                 user_id=user.id,
                 action="LOGIN_FAILED",
                 entity_type="user",
                 entity_id=user.id,
-                metadata={"reason": "wrong_password"},
+                metadata={"reason": reason},
                 ip_address=ip_address,
             )
         raise UnauthorizedError("Invalid credentials. Please check your email and password.")

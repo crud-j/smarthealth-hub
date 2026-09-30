@@ -18,9 +18,16 @@ Tasks:
 Both tasks are idempotent: the NOT EXISTS guard prevents double-queuing if
 Beat fires more than once in the same window (e.g. clock skew, restart).
 
-Template registry (extend here for Filipino / other language variants):
-  SMS_TEMPLATES["appointment_reminder"]["en"]
-  SMS_TEMPLATES["immunization_reminder"]["en"]
+Template registry (extend here for additional language variants):
+  SMS_TEMPLATES["appointment_reminder"]["en"]   — English
+  SMS_TEMPLATES["appointment_reminder"]["fil"]  — Filipino
+  SMS_TEMPLATES["immunization_reminder"]["en"]  — English
+  SMS_TEMPLATES["immunization_reminder"]["fil"] — Filipino
+  SMS_TEMPLATES["missed_appointment"]["en"]     — English
+  SMS_TEMPLATES["missed_appointment"]["fil"]    — Filipino
+
+Template selection uses patient.preferred_language; falls back to "en" when
+the patient's preferred language is not present in the registry.
 """
 
 from __future__ import annotations
@@ -35,6 +42,10 @@ from app.core.config import settings
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+from app.workers.sms_tasks import send_reminder_task as _celery_send_reminder_task
+
+send_reminder_task = _celery_send_reminder_task
 
 # ---------------------------------------------------------------------------
 # SMS template registry
@@ -51,6 +62,11 @@ SMS_TEMPLATES: dict[str, dict[str, str]] = {
             "{scheduled_time}. Please arrive 15 minutes early. "
             "Reply STOP to unsubscribe."
         ),
+        "fil": (
+            "Kamusta {patient_name}, paalala: mayroon kang {appointment_type} "
+            "na appointment sa {bhc_name} sa {scheduled_date} ng {scheduled_time}. "
+            "Sagutin ng STOP para mag-opt out."
+        ),
     },
     "immunization_reminder": {
         "en": (
@@ -58,8 +74,36 @@ SMS_TEMPLATES: dict[str, dict[str, str]] = {
             "{due_date} at the Barangay Health Center. Please bring your health "
             "card. Reply STOP to unsubscribe."
         ),
+        "fil": (
+            "Kamusta {patient_name}, ang {vaccine_name} (dose {dose_number}) "
+            "para kay {patient_name} ay dapat ibigay sa {due_date}. "
+            "Pakidalaw ang {bhc_name}."
+        ),
+    },
+    "missed_appointment": {
+        "en": (
+            "Hi {first_name}, we noticed you missed your appointment today. "
+            "Please contact {bhc_name} to reschedule."
+        ),
+        "fil": (
+            "Kamusta {first_name}, napansin namin na hindi ka dumating sa "
+            "iyong appointment ngayon. Makipag-ugnayan sa {bhc_name} para mag-reschedule."
+        ),
     },
 }
+
+
+def _resolve_lang(preferred_language: str | None, template_key: str) -> str:
+    """
+    Return the language key to use for a given template.
+
+    Falls back to "en" when ``preferred_language`` is None, empty, or not
+    present as a key in ``SMS_TEMPLATES[template_key]``.
+    """
+    lang = preferred_language or "en"
+    if lang not in SMS_TEMPLATES.get(template_key, {}):
+        lang = "en"
+    return lang
 
 
 def _build_full_name(first: str, middle: str | None, last: str) -> str:
@@ -114,6 +158,7 @@ async def _dispatch_appointment_reminders_async() -> int:
                 Appointment.scheduled_at <= window_end,
                 Appointment.status.in_(["pending", "confirmed"]),
                 Patient.mobile_number.isnot(None),
+                Patient.sms_opt_out.is_(False),
                 not_(exists(existing_sms_subq)),
             )
         )
@@ -128,11 +173,13 @@ async def _dispatch_appointment_reminders_async() -> int:
             scheduled_date = appt.scheduled_at.strftime("%m/%d/%Y")
             scheduled_time = appt.scheduled_at.strftime("%I:%M %p")
 
-            base_message = SMS_TEMPLATES["appointment_reminder"]["en"].format(
+            lang = _resolve_lang(patient.preferred_language, "appointment_reminder")
+            base_message = SMS_TEMPLATES["appointment_reminder"][lang].format(
                 patient_name=full_name,
                 appointment_type=appt.appointment_type,
                 scheduled_date=scheduled_date,
                 scheduled_time=scheduled_time,
+                bhc_name=settings.BHC_NAME,
             )
 
             # Generate a 4-digit confirmation token for SMS reply-confirm flow.
@@ -167,7 +214,6 @@ async def _dispatch_appointment_reminders_async() -> int:
 
             # Enqueue send_reminder_task after commit so the row is visible.
             try:
-                from app.workers.sms_tasks import send_reminder_task
                 send_reminder_task.delay(str(sms_log.id))
                 queued_count += 1
                 logger.info(
@@ -226,6 +272,7 @@ async def _dispatch_immunization_reminders_async() -> int:
                 Immunization.next_due_date == target_date,
                 Immunization.status != "completed",
                 Patient.mobile_number.isnot(None),
+                Patient.sms_opt_out.is_(False),
                 not_(exists(existing_today_subq)),
             )
         )
@@ -239,10 +286,13 @@ async def _dispatch_immunization_reminders_async() -> int:
             )
             due_date_str = immunization.next_due_date.strftime("%m/%d/%Y")
 
-            message = SMS_TEMPLATES["immunization_reminder"]["en"].format(
+            lang = _resolve_lang(patient.preferred_language, "immunization_reminder")
+            message = SMS_TEMPLATES["immunization_reminder"][lang].format(
                 patient_name=full_name,
                 vaccine_name=immunization.vaccine_name,
                 due_date=due_date_str,
+                dose_number=immunization.dose_number,
+                bhc_name=settings.BHC_NAME,
             )
 
             sms_log = SmsLog(
@@ -258,7 +308,6 @@ async def _dispatch_immunization_reminders_async() -> int:
             await db.commit()
 
             try:
-                from app.workers.sms_tasks import send_reminder_task
                 send_reminder_task.delay(str(sms_log.id))
                 queued_count += 1
                 logger.info(
@@ -320,3 +369,157 @@ def dispatch_immunization_reminders() -> dict:  # type: ignore[type-arg]
         extra={"queued_count": queued},
     )
     return {"queued_count": queued}
+
+
+# ---------------------------------------------------------------------------
+# Missed-appointment marking
+# ---------------------------------------------------------------------------
+
+
+async def _mark_missed_appointments_async() -> int:
+    """
+    Core async logic for marking past-due appointments as 'missed'.
+
+    Updates all appointments whose status is 'pending' or 'confirmed' and
+    whose scheduled_at is strictly before now() to status='missed'.
+
+    After committing the status updates, enqueues a follow-up SMS for each
+    appointment that was marked missed today and whose patient has a mobile
+    number on file.  SMS enqueueing failures are logged as warnings and do
+    NOT prevent the status update from being persisted.
+
+    Returns the number of rows updated.
+    """
+    from sqlalchemy import func, select, update
+    from app.models.appointment import Appointment
+    from app.models.patient import Patient
+    from app.models.sms_log import SmsLog
+    from app.workers.db import CelerySessionLocal
+
+    # ── Step 1: bulk-update missed appointments ───────────────────────────────
+    async with CelerySessionLocal() as db:
+        result = await db.execute(
+            update(Appointment)
+            .where(
+                Appointment.status.in_(["pending", "confirmed"]),
+                Appointment.scheduled_at < datetime.now(tz=UTC),
+            )
+            .values(status="missed")
+            .execution_options(synchronize_session=False)
+        )
+        await db.commit()
+        updated_count: int = result.rowcount
+
+    # ── Step 2: enqueue post-miss follow-up SMS for affected patients ─────────
+    # Runs in a separate session so a failure here cannot roll back the status
+    # update committed above.  Patients with sms_opt_out=True are skipped.
+    try:
+        async with CelerySessionLocal() as db:
+            today = datetime.now(tz=UTC).date()
+
+            missed_stmt = (
+                select(
+                    Appointment.id,
+                    Appointment.patient_id,
+                    Patient.mobile_number,
+                    Patient.first_name,
+                    Patient.preferred_language,
+                )
+                .join(Patient, Patient.id == Appointment.patient_id)
+                .where(
+                    Appointment.status == "missed",
+                    func.date(Appointment.scheduled_at) == today,
+                    Patient.mobile_number.isnot(None),
+                    Patient.sms_opt_out.is_(False),
+                )
+            )
+
+            missed_result = await db.execute(missed_stmt)
+            missed_rows = missed_result.all()
+
+            bhc_name: str = settings.BHC_NAME
+            enqueued_count = 0
+
+            for appointment_id, patient_id, mobile_number, first_name, preferred_language in missed_rows:
+                lang = _resolve_lang(preferred_language, "missed_appointment")
+                message = SMS_TEMPLATES["missed_appointment"][lang].format(
+                    first_name=first_name,
+                    bhc_name=bhc_name,
+                )
+
+                sms_log = SmsLog(
+                    id=uuid.uuid4(),
+                    patient_id=patient_id,
+                    appointment_id=appointment_id,
+                    mobile_number=mobile_number,
+                    message=message,
+                    status="queued",
+                    sms_metadata={"trigger": "post_miss_followup"},
+                )
+                db.add(sms_log)
+                await db.flush()  # populate sms_log.id before commit
+                await db.commit()
+
+                try:
+                    send_reminder_task.apply_async(
+                        args=[str(sms_log.id)],
+                        queue="sms",
+                        countdown=0,
+                    )
+                    enqueued_count += 1
+                    logger.info(
+                        "Post-miss follow-up SMS queued",
+                        extra={
+                            "appointment_id": str(appointment_id),
+                            "patient_id": str(patient_id),
+                            "sms_log_id": str(sms_log.id),
+                        },
+                    )
+                except Exception as enqueue_exc:  # noqa: BLE001
+                    logger.warning(
+                        "Failed to enqueue post-miss SMS — Celery may be down",
+                        extra={
+                            "sms_log_id": str(sms_log.id),
+                            "appointment_id": str(appointment_id),
+                            "error": str(enqueue_exc),
+                        },
+                    )
+
+        logger.info(
+            "Post-miss follow-up: enqueued SMS for missed appointments",
+            extra={"enqueued_count": enqueued_count, "date": str(today)},
+        )
+
+    except Exception as followup_exc:  # noqa: BLE001
+        logger.warning(
+            "Post-miss follow-up SMS block failed — missed-appointment status "
+            "update was already committed and is not affected",
+            extra={"error": str(followup_exc)},
+        )
+
+    return updated_count
+
+
+@celery_app.task(name="workers.mark_missed_appointments", bind=True, max_retries=3)
+def mark_missed_appointments(self) -> dict:  # type: ignore[type-arg]
+    """
+    Nightly periodic task (Celery Beat, runs at 23:00 Asia/Manila).
+
+    Sets status='missed' on all appointments that are still 'pending' or
+    'confirmed' but whose scheduled_at has already passed.  This keeps the
+    appointment list accurate without requiring staff to manually close
+    no-shows.
+
+    Retries up to 3 times with a 5-minute countdown on any exception.
+    """
+    logger.info("mark_missed_appointments: starting")
+    try:
+        updated = asyncio.run(_mark_missed_appointments_async())
+        logger.info("Marked %d appointments as missed", updated)
+        return {"updated_count": updated}
+    except Exception as exc:
+        logger.exception(
+            "mark_missed_appointments: error — will retry",
+            extra={"exc": str(exc)},
+        )
+        raise self.retry(exc=exc, countdown=300)

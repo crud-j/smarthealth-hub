@@ -7,8 +7,11 @@
  *   `credentials: 'include'`.
  * - Parses the backend's standard error envelope and throws `ApiError` for
  *   non-2xx responses so callers can catch a typed error.
- * - On 401 responses, redirects to /login (client-side only — no-ops during
- *   SSR to avoid hydration issues).
+ * - On 401 responses, attempts a single silent token refresh via
+ *   POST /auth/refresh and retries the original request. Concurrent 401s
+ *   share one in-flight refresh. Only if the refresh itself fails does it
+ *   redirect to /login (client-side only — no-ops during SSR to avoid
+ *   hydration issues).
  */
 
 // Browser: use a relative URL so requests go through the Next.js rewrite
@@ -48,6 +51,43 @@ export class ApiError extends Error {
 }
 
 // ---------------------------------------------------------------------------
+// Silent token-refresh coordination
+// ---------------------------------------------------------------------------
+
+/** Path (relative to API_BASE_URL) of the token-refresh endpoint. */
+const REFRESH_PATH = "/auth/refresh";
+
+/**
+ * Module-level shared refresh promise. When several requests receive a 401 at
+ * the same time, only the first triggers a refresh; the rest await this same
+ * promise. It resolves to `true` when the refresh succeeded, `false` otherwise.
+ * Reset to `null` once settled so a later 401 can trigger a fresh refresh.
+ */
+let inFlightRefresh: Promise<boolean> | null = null;
+
+/**
+ * Attempt to refresh the auth tokens exactly once, coordinating concurrent
+ * callers through a shared in-flight promise so only one network refresh runs.
+ *
+ * @returns `true` if the refresh succeeded, `false` otherwise.
+ */
+function refreshTokens(): Promise<boolean> {
+  if (inFlightRefresh === null) {
+    inFlightRefresh = fetch(`${API_BASE_URL}${REFRESH_PATH}`, {
+      method: "POST",
+      credentials: "include", // send the httpOnly refresh_token cookie
+      headers: { "Content-Type": "application/json" },
+    })
+      .then((res) => res.ok)
+      .catch(() => false)
+      .finally(() => {
+        inFlightRefresh = null;
+      });
+  }
+  return inFlightRefresh;
+}
+
+// ---------------------------------------------------------------------------
 // Core fetch wrapper
 // ---------------------------------------------------------------------------
 
@@ -69,18 +109,31 @@ export async function apiFetch<T>(
     "Content-Type": "application/json",
   };
 
-  const response = await fetch(url, {
+  const requestInit: RequestInit = {
     ...options,
     credentials: "include", // send httpOnly auth cookies on every request
     headers: {
       ...defaultHeaders,
       ...options.headers,
     },
-  });
+  };
 
-  // 401 → redirect to login (client-side only; skip during SSR)
-  if (response.status === 401) {
-    if (typeof window !== "undefined") {
+  let response = await fetch(url, requestInit);
+
+  // 401 → attempt a single silent refresh, then retry the original request.
+  // Never attempt refresh-retry when the failing request IS the refresh call
+  // itself (avoids an infinite loop).
+  if (
+    response.status === 401 &&
+    typeof window !== "undefined" &&
+    path !== REFRESH_PATH
+  ) {
+    const refreshed = await refreshTokens();
+    if (refreshed) {
+      // Refresh succeeded — retry the original request once.
+      response = await fetch(url, requestInit);
+    } else {
+      // Refresh failed — session is truly expired; send the user to login.
       window.location.href = "/login";
     }
   }

@@ -32,10 +32,11 @@ Security notes:
 from __future__ import annotations
 
 import json
+import socket
 import sys
 import threading
-from datetime import datetime
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -48,6 +49,14 @@ RELAY_PORT = 9000
 # FastAPI backend — runs on the laptop, accessible from localhost
 FASTAPI_SCAN_UID_URL = "http://127.0.0.1:8000/api/v1/health-cards/scan-uid"
 FASTAPI_VIEW_URL = "http://127.0.0.1:8000/api/v1/health-cards/view"
+
+# When an NFC tap opens /view/{identifier} in a mobile browser, the relay
+# issues an HTTP 302 redirect to FastAPI's view endpoint so the browser
+# receives the rich clinical summary HTML directly from the backend.
+# This avoids duplicating rendering logic in the relay.
+# The URL uses the LAN IP (not 127.0.0.1) so mobile phones can reach it.
+# Overridden below once _LOCAL_IP is detected.
+_FASTAPI_VIEW_REDIRECT_BASE = ""  # set after _LOCAL_IP is detected
 
 # ---------------------------------------------------------------------------
 # ANSI colour helpers (work on Windows 10+ with VT mode)
@@ -86,6 +95,39 @@ def log_scan(uid_prefix: str, name: str | None, status: str) -> None:
 def log_error(msg: str) -> None:
     print(f"{_DIM}{_ts()}{_RESET} {_RED}[ERROR]{_RESET} {msg}")
 
+
+# ---------------------------------------------------------------------------
+# Local IP detection
+# ---------------------------------------------------------------------------
+
+
+def _get_local_ip() -> str:
+    """Return the machine's LAN IP address (not 127.0.0.1).
+
+    Uses the UDP connect trick: the OS picks the outbound interface for the
+    given destination without actually sending any packets.  Falls back to
+    socket.gethostbyname() and then "127.0.0.1" if both fail.
+    """
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            # Connecting to an external address forces the OS to choose the
+            # correct outbound interface.  No packets are sent.
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+    except OSError:
+        pass
+    try:
+        return socket.gethostbyname(socket.gethostname())
+    except OSError:
+        return "127.0.0.1"
+
+
+# Detected once at import time so all parts of the module share the same value.
+_LOCAL_IP: str = _get_local_ip()
+
+# Build the redirect base using the LAN IP so mobile browsers can reach FastAPI.
+# The relay listens on port 9000; FastAPI listens on port 8000.
+_FASTAPI_VIEW_REDIRECT_BASE = f"http://{_LOCAL_IP}:8000/api/v1/health-cards/view"
 
 # ---------------------------------------------------------------------------
 # In-memory last-scan cache (mirrors the FastAPI in-memory cache)
@@ -222,35 +264,39 @@ _HTML_TEMPLATE = """\
 </html>
 """
 
-_WAITING_CONTENT = """\
-<div class="card">
-  <div class="waiting-icon">&#x1F4F6;</div>
-  <h2 style="font-size:22px;font-weight:700;color:#1e40af;margin-bottom:8px;">
-    Waiting for NFC Scan...
-  </h2>
-  <p style="font-size:15px;color:#64748b;line-height:1.5;">
-    Hold an NFC health card against your phone's NFC sensor.<br>
-    Patient details will appear here.
-  </p>
-</div>
-<div style="margin-top:16px;padding:16px;background:#f8fafc;border-radius:12px;font-size:13px;color:#64748b;max-width:440px;width:100%;">
-  <strong style="color:#0369a1;">Testing tip:</strong><br>
-  Set NFC Tools Task URL to:<br>
-  <code style="background:#e0f2fe;padding:2px 6px;border-radius:4px;">http://192.168.100.6:9000/view/HC-2026-XXXXX</code><br>
-  Replace <code>HC-2026-XXXXX</code> with the health card code. No UID linking needed.
-</div>
-"""
+def _build_waiting_content() -> str:
+    """Return the 'waiting for scan' HTML block with the current local IP embedded."""
+    return (
+        '<div class="card">\n'
+        '  <div class="waiting-icon">&#x1F4F6;</div>\n'
+        '  <h2 style="font-size:22px;font-weight:700;color:#1e40af;margin-bottom:8px;">\n'
+        "    Waiting for NFC Scan...\n"
+        "  </h2>\n"
+        '  <p style="font-size:15px;color:#64748b;line-height:1.5;">\n'
+        "    Hold an NFC health card against your phone's NFC sensor.<br>\n"
+        "    Patient details will appear here.\n"
+        "  </p>\n"
+        "</div>\n"
+        '<div style="margin-top:16px;padding:16px;background:#f8fafc;border-radius:12px;'
+        'font-size:13px;color:#64748b;max-width:440px;width:100%;">\n'
+        '  <strong style="color:#0369a1;">Testing tip:</strong><br>\n'
+        "  Set NFC Tools Task URL to:<br>\n"
+        f'  <code style="background:#e0f2fe;padding:2px 6px;border-radius:4px;">'
+        f"http://{_LOCAL_IP}:{RELAY_PORT}/view/SH-2026-XXXXX</code><br>\n"
+        "  Replace <code>SH-2026-XXXXX</code> with the health card code. No UID linking needed.\n"
+        "</div>\n"
+    )
 
 
 def _build_patient_content(data: dict[str, Any]) -> str:
     patient = data.get("patient") or {}
     if not patient:
-        return _WAITING_CONTENT
+        return _build_waiting_content()
 
-    name = patient.get("full_name", "Unknown")
-    code = patient.get("patient_code", "")
-    dob = patient.get("date_of_birth", "—")
-    sex = patient.get("sex", "—").capitalize()
+    name  = patient.get("full_name", "Unknown")
+    code  = patient.get("patient_code", "")
+    dob   = patient.get("date_of_birth", "—")
+    sex   = patient.get("sex", "—").capitalize()
     blood = patient.get("blood_type", "—")
     allergies = patient.get("allergies", "None on record")
     ec_name = patient.get("emergency_contact_name") or "None on record"
@@ -311,7 +357,7 @@ def _do_scan(uid: str) -> dict[str, Any]:
         result: dict[str, Any] = resp.json()
         with _cache_lock:
             _last_result.update(
-                scanned_at=datetime.utcnow().isoformat() + "Z",
+                scanned_at=datetime.now(timezone.utc).isoformat(),
                 found=result.get("found", False),
                 uid=uid,
                 patient=result.get("patient"),
@@ -332,9 +378,11 @@ def _do_view(identifier: str) -> dict[str, Any]:
     """
     Call FastAPI GET /api/v1/health-cards/view/{identifier} and update local cache.
 
-    The identifier may be a health card code (HC-2026-00004) or a raw NFC UID
-    (C9:49:3B:07).  Uses GET — no request body.  Returns the result dict from
-    FastAPI, shaped like ViewByIdentifierResponse.
+    FastAPI now returns an HTML clinical summary (not JSON), so we check the HTTP
+    status code only.  The browser was already redirected to FastAPI's HTML page
+    before this background thread runs — this call only updates the relay monitor
+    cache (GET /).  Patient details are no longer extracted here; the full page is
+    served directly by FastAPI.
     """
     try:
         import requests  # noqa: PLC0415
@@ -342,22 +390,30 @@ def _do_view(identifier: str) -> dict[str, Any]:
 
         encoded = quote(identifier, safe="")
         url = f"{FASTAPI_VIEW_URL}/{encoded}"
-        resp = requests.get(url, timeout=10)
-        result: dict[str, Any] = resp.json()
+        # FastAPI view endpoint returns HTML — do NOT call resp.json().
+        resp = requests.get(url, timeout=10, allow_redirects=True)
+        found = resp.status_code == 200
+
         with _cache_lock:
             _last_result.update(
-                scanned_at=datetime.utcnow().isoformat() + "Z",
-                found=result.get("found", False),
+                scanned_at=datetime.now(timezone.utc).isoformat(),
+                found=found,
                 uid=identifier,
-                patient=result.get("patient"),
+                patient=None,  # HTML response — patient shown directly on FastAPI page
             )
         uid_prefix = identifier[:8]
-        if result.get("found") and result.get("patient"):
-            p = result["patient"]
-            log_scan(uid_prefix, p.get("full_name"), p.get("card_status", "unknown"))
+        suffix = "..." if len(identifier) > 8 else ""
+        if found:
+            print(
+                f"{_DIM}{_ts()}{_RESET} {_GREEN}{_BOLD}[VIEW]{_RESET}  "
+                f"{uid_prefix}{suffix} → card found — HTML served by FastAPI"
+            )
         else:
-            log_scan(uid_prefix, None, "not found")
-        return result
+            print(
+                f"{_DIM}{_ts()}{_RESET} {_YELLOW}[VIEW]{_RESET}  "
+                f"{uid_prefix}{suffix} → NOT FOUND (HTTP {resp.status_code})"
+            )
+        return {"found": found}
     except Exception as exc:  # noqa: BLE001
         log_error(f"FastAPI unreachable during view: {exc}")
         return {"found": False, "error": str(exc)}
@@ -405,7 +461,7 @@ def _build_html() -> str:
         data = dict(_last_result)
 
     if not data.get("found") or not data.get("patient"):
-        content = _WAITING_CONTENT
+        content = _build_waiting_content()
     else:
         content = _build_patient_content(data)
 
@@ -415,6 +471,26 @@ def _build_html() -> str:
 # ---------------------------------------------------------------------------
 # HTTP request handler
 # ---------------------------------------------------------------------------
+
+
+class RelayServer(ThreadingHTTPServer):
+    """Multi-threaded HTTP server for the NFC relay.
+
+    Subclasses ThreadingHTTPServer (available since Python 3.7) so each
+    incoming connection is handled in its own thread.  This prevents
+    Cloudflare's keep-alive probe connections from blocking while the relay
+    waits on a synchronous FastAPI call — which was the root cause of
+    WinError 10053/10054 errors and missed NFC scan responses.
+
+    Also silences the benign connection-drop errors that are unavoidable with
+    Cloudflare tunnels and mobile browsers.
+    """
+
+    def handle_error(self, request: object, client_address: object) -> None:
+        exc_type = sys.exc_info()[0]
+        if exc_type in (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+            return
+        super().handle_error(request, client_address)
 
 
 class RelayHandler(BaseHTTPRequestHandler):
@@ -472,16 +548,26 @@ class RelayHandler(BaseHTTPRequestHandler):
             self._send_html(200, _build_html_from_result(result))
         elif path.startswith("/view/"):
             # GET /view/HC-2026-00004 or /view/C9:49:3B:07
-            # NFC Tools Task URL testing: tap school ID → browser opens this URL.
-            # The patient is identified by the card code in the URL, not the UID.
-            from urllib.parse import unquote  # noqa: PLC0415
+            # NFC Tools Task URL: tap triggers browser to open this URL.
+            # We redirect the browser to FastAPI's view endpoint so it receives
+            # the rich clinical summary HTML directly (no relay rendering needed).
+            from urllib.parse import unquote, quote  # noqa: PLC0415
             identifier = unquote(path[len("/view/"):]).strip()
             if not identifier:
                 self._send_html(400, _build_error_html("Missing identifier in path"))
                 return
-            log_info(f"View by identifier: {identifier[:8]}{'...' if len(identifier) > 8 else ''}")
-            result = _do_view(identifier)
-            self._send_html(200, _build_html_from_result(result))
+            log_info(f"View redirect: {identifier[:8]}{'...' if len(identifier) > 8 else ''}")
+            # Also update the relay monitor cache in the background (non-blocking).
+            # _do_view is called in a thread so the redirect response is sent first.
+            import threading  # noqa: PLC0415
+            threading.Thread(target=_do_view, args=(identifier,), daemon=True).start()
+            # HTTP 302 redirect to FastAPI's rich HTML clinical summary endpoint.
+            encoded_id = quote(identifier, safe="")
+            redirect_url = f"{_FASTAPI_VIEW_REDIRECT_BASE}/{encoded_id}"
+            self.send_response(302)
+            self.send_header("Location", redirect_url)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
         else:
             self._send_json(404, {"error": "Not found"})
 
@@ -538,17 +624,21 @@ def main() -> None:
         )
         sys.exit(1)
 
-    server = HTTPServer((RELAY_HOST, RELAY_PORT), RelayHandler)
+    server = RelayServer((RELAY_HOST, RELAY_PORT), RelayHandler)
+
+    _base = f"http://{_LOCAL_IP}:{RELAY_PORT}"
 
     print(f"\n{_BOLD}{_CYAN}  SmartHealth Hub — NFC Wi-Fi Relay Server{_RESET}")
     print(f"  {'─' * 50}")
-    print(f"  Relay server     : http://0.0.0.0:{RELAY_PORT}")
-    print(f"  Monitor page     : http://192.168.100.6:{RELAY_PORT}/")
-    print(f"  Health check     : http://192.168.100.6:{RELAY_PORT}/status")
-    print(f"  NFC endpoint     : POST http://192.168.100.6:{RELAY_PORT}/nfc-uid")
-    print(f"  View by card/UID : GET  http://192.168.100.6:{RELAY_PORT}/view/{{HC-XXXX or UID}}")
+    print(f"  Relay server     : http://0.0.0.0:{RELAY_PORT}  (all interfaces)")
+    print(f"  Local IP         : {_CYAN}{_LOCAL_IP}{_RESET}  (auto-detected)")
+    print(f"  Monitor page     : {_base}/")
+    print(f"  Health check     : {_base}/status")
+    print(f"  NFC endpoint     : POST {_base}/nfc-uid")
+    print(f"  View (redirect)  : GET  {_base}/view/{{HC-XXXX or UID}}")
+    print(f"                     → 302 → {_FASTAPI_VIEW_REDIRECT_BASE}/{{identifier}}")
     print(f"  FastAPI scan     : {FASTAPI_SCAN_UID_URL}")
-    print(f"  FastAPI view     : {FASTAPI_VIEW_URL}/{{identifier}}")
+    print(f"  FastAPI view     : {FASTAPI_VIEW_URL}/{{identifier}}  (rich HTML)")
     print(f"  {'─' * 50}")
     print(f"  {_DIM}Press Ctrl-C to stop{_RESET}\n")
 

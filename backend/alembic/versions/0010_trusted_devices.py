@@ -32,7 +32,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql as pg
 
 revision: str = "0010"
-down_revision: str | None = "0008"
+down_revision: str | None = "0009"
 branch_labels: str | tuple[str, ...] | None = None
 depends_on: str | tuple[str, ...] | None = None
 

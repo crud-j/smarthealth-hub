@@ -152,16 +152,16 @@ def _error_response(
     detail: dict[str, Any] | None = None,
 ) -> JSONResponse:
     """Build the standard error JSON envelope."""
-    return JSONResponse(
-        status_code=status_code,
-        content={
-            "error": {
-                "code": code,
-                "message": message,
-                "detail": detail or {},
-            }
-        },
-    )
+    structured_detail = detail or {}
+    payload: dict[str, Any] = {
+        "error": {
+            "code": code,
+            "message": message,
+            "detail": structured_detail,
+        }
+    }
+    payload["detail"] = message if not structured_detail else structured_detail
+    return JSONResponse(status_code=status_code, content=payload)
 
 
 # ---------------------------------------------------------------------------

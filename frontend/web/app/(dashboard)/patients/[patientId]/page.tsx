@@ -1,64 +1,29 @@
 "use client";
-/**
- * Patient Profile Page.
- *
- * Shows:
- *   - Demographics card: all RHU header fields (name, age, sex, birthday,
- *     PhilHealth, contact, address)
- *   - Visit history table (case_no, date, visit type, chief complaint)
- *   - Priority flags (Senior, PWD, Pregnant)
- *   - Action buttons: Edit | Print Card | Verify
- *
- * PHI note: diagnosis and treatment_notes are NOT shown on this page.
- * The visit table shows only VisitSummary (no encrypted PHI) — clinical staff
- * must navigate to /visits/{id} for the full record.
- *
- * This page is a Client Component because it uses data hooks (usePatient,
- * usePatientVisits) which need the auth cookie from the browser.
- */
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { usePatient, usePatientVisits, useDeactivatePatient } from "@/hooks/usePatients";
+import { usePatient, usePatientVisits, useDeactivatePatient, useArchivePatient } from "@/hooks/usePatients";
 import { useCurrentUser } from "@/hooks/useAuth";
 import type { VisitSummary } from "@/types/patient";
 import React, { useEffect, useState } from "react";
 import ProfilePhotoUploader from "@/app/(dashboard)/patients/_components/ProfilePhotoUploader";
 
 // ---------------------------------------------------------------------------
-// Inline toast (matches the pattern used by ProfilePhotoUploader — avoids
-// pulling in an external toast dependency)
+// Toast
 // ---------------------------------------------------------------------------
 
-interface ToastState {
-  message: string;
-  kind: "success" | "error";
-}
+interface ToastState { message: string; kind: "success" | "error"; }
 
 function Toast({ toast, onDismiss }: { toast: ToastState; onDismiss: () => void }) {
   useEffect(() => {
     const timer = window.setTimeout(onDismiss, 4000);
     return () => window.clearTimeout(timer);
   }, [onDismiss]);
-
   return (
     <div
       role="status"
       aria-live="polite"
-      style={{
-        position: "fixed",
-        bottom: 24,
-        right: 24,
-        zIndex: 50,
-        padding: "0.75rem 1.25rem",
-        borderRadius: "0.5rem",
-        fontSize: "0.875rem",
-        fontWeight: 500,
-        color: "white",
-        background: toast.kind === "success" ? "#16a34a" : "#dc2626",
-        boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-        maxWidth: 320,
-      }}
+      className={`fixed bottom-6 right-6 z-50 max-w-xs rounded-xl px-5 py-3 text-sm font-medium text-white shadow-xl ${toast.kind === "success" ? "bg-[#16a34a]" : "bg-[#dc2626]"}`}
     >
       {toast.message}
     </div>
@@ -66,130 +31,165 @@ function Toast({ toast, onDismiss }: { toast: ToastState; onDismiss: () => void 
 }
 
 // ---------------------------------------------------------------------------
-// Helper: format date strings
+// Helpers
 // ---------------------------------------------------------------------------
 
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("en-PH", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
+  return new Date(iso).toLocaleDateString("en-PH", { year: "numeric", month: "long", day: "numeric" });
 }
 
 function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString("en-PH", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return new Date(iso).toLocaleString("en-PH", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 // ---------------------------------------------------------------------------
 // Flag badge
 // ---------------------------------------------------------------------------
 
-function FlagBadge({ label, color }: { label: string; color: string }) {
+const FLAG_COLORS: Record<string, string> = {
+  "Senior Citizen": "bg-violet-100 text-violet-700 border border-violet-200",
+  "PWD": "bg-sky-100 text-sky-700 border border-sky-200",
+  "Pregnant": "bg-pink-100 text-pink-700 border border-pink-200",
+  "Inactive": "bg-stone-100 text-stone-500 border border-stone-200",
+  "Archived": "bg-amber-100 text-amber-700 border border-amber-200",
+};
+
+function FlagBadge({ label }: { label: string }) {
   return (
-    <span
-      style={{
-        display: "inline-block",
-        padding: "0.25rem 0.75rem",
-        borderRadius: "9999px",
-        fontSize: "0.75rem",
-        fontWeight: 600,
-        background: color,
-        color: "white",
-        marginRight: "0.5rem",
-      }}
-    >
+    <span className={`inline-block rounded-full px-3 py-0.5 text-xs font-semibold ${FLAG_COLORS[label] ?? "bg-stone-100 text-stone-600 border border-stone-200"}`}>
       {label}
     </span>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Demographics card field
+// Demographics field
 // ---------------------------------------------------------------------------
 
 function DemoField({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div style={{ marginBottom: "0.875rem" }}>
-      <div
-        style={{
-          fontSize: "0.625rem",
-          fontWeight: 700,
-          color: "#b09090",
-          textTransform: "uppercase",
-          letterSpacing: "0.075em",
-          marginBottom: "0.125rem",
-        }}
-      >
-        {label}
-      </div>
-      <div style={{ fontSize: "0.875rem", color: "#1a0808", fontWeight: 500 }}>
-        {value || <span style={{ color: "#d4b0b0", fontStyle: "italic" }}>—</span>}
-      </div>
+    <div className="mb-4">
+      <p className="mb-0.5 text-[0.625rem] font-bold uppercase tracking-wider text-[#b09090]">{label}</p>
+      <p className="text-sm font-medium text-[#1a0808]">
+        {value || <span className="italic text-[#d4b0b0]">—</span>}
+      </p>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Visit table row
+// Panel wrapper
+// ---------------------------------------------------------------------------
+
+function Panel({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  return (
+    <div
+      className={`overflow-hidden rounded-xl bg-white border border-[#e5d4cc] ${className}`}
+      style={{ boxShadow: "0 2px 10px rgba(160,80,80,0.07)" }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function PanelHeader({ title, action }: { title: string; action?: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between px-5 py-4 bg-gradient-to-br from-[#fdf0eb] to-white border-b border-[#edd9d0]">
+      <div className="flex items-center gap-2.5">
+        <span className="inline-block h-4 w-1 rounded-full bg-gradient-to-b from-[#b5343e] to-[#e07070]" aria-hidden="true" />
+        <h2 className="text-sm font-bold text-[#1a0808]">{title}</h2>
+      </div>
+      {action}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Visit row
 // ---------------------------------------------------------------------------
 
 function VisitRow({ visit }: { visit: VisitSummary }) {
   return (
-    <tr style={{ borderBottom: "1px solid #f0e4dd" }}>
-      <td
-        style={{
-          padding: "0.625rem 1rem",
-          fontSize: "0.8125rem",
-          fontFamily: "monospace",
-          color: "#1a0808",
-          fontWeight: 500,
-          whiteSpace: "nowrap",
-        }}
-      >
-        {visit.caseNo ?? "—"}
+    <tr className="border-b border-[#f0e4dd] hover:bg-[#fdf5f0] transition-colors duration-150">
+      <td className="px-4 py-3 font-mono text-sm font-medium text-[#1a0808] whitespace-nowrap">{visit.caseNo ?? "—"}</td>
+      <td className="px-4 py-3 text-sm text-[#7a5252] whitespace-nowrap">{formatDateTime(visit.visitDate)}</td>
+      <td className="px-4 py-3 text-sm text-[#7a5252]">{visit.visitType.replace("_", " ").replace(/\b\w/g, (l) => l.toUpperCase())}</td>
+      <td className="max-w-[240px] overflow-hidden text-ellipsis whitespace-nowrap px-4 py-3 text-sm text-[#7a5252]" title={visit.chiefComplaint ?? undefined}>
+        {visit.chiefComplaint ?? <span className="italic text-[#d4b0b0]">—</span>}
       </td>
-      <td
-        style={{
-          padding: "0.625rem 1rem",
-          fontSize: "0.8125rem",
-          color: "#7a5252",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {formatDateTime(visit.visitDate)}
-      </td>
-      <td style={{ padding: "0.625rem 1rem", fontSize: "0.8125rem", color: "#7a5252" }}>
-        {visit.visitType.replace("_", " ").replace(/\b\w/g, (l) => l.toUpperCase())}
-      </td>
-      <td
-        style={{
-          padding: "0.625rem 1rem",
-          fontSize: "0.8125rem",
-          color: "#7a5252",
-          maxWidth: 240,
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-        }}
-        title={visit.chiefComplaint ?? undefined}
-      >
-        {visit.chiefComplaint ?? (
-          <span style={{ color: "#d4b0b0", fontStyle: "italic" }}>—</span>
-        )}
-      </td>
-      <td style={{ padding: "0.625rem 1rem", fontSize: "0.8125rem", color: "#7a5252" }}>
-        {visit.bloodPressure ?? "—"}
-      </td>
+      <td className="px-4 py-3 text-sm text-[#7a5252]">{visit.bloodPressure ?? "—"}</td>
     </tr>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Archive confirmation modal
+// ---------------------------------------------------------------------------
+
+function ArchiveModal({
+  patientName,
+  onConfirm,
+  onCancel,
+  loading,
+}: {
+  patientName: string;
+  onConfirm: (reason: string) => void;
+  onCancel: () => void;
+  loading: boolean;
+}) {
+  const [reason, setReason] = useState("");
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  function handleSubmit() {
+    if (reason.trim().length < 5) {
+      setLocalError("Reason must be at least 5 characters.");
+      return;
+    }
+    onConfirm(reason.trim());
+  }
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl" style={{ border: "1px solid #e5d4cc" }}>
+        <h2 className="text-base font-bold text-[#1a0808] mb-2">Archive Patient</h2>
+        <p className="text-sm text-[#7a5252] mb-4">
+          <strong>{patientName}</strong> will be removed from the main patient list.
+          All records are preserved and can be viewed in the Patient Archive.
+        </p>
+        <label className="block text-xs font-bold uppercase tracking-wider text-[#3d2222] mb-1">
+          Reason for archiving *
+        </label>
+        <textarea
+          rows={3}
+          value={reason}
+          onChange={(e) => { setReason(e.target.value); setLocalError(null); }}
+          placeholder="e.g. Patient relocated, duplicate record, transferred to another facility..."
+          className="w-full rounded-lg border border-[#e5d4cc] px-3 py-2 text-sm text-[#1a0808] focus:outline-none focus:ring-2 focus:ring-[#b5343e]"
+        />
+        {localError && (
+          <p className="text-xs text-red-600 mt-1">{localError}</p>
+        )}
+        <div className="flex gap-2 mt-4">
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={loading}
+            className="rounded-lg bg-[#b5343e] px-5 py-2 text-sm font-bold text-white hover:bg-[#9d1f29] disabled:opacity-60"
+          >
+            {loading ? "Archiving..." : "Archive Patient"}
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-lg border border-[#e5d4cc] px-5 py-2 text-sm font-semibold text-[#3d2222] hover:bg-[#fdf5f0]"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -197,200 +197,107 @@ function VisitRow({ visit }: { visit: VisitSummary }) {
 // Main component
 // ---------------------------------------------------------------------------
 
-export default function PatientProfilePage({
-  params,
-}: {
-  params: Promise<{ patientId: string }>;
-}) {
-  // Next.js 15: params is a Promise — use React.use() to unwrap
+export default function PatientProfilePage({ params }: { params: Promise<{ patientId: string }> }) {
   const { patientId } = React.use(params);
   const router = useRouter();
   const { data: patient, loading, error } = usePatient(patientId);
-  const {
-    data: visits,
-    loading: visitsLoading,
-    error: visitsError,
-  } = usePatientVisits(patientId);
+  const { data: visits, loading: visitsLoading, error: visitsError } = usePatientVisits(patientId);
   const { user: currentUser } = useCurrentUser();
   const { deactivatePatient, loading: deactivating } = useDeactivatePatient();
+  const { archivePatient, loading: archiving } = useArchivePatient();
   const [toast, setToast] = useState<ToastState | null>(null);
+  const [showArchiveModal, setShowArchiveModal] = useState(false);
 
   const isAdmin = currentUser?.role === "admin";
 
   async function handleDeactivate() {
-    if (
-      !confirm(
-        "This will mark the patient as inactive. They will no longer appear in search results. Continue?"
-      )
-    ) {
-      return;
-    }
+    if (!confirm("This will mark the patient as inactive. They will no longer appear in search results. Continue?")) return;
     const ok = await deactivatePatient(patientId);
+    if (ok) { router.push("/patients"); }
+    else { setToast({ message: "Could not deactivate patient. Please try again.", kind: "error" }); }
+  }
+
+  async function handleArchive(reason: string) {
+    const ok = await archivePatient(patientId, reason);
     if (ok) {
+      setShowArchiveModal(false);
       router.push("/patients");
     } else {
-      setToast({
-        message: "Could not deactivate patient. Please try again.",
-        kind: "error",
-      });
+      setShowArchiveModal(false);
+      setToast({ message: "Could not archive patient. Please try again.", kind: "error" });
     }
   }
 
-  // Track the current patient photo URL so the profile header updates after upload.
-  const apiBase =
-    process.env.NEXT_PUBLIC_API_BASE_URL?.replace("/api/v1", "") ??
-    "http://localhost:8000";
-
-  // Derive initial photo URL from the loaded patient record's photo_path.
-  // Once set by the patient data hook, we override it with a cache-busted
-  // URL whenever the uploader saves a new photo.
-  const initialPhotoUrl = patient?.photoPath
-    ? `${apiBase}${patient.photoPath}`
-    : null;
-
+  const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.replace("/api/v1", "") ?? "http://localhost:8000";
+  const initialPhotoUrl = patient?.photoPath ? `${apiBase}${patient.photoPath}` : null;
   const [currentPhotoUrl, setCurrentPhotoUrl] = useState<string | null>(null);
-
-  // Build the photo URL once the patient data is available.
-  // We point directly at the authenticated photo endpoint rather than the
-  // static /media path so auth cookies are always sent.
-  const photoEndpointUrl = patientId
-    ? `${apiBase}/api/v1/patients/${patientId}/photo`
-    : null;
+  const photoEndpointUrl = patientId ? `${apiBase}/api/v1/patients/${patientId}/photo` : null;
 
   if (loading) {
     return (
-      <div
-        style={{
-          padding: "3rem",
-          textAlign: "center",
-          color: "#b09090",
-          fontSize: "0.875rem",
-        }}
-      >
-        Loading patient profile...
+      <div className="mx-auto max-w-[960px]">
+        <div className="mb-6 space-y-3">
+          <div className="h-8 w-64 animate-pulse rounded-lg bg-[#e8d5cc]" />
+          <div className="h-5 w-40 animate-pulse rounded bg-[#e8d5cc]" />
+        </div>
+        <div className="space-y-4">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="h-40 animate-pulse rounded-xl bg-[#e8d5cc]" />
+          ))}
+        </div>
       </div>
     );
   }
 
   if (error || !patient) {
     return (
-      <div
-        style={{
-          padding: "1.5rem",
-          background: "#fef2f2",
-          border: "1px solid #fca5a5",
-          borderRadius: "0.5rem",
-          color: "#dc2626",
-          fontSize: "0.875rem",
-        }}
-      >
+      <div role="alert" className="rounded-xl border border-[#fcc] bg-[#fef2f2] p-6 text-sm font-medium text-[#b91c1c]">
         {error?.message ?? "Patient not found."}
       </div>
     );
   }
 
   return (
-    <div style={{ maxWidth: 960, margin: "0 auto" }}>
-      {/* Page header + actions */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "flex-start",
-          justifyContent: "space-between",
-          marginBottom: "1.5rem",
-          flexWrap: "wrap",
-          gap: "1rem",
-        }}
-      >
+    <div className="mx-auto max-w-[960px]">
+      {/* Page header */}
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
-          <div
-            style={{
-              fontSize: "0.75rem",
-              color: "#9b6e6e",
-              marginBottom: "0.25rem",
-              fontFamily: "monospace",
-            }}
-          >
-            {patient.patientCode}
-          </div>
-          <h1
-            style={{ fontSize: "1.5rem", fontFamily: "var(--font-dm-serif, Georgia, serif)", fontWeight: 400, color: "#1a0808", margin: 0 }}
-          >
-            {patient.fullName}
-          </h1>
-          <div style={{ marginTop: "0.5rem" }}>
-            {patient.isSenior && <FlagBadge label="Senior Citizen" color="#8b5cf6" />}
-            {patient.isPwd && <FlagBadge label="PWD" color="#0891b2" />}
-            {patient.isPregnant && <FlagBadge label="Pregnant" color="#db2777" />}
-            {!patient.isActive && (
-              <FlagBadge label="Inactive" color="#94a3b8" />
-            )}
+          <p className="mb-1 font-mono text-xs text-[#9b6e6e]">{patient.patientCode}</p>
+          <h1 className="text-3xl leading-tight text-[#1a0808] font-display">{patient.fullName}</h1>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {patient.isSenior && <FlagBadge label="Senior Citizen" />}
+            {patient.isPwd && <FlagBadge label="PWD" />}
+            {patient.isPregnant && <FlagBadge label="Pregnant" />}
+            {!patient.isActive && <FlagBadge label="Inactive" />}
+            {patient.archivedAt && <FlagBadge label="Archived" />}
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+        <div className="flex flex-wrap gap-2">
           <Link
             href={`/patients/${patientId}/edit`}
-            style={{
-              padding: "0.5rem 1rem",
-              border: "1px solid #e5d4cc",
-              borderRadius: "0.375rem",
-              fontSize: "0.875rem",
-              fontWeight: 500,
-              color: "#3d2222",
-              textDecoration: "none",
-              background: "white",
-            }}
+            className="rounded-lg border border-[#e5d4cc] bg-white px-4 py-2 text-sm font-semibold text-[#3d2222] hover:bg-[#fdf5f0] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e]"
           >
             Edit
           </Link>
           <Link
             href={`/health-cards/${patientId}/print`}
-            style={{
-              padding: "0.5rem 1rem",
-              border: "1px solid #e5d4cc",
-              borderRadius: "0.375rem",
-              fontSize: "0.875rem",
-              fontWeight: 500,
-              color: "#3d2222",
-              textDecoration: "none",
-              background: "white",
-            }}
+            className="rounded-lg border border-[#e5d4cc] bg-white px-4 py-2 text-sm font-semibold text-[#3d2222] hover:bg-[#fdf5f0] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e]"
           >
             Print Card
           </Link>
           <Link
             href={`/patients/${patientId}/verify`}
-            style={{
-              padding: "0.5rem 1rem",
-              background: "linear-gradient(135deg, #b5343e, #c94060)",
-              border: "none",
-              borderRadius: "0.375rem",
-              fontSize: "0.875rem",
-              fontWeight: 600,
-              color: "white",
-              textDecoration: "none",
-            }}
+            className="rounded-lg px-4 py-2 text-sm font-bold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e]"
+            style={{ background: "linear-gradient(135deg, #b5343e, #c94060)" }}
           >
             Verify
           </Link>
           <button
             type="button"
-            onClick={() => {
-              // Use the same-origin Next.js API proxy so the auth cookie that
-              // was set on the Next.js origin is included in the request.
-              window.open(`/api/v1/patients/${patientId}/summary-pdf`, "_blank");
-            }}
-            style={{
-              padding: "0.5rem 1rem",
-              background: "linear-gradient(135deg, #b5343e, #c94060)",
-              border: "none",
-              borderRadius: "0.375rem",
-              fontSize: "0.875rem",
-              fontWeight: 600,
-              color: "white",
-              cursor: "pointer",
-            }}
+            onClick={() => { window.open(`/api/v1/patients/${patientId}/summary-pdf`, "_blank"); }}
+            className="rounded-lg px-4 py-2 text-sm font-bold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e]"
+            style={{ background: "linear-gradient(135deg, #b5343e, #c94060)" }}
           >
             Download Summary
           </button>
@@ -399,18 +306,19 @@ export default function PatientProfilePage({
               type="button"
               onClick={() => void handleDeactivate()}
               disabled={deactivating}
-              style={{
-                padding: "0.5rem 1rem",
-                background: deactivating ? "#fca5a5" : "#fef2f2",
-                border: "1px solid #fca5a5",
-                borderRadius: "0.375rem",
-                fontSize: "0.875rem",
-                fontWeight: 600,
-                color: "#dc2626",
-                cursor: deactivating ? "not-allowed" : "pointer",
-              }}
+              className="rounded-lg border border-[#fca5a5] px-4 py-2 text-sm font-bold text-[#dc2626] hover:bg-[#fef2f2] disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#dc2626]"
             >
               {deactivating ? "Deactivating..." : "Deactivate Patient"}
+            </button>
+          )}
+          {isAdmin && !patient.archivedAt && (
+            <button
+              type="button"
+              onClick={() => setShowArchiveModal(true)}
+              disabled={archiving}
+              className="rounded-lg border border-amber-300 px-4 py-2 text-sm font-bold text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-500"
+            >
+              Archive Patient
             </button>
           )}
         </div>
@@ -418,337 +326,171 @@ export default function PatientProfilePage({
 
       {toast && <Toast toast={toast} onDismiss={() => setToast(null)} />}
 
-      {/* Demographics card */}
-      <div
-        style={{
-          background: "white",
-          border: "1px solid #e5d4cc",
-          borderRadius: "1rem",
-          padding: "1.5rem",
-          marginBottom: "1.25rem",
-          boxShadow: "0 2px 10px rgba(160,80,80,0.06)",
-        }}
-      >
-        <div
-          style={{
-            fontSize: "0.875rem",
-            fontWeight: 700,
-            color: "#1a0808",
-            marginBottom: "1.25rem",
-            paddingBottom: "0.5rem",
-            borderBottom: "1px solid #f0e4dd",
-            textTransform: "uppercase",
-            letterSpacing: "0.05em",
-            borderLeft: "3px solid #b5343e",
-            paddingLeft: "0.75rem",
-          }}
-        >
-          Patient Demographics
-        </div>
+      {showArchiveModal && patient && (
+        <ArchiveModal
+          patientName={patient.fullName}
+          onConfirm={(reason) => void handleArchive(reason)}
+          onCancel={() => setShowArchiveModal(false)}
+          loading={archiving}
+        />
+      )}
 
-        {/* Patient header: photo + name row */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "flex-start",
-            gap: "1.25rem",
-            marginBottom: "1.25rem",
-          }}
-        >
-          {/* Profile photo thumbnail */}
-          <div style={{ flexShrink: 0 }}>
-            <img
-              src={currentPhotoUrl ?? initialPhotoUrl ?? photoEndpointUrl ?? undefined}
-              alt="Patient profile photo"
-              width={80}
-              height={80}
-              onError={(e) => {
-                // If the photo endpoint returns 404 (no photo), hide the img
-                (e.currentTarget as HTMLImageElement).style.display = "none";
-              }}
-              style={{
-                width: 80,
-                height: 80,
-                objectFit: "cover",
-                borderRadius: "0.5rem",
-                border: "1px solid #e5d4cc",
-                background: "#f0e4dd",
-                display: "block",
-              }}
-            />
+      {/* Archived banner */}
+      {patient.archivedAt && (
+        <div className="mb-4 flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-5 py-3">
+          <span className="text-amber-600 text-lg">&#9888;</span>
+          <div>
+            <p className="text-sm font-semibold text-amber-800">
+              This patient record is archived
+              {patient.archivedAt && (
+                <> &mdash; since {new Date(patient.archivedAt).toLocaleDateString("en-PH", { dateStyle: "medium" })}</>
+              )}
+            </p>
+            {patient.archiveReason && (
+              <p className="text-xs text-amber-700">Reason: {patient.archiveReason}</p>
+            )}
+            {isAdmin && (
+              <Link href="/patients/archived" className="text-xs font-semibold text-amber-800 underline mt-0.5 inline-block">
+                View Patient Archive &rarr;
+              </Link>
+            )}
           </div>
+        </div>
+      )}
 
-          <div style={{ flex: 1 }}>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(3, 1fr)",
-                gap: "0 2rem",
-              }}
-            >
+      {/* Demographics card */}
+      <Panel className="mb-4">
+        <PanelHeader title="Patient Demographics" />
+        <div className="p-5">
+          <div className="flex items-start gap-5">
+            <div className="shrink-0">
+              <img
+                src={currentPhotoUrl ?? initialPhotoUrl ?? photoEndpointUrl ?? undefined}
+                alt="Patient profile photo"
+                width={80}
+                height={80}
+                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+                className="h-20 w-20 rounded-xl border border-[#e5d4cc] bg-[#f0e4dd] object-cover"
+              />
+            </div>
+            <div className="flex-1 grid grid-cols-1 gap-x-8 sm:grid-cols-2 lg:grid-cols-3">
               <DemoField label="Registration Date" value={formatDate(patient.createdAt)} />
-              <DemoField
-                label="Birthday"
-                value={`${formatDate(patient.birthDate)} (Age ${patient.age})`}
-              />
-              <DemoField
-                label="Sex"
-                value={patient.sex.charAt(0).toUpperCase() + patient.sex.slice(1)}
-              />
+              <DemoField label="Birthday" value={`${formatDate(patient.birthDate)} (Age ${patient.age})`} />
+              <DemoField label="Sex" value={patient.sex.charAt(0).toUpperCase() + patient.sex.slice(1)} />
               <DemoField label="Civil Status" value={patient.civilStatus} />
               <DemoField label="Contact No." value={patient.mobileNumber} />
               <DemoField
                 label="PhilHealth"
-                value={
-                  patient.philhealthNo
-                    ? `${patient.philhealthNo}${patient.philhealthMemberType ? ` (${patient.philhealthMemberType})` : ""}`
-                    : undefined
-                }
+                value={patient.philhealthNo ? `${patient.philhealthNo}${patient.philhealthMemberType ? ` (${patient.philhealthMemberType})` : ""}` : undefined}
               />
-              <DemoField
-                label="Complete Address"
-                value={patient.address}
-              />
+              <DemoField label="Complete Address" value={patient.address} />
               {(patient.guardianName || patient.guardianContact) && (
                 <DemoField
                   label="Guardian"
-                  value={
-                    `${patient.guardianName ?? ""}${patient.guardianContact ? ` — ${patient.guardianContact}` : ""}`.trim()
-                  }
+                  value={`${patient.guardianName ?? ""}${patient.guardianContact ? ` — ${patient.guardianContact}` : ""}`.trim()}
                 />
               )}
             </div>
           </div>
         </div>
-      </div>
+      </Panel>
 
-      {/* Profile photo uploader */}
+      {/* Photo uploader */}
       <ProfilePhotoUploader
         patientId={patientId}
         currentPhotoUrl={null}
         onPhotoSaved={(url) => {
-          // Force a cache-bust by appending a timestamp so the browser
-          // re-fetches the newly saved photo from the API endpoint.
-          const base =
-            (process.env.NEXT_PUBLIC_API_BASE_URL?.replace("/api/v1", "") ??
-              "http://localhost:8000") + url;
+          const base = (process.env.NEXT_PUBLIC_API_BASE_URL?.replace("/api/v1", "") ?? "http://localhost:8000") + url;
           setCurrentPhotoUrl(`${base}?t=${Date.now()}`);
         }}
       />
 
-      {/* Latest Recorded Vitals */}
+      {/* Latest vitals */}
       {!visitsLoading && visits.length > 0 && (
-        <div
-          style={{
-            background: "white",
-            border: "1px solid #e5d4cc",
-            borderRadius: "1rem",
-            padding: "1.5rem",
-            marginBottom: "1.25rem",
-            boxShadow: "0 2px 10px rgba(160,80,80,0.06)",
-          }}
-        >
-          <div
-            style={{
-              fontSize: "0.875rem",
-              fontWeight: 700,
-              color: "#1a0808",
-              marginBottom: "1.25rem",
-              paddingBottom: "0.5rem",
-              borderBottom: "1px solid #f0e4dd",
-              textTransform: "uppercase",
-              letterSpacing: "0.05em",
-            }}
-          >
-            Latest Recorded Vitals
+        <Panel className="mb-4">
+          <PanelHeader title="Latest Recorded Vitals" />
+          <div className="p-5">
+            <div className="grid grid-cols-2 gap-x-8 sm:grid-cols-4">
+              <DemoField label="Blood Pressure" value={visits[0].bloodPressure ?? "—"} />
+              <DemoField label="Temperature" value={visits[0].temperature != null ? `${visits[0].temperature}°C` : "—"} />
+              <DemoField label="Pulse Rate" value={visits[0].pulseRate != null ? `${visits[0].pulseRate} bpm` : "—"} />
+              <DemoField label="Last Visit" value={formatDateTime(visits[0].visitDate)} />
+            </div>
+            <div className="grid grid-cols-1 gap-x-8 sm:grid-cols-2">
+              <DemoField label="Chief Complaint" value={visits[0].chiefComplaint ?? "—"} />
+              <DemoField
+                label="Visit Type"
+                value={visits[0].visitType ? visits[0].visitType.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()) : "—"}
+              />
+            </div>
           </div>
-
-          {/* 4-column vitals grid */}
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(4, 1fr)",
-              gap: "0 2rem",
-              marginBottom: "0.75rem",
-            }}
-          >
-            <DemoField
-              label="Blood Pressure"
-              value={visits[0].bloodPressure ?? "—"}
-            />
-            <DemoField
-              label="Temperature"
-              value={
-                visits[0].temperature != null
-                  ? `${visits[0].temperature}°C`
-                  : "—"
-              }
-            />
-            <DemoField
-              label="Pulse Rate"
-              value={
-                visits[0].pulseRate != null
-                  ? `${visits[0].pulseRate} bpm`
-                  : "—"
-              }
-            />
-            <DemoField
-              label="Last Visit"
-              value={formatDateTime(visits[0].visitDate)}
-            />
-          </div>
-
-          {/* 2-column complaint / type row */}
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: "0 2rem",
-            }}
-          >
-            <DemoField
-              label="Chief Complaint"
-              value={visits[0].chiefComplaint ?? "—"}
-            />
-            <DemoField
-              label="Visit Type"
-              value={
-                visits[0].visitType
-                  ? visits[0].visitType
-                      .replace(/_/g, " ")
-                      .replace(/\b\w/g, (l) => l.toUpperCase())
-                  : "—"
-              }
-            />
-          </div>
-        </div>
+        </Panel>
       )}
 
       {/* Visit history */}
-      <div
-        style={{
-          background: "white",
-          border: "1px solid #e5d4cc",
-          borderRadius: "1rem",
-          overflow: "hidden",
-          boxShadow: "0 2px 10px rgba(160,80,80,0.06)",
-        }}
-      >
-        {/* Header row */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "1rem 1.5rem",
-            borderBottom: "1px solid #f0e4dd",
-          }}
-        >
-          <div
-            style={{
-              fontSize: "0.875rem",
-              fontWeight: 700,
-              color: "#1a0808",
-              textTransform: "uppercase",
-              letterSpacing: "0.05em",
-              borderLeft: "3px solid #b5343e",
-              paddingLeft: "0.75rem",
-            }}
-          >
-            Visit History
-          </div>
-          <Link
-            href={`/patients/${patientId}/visits/new`}
-            style={{
-              padding: "0.375rem 0.875rem",
-              background: "linear-gradient(135deg, #b5343e, #c94060)",
-              color: "white",
-              borderRadius: "0.375rem",
-              fontSize: "0.75rem",
-              fontWeight: 600,
-              textDecoration: "none",
-            }}
-          >
-            + Add Visit
-          </Link>
-        </div>
+      <Panel>
+        <PanelHeader
+          title="Visit History"
+          action={
+            <Link
+              href={`/patients/${patientId}/visits/new`}
+              className="rounded-lg px-3 py-1.5 text-xs font-bold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e]"
+              style={{ background: "linear-gradient(135deg, #b5343e, #c94060)" }}
+            >
+              + Add Visit
+            </Link>
+          }
+        />
 
         {visitsError && (
-          <div
-            style={{
-              padding: "1rem 1.5rem",
-              color: "#dc2626",
-              fontSize: "0.875rem",
-            }}
-          >
-            {visitsError.message}
-          </div>
+          <div role="alert" className="px-5 py-3 text-sm font-medium text-[#dc2626]">{visitsError.message}</div>
         )}
 
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead>
-            <tr style={{ background: "linear-gradient(135deg, #fdf0eb 0%, #ffffff 100%)" }}>
-              {[
-                "Case No.",
-                "Date / Time",
-                "Visit Type",
-                "Chief Complaint",
-                "BP",
-              ].map((h) => (
-                <th
-                  key={h}
-                  style={{
-                    padding: "0.5rem 1rem",
-                    textAlign: "left",
-                    fontSize: "0.6875rem",
-                    fontWeight: 600,
-                    color: "#9b6e6e",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.05em",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {visitsLoading && (
-              <tr>
-                <td
-                  colSpan={5}
-                  style={{
-                    padding: "2rem",
-                    textAlign: "center",
-                    color: "#b09090",
-                    fontSize: "0.875rem",
-                  }}
-                >
-                  Loading visits...
-                </td>
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse" aria-label="Visit history">
+            <thead>
+              <tr className="bg-gradient-to-br from-[#fdf5f0] to-white">
+                {["Case No.", "Date / Time", "Visit Type", "Chief Complaint", "BP"].map((h) => (
+                  <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wider text-[#9b6e6e] whitespace-nowrap">
+                    {h}
+                  </th>
+                ))}
               </tr>
-            )}
-            {!visitsLoading && visits.length === 0 && (
-              <tr>
-                <td
-                  colSpan={5}
-                  style={{
-                    padding: "2rem",
-                    textAlign: "center",
-                    color: "#b09090",
-                    fontSize: "0.875rem",
-                  }}
-                >
-                  No visits recorded yet.
-                </td>
-              </tr>
-            )}
-            {!visitsLoading &&
-              visits.map((v) => <VisitRow key={v.id} visit={v} />)}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {visitsLoading && (
+                <tr>
+                  <td colSpan={5}>
+                    {Array.from({ length: 4 }).map((_, i) => (
+                      <div key={i} className="flex items-center gap-3 border-b border-[#f0e4dd] px-4 py-3">
+                        <div className="h-4 w-16 animate-pulse rounded bg-[#e8d5cc]" />
+                        <div className="h-4 w-32 animate-pulse rounded bg-[#e8d5cc]" />
+                        <div className="h-4 w-24 animate-pulse rounded bg-[#e8d5cc]" />
+                      </div>
+                    ))}
+                  </td>
+                </tr>
+              )}
+              {!visitsLoading && visits.length === 0 && (
+                <tr>
+                  <td colSpan={5}>
+                    <div role="status" className="flex flex-col items-center justify-center py-16 text-center">
+                      <div className="mb-3 text-[#c08080]">
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+                          <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+                        </svg>
+                      </div>
+                      <p className="text-sm font-medium text-[#9b6e6e]">No visits recorded yet.</p>
+                      <p className="mt-1 text-xs text-[#c08080]">Add the first visit to start tracking this patient's care history.</p>
+                    </div>
+                  </td>
+                </tr>
+              )}
+              {!visitsLoading && visits.map((v) => <VisitRow key={v.id} visit={v} />)}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
     </div>
   );
 }

@@ -45,6 +45,10 @@ from app.schemas.sms_log import (
 
 logger = get_logger(__name__)
 
+from app.workers.sms_tasks import send_reminder_task as _send_reminder_task
+
+send_reminder_task = _send_reminder_task
+
 router = APIRouter(prefix="/sms", tags=["sms"])
 
 # Module-level flag so the "webhook secret not set" warning is logged once
@@ -246,7 +250,6 @@ async def send_manual_sms(
     # Default path — enqueue Celery task (fire-and-forget).
     response.status_code = 202
     try:
-        from app.workers.sms_tasks import send_reminder_task
         send_reminder_task.delay(str(sms_log_id))
     except Exception as exc:  # noqa: BLE001
         logger.warning(
@@ -511,4 +514,92 @@ async def sms_delivery_status_webhook(
             extra={"error": str(exc)},
         )
 
-    return {"received": True, "processed": True}
+    # -------------------------------------------------------------------
+    # Block 3 — Inbound STOP opt-out handling
+    # -------------------------------------------------------------------
+    # Detect when a patient replies STOP (or any variant: STOP, UNSUBSCRIBE,
+    # CANCEL, QUIT, END — following CTIA short-code standards).
+    # On a STOP reply, locate the patient by their mobile number and set
+    # sms_opt_out=True so the scheduler skips them going forward.
+    # Semaphore inbound reply payloads carry the sender's number in
+    # "from" or "sender_number" within model_extra; the reply text appears
+    # in "message", "text", or "body" (same fields as CONFIRM handling).
+    try:
+        from sqlalchemy import select as _sa_select
+        from app.models.patient import Patient as _Patient
+
+        _extra: dict = body.model_extra or {}  # type: ignore[type-arg]
+        _reply_text_stop: str | None = (
+            _extra.get("message")
+            or _extra.get("text")
+            or _extra.get("body")
+        )
+
+        # Fall back to body.status when it is not a known delivery-status value
+        # (Semaphore sometimes encodes the reply content there for inbound events).
+        if not _reply_text_stop:
+            _known_statuses_stop = {"sent", "delivered", "failed", "undelivered", "expired"}
+            if body.status.lower() not in _known_statuses_stop:
+                _reply_text_stop = body.status
+
+        if _reply_text_stop:
+            _normalised_stop = _reply_text_stop.strip().upper()
+            # CTIA opt-out keywords as per short-code standards.
+            _STOP_KEYWORDS = {"STOP", "UNSUBSCRIBE", "CANCEL", "QUIT", "END"}
+
+            if _normalised_stop in _STOP_KEYWORDS:
+                # Semaphore inbound reply payload carries the sender's number
+                # in "from" or "sender_number" extra fields.
+                _sender_number: str | None = (
+                    _extra.get("from")
+                    or _extra.get("sender_number")
+                    or _extra.get("sender")
+                )
+
+                if _sender_number:
+                    _opt_result = await db.execute(
+                        _sa_select(_Patient).where(
+                            _Patient.mobile_number == _sender_number,
+                            _Patient.is_active.is_(True),
+                        )
+                    )
+                    _opt_patient: _Patient | None = _opt_result.scalar_one_or_none()
+
+                    if _opt_patient is not None and not _opt_patient.sms_opt_out:
+                        _opt_patient.sms_opt_out = True
+                        await db.commit()
+                        logger.info(
+                            "Patient %s opted out of SMS",
+                            _opt_patient.id,
+                        )
+                    elif _opt_patient is not None:
+                        logger.debug(
+                            "STOP received for patient %s — already opted out",
+                            _opt_patient.id,
+                        )
+                    else:
+                        logger.info(
+                            "STOP received from number %s — no matching active patient found",
+                            _sender_number,
+                        )
+                else:
+                    logger.warning(
+                        "STOP reply received but sender number not present in webhook payload",
+                        extra={"reply_text": _reply_text_stop[:80]},
+                    )
+
+    except Exception as exc:  # noqa: BLE001
+        # Never let opt-out errors block a 200 response — Semaphore would retry.
+        logger.error(
+            "SMS opt-out (STOP) processing error",
+            extra={"error": str(exc)},
+        )
+
+    reason = _delivery_result.get("reason") if isinstance(_delivery_result, dict) else None
+    processed = bool(_delivery_result.get("delivery_processed")) if isinstance(_delivery_result, dict) else False
+    payload = {"received": True, "processed": processed}
+    if reason is not None:
+        payload["reason"] = reason
+    if isinstance(_delivery_result, dict) and _delivery_result.get("sms_log_id"):
+        payload["sms_log_id"] = _delivery_result["sms_log_id"]
+    return payload

@@ -83,6 +83,10 @@ USER appuser
 
 EXPOSE 8000
 
-# Run Alembic migrations then start uvicorn.
-# In production the CMD is overridden by docker-compose to add --workers.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Copy the entrypoint script that runs migrations before starting uvicorn.
+COPY scripts/ /app/scripts/
+RUN chmod +x /app/scripts/entrypoint.sh
+
+# Run migrations then hand off to uvicorn.
+# exec in entrypoint.sh ensures SIGTERM/SIGINT reach uvicorn directly.
+ENTRYPOINT ["/app/scripts/entrypoint.sh"]

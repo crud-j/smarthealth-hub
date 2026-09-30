@@ -2,68 +2,65 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import PatientListClient from "./_components/PatientListClient";
 
-export const metadata: Metadata = { title: "Patients — SmartHealth Hub" };
+export const metadata: Metadata = { 
+  title: "Patients — SmartHealth Hub" 
+}; //[cite: 2]
 
-/**
- * Patient list page.
- *
- * This is a Server Component shell that renders the page title and delegates
- * the interactive list/search/filter UI to the ``PatientListClient`` Client
- * Component island.
- *
- * SSR note: The initial patient list fetch happens client-side in the hook
- * (usePatientList) so the auth cookie is available for the API call.
- * This is correct because this route is behind JWT middleware and the
- * cookie is only available in a browser context.
- */
+// ---------------------------------------------------------------------------
+// Components
+// ---------------------------------------------------------------------------
+
+function PatientListSkeleton() {
+  return (
+    <div 
+      className="mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
+      aria-busy="true"
+      aria-label="Loading patient records"
+    >
+      <ul role="list" className="divide-y divide-slate-100">
+        {Array.from({ length: 6 }).map((_, i) => ( //[cite: 2]
+          <li key={i} className="flex items-center gap-4 px-6 py-4">
+            {/* Avatar Skeleton */}
+            <div className="h-10 w-10 shrink-0 animate-pulse rounded-full bg-slate-100" />
+            
+            {/* Text Skeleton */}
+            <div className="flex-1 space-y-2.5">
+              <div className="h-4 w-40 animate-pulse rounded bg-slate-100" />
+              <div className="h-3 w-24 animate-pulse rounded-sm bg-slate-50" />
+            </div>
+
+            {/* Desktop-only secondary column skeleton */}
+            <div className="hidden sm:block">
+              <div className="h-4 w-20 animate-pulse rounded bg-slate-100" />
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Page Layout
+// ---------------------------------------------------------------------------
+
 export default function PatientsPage() {
   return (
-    <div>
-      {/* Page header */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "flex-start",
-          justifyContent: "space-between",
-          marginBottom: "1.5rem",
-          flexWrap: "wrap",
-          gap: "1rem",
-        }}
-      >
-        <div>
-          <h1
-            style={{
-              fontSize: "1.5rem",
-              fontWeight: 700,
-              color: "#0f172a",
-              marginBottom: "0.25rem",
-            }}
-          >
-            Patients
-          </h1>
-          <p style={{ color: "#64748b", fontSize: "0.875rem" }}>
-            Search and manage patient records
-          </p>
-        </div>
-      </div>
+    <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      {/* Page Header */}
+      <header className="mb-8">
+        <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">
+          Patients
+        </h1>
+        <p className="mt-2 text-sm text-slate-500">
+          Search and manage patient records.
+        </p>
+      </header>
 
-      {/* Interactive list — client component */}
-      <Suspense
-        fallback={
-          <div
-            style={{
-              padding: "3rem",
-              textAlign: "center",
-              color: "#94a3b8",
-              fontSize: "0.875rem",
-            }}
-          >
-            Loading patients...
-          </div>
-        }
-      >
+      {/* Data Boundary */}
+      <Suspense fallback={<PatientListSkeleton />}>
         <PatientListClient />
       </Suspense>
-    </div>
+    </main>
   );
 }

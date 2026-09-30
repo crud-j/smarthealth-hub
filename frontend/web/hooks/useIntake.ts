@@ -10,6 +10,8 @@ export interface IntakeDraftResponse {
   token: string;
   expires_at: string;
   draft_data: Record<string, unknown> | null;
+  visit_purpose: string | null;
+  purpose_details: Record<string, unknown> | null;
 }
 
 export interface IntakeFinalizeResponse {

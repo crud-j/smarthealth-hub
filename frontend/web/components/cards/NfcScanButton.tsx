@@ -82,23 +82,12 @@ export default function NfcScanButton({
   // ── Unsupported browser ─────────────────────────────────────────────────
   if (status === "unsupported") {
     return (
-      <div
-        role="alert"
-        style={{
-          padding: "12px 16px",
-          borderRadius: "8px",
-          backgroundColor: "#fef9c3",
-          border: "1px solid #fde047",
-          color: "#713f12",
-          fontSize: "14px",
-        }}
-      >
+      <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
         <strong>NFC not supported on this browser or device.</strong>
-        <p style={{ margin: "4px 0 0", fontSize: "13px" }}>
-          {nfcSupport.reason ??
-            "NFC card scanning requires Chrome on an Android device with NFC hardware."}
+        <p className="mt-1 text-xs">
+          {nfcSupport.reason ?? "NFC card scanning requires Chrome on an Android device with NFC hardware."}
         </p>
-        <p style={{ margin: "4px 0 0", fontSize: "13px" }}>
+        <p className="mt-1 text-xs">
           Use the <strong>QR Code</strong> tab to scan the patient&apos;s card instead.
         </p>
       </div>
@@ -126,28 +115,15 @@ export default function NfcScanButton({
   const isLoading = status === "reading";
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+    <div className="flex flex-col gap-2">
       <button
         type="button"
         onClick={() => void handleScan()}
         disabled={disabled || isLoading}
         aria-busy={isLoading}
         aria-label={labels[status]}
-        style={{
-          padding: "14px 28px",
-          borderRadius: "8px",
-          backgroundColor: bg,
-          color: text,
-          border: `2px solid ${border}`,
-          fontSize: "15px",
-          fontWeight: "bold",
-          cursor: disabled || isLoading ? "not-allowed" : "pointer",
-          opacity: disabled ? 0.6 : 1,
-          display: "flex",
-          alignItems: "center",
-          gap: "10px",
-          transition: "background-color 0.2s",
-        }}
+        className={`flex items-center gap-2.5 rounded-xl border-2 px-7 py-3.5 text-sm font-bold transition-colors focus-visible:outline focus-visible:outline-2 ${disabled || isLoading ? "cursor-not-allowed" : "cursor-pointer"}`}
+        style={{ backgroundColor: bg, color: text, borderColor: border, opacity: disabled ? 0.6 : 1 }}
       >
         {/* NFC icon */}
         <svg
@@ -169,18 +145,9 @@ export default function NfcScanButton({
 
         {isLoading ? (
           <>
-            <span
-              style={{
-                display: "inline-block",
-                width: "14px",
-                height: "14px",
-                border: "2px solid rgba(255,255,255,0.3)",
-                borderTopColor: "#ffffff",
-                borderRadius: "50%",
-                animation: "spin 0.7s linear infinite",
-              }}
-              aria-hidden="true"
-            />
+            <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <circle cx="12" cy="12" r="10" strokeOpacity="0.3" /><path d="M12 2a10 10 0 0 1 10 10" />
+            </svg>
             {labels[status]}
           </>
         ) : (
@@ -190,26 +157,10 @@ export default function NfcScanButton({
 
       {/* Status messages */}
       {status === "error" && errorMessage && (
-        <p
-          role="alert"
-          style={{
-            fontSize: "13px",
-            color: "#dc2626",
-            margin: 0,
-          }}
-        >
-          {errorMessage}
-        </p>
+        <p role="alert" className="text-sm font-medium text-[#dc2626]">{errorMessage}</p>
       )}
       {status === "reading" && (
-        <p
-          aria-live="polite"
-          style={{
-            fontSize: "13px",
-            color: "#0891b2",
-            margin: 0,
-          }}
-        >
+        <p aria-live="polite" className="text-sm font-medium text-[#0891b2]">
           Hold the card flat against the back of the device...
         </p>
       )}

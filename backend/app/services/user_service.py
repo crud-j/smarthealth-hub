@@ -195,13 +195,28 @@ async def create_user(
             f"A user with mobile number '{data.mobile_number}' already exists."
         )
 
-    # 4. Generate temporary password (16-char URL-safe random string)
-    temp_pw = secrets.token_urlsafe(12)[:16]
+    # 4. Determine credential setup based on credential_mode.
+    #
+    #    "password" mode: use the caller-supplied password (already validated
+    #    by UserCreate.validate_credential_fields to be >= 8 chars).
+    #    A temp_pw token is *not* auto-generated when the admin sets the
+    #    password explicitly — the caller supplied it.
+    #
+    #    "passkey" mode: no password is set.  password_hash is stored as NULL.
+    #    The user will register a WebAuthn passkey on first login.
+    #    temp_pw is set to None so the SMS branch below skips the password text.
 
-    # 5. Hash password
-    pw_hash = hash_password(temp_pw)
+    temp_pw: str | None = None
 
-    # 6. Create User row
+    if data.credential_mode == "password":
+        # data.password is guaranteed non-None by the schema validator
+        pw_hash: str | None = hash_password(data.password)  # type: ignore[arg-type]
+        temp_pw = data.password
+    else:
+        # passkey — no password hash stored
+        pw_hash = None
+
+    # 5. Create User row
     user = User(
         id=uuid.uuid4(),
         full_name=data.full_name,
@@ -233,36 +248,50 @@ async def create_user(
     # Reload with role relationship for response serialisation
     await db.refresh(user, attribute_names=["role"])
 
-    # 7. Audit log
+    # 6. Audit log — includes credential_mode so the audit trail records how
+    #    the account was initialised.
     await write_audit_log(
         db=db,
         action="CREATE",
         entity_type="user",
         entity_id=user.id,
         user_id=created_by,
-        metadata={"email": str(data.email), "role": role.name},
+        metadata={
+            "email": str(data.email),
+            "role": role.name,
+            "credential_mode": data.credential_mode,
+        },
     )
 
     await db.commit()
     await db.refresh(user, attribute_names=["role"])
 
-    # 8. Enqueue welcome SMS with temporary password — fire-and-forget.
+    # 7. Enqueue welcome SMS — fire-and-forget.
     #    SMS failure must never block account creation.
-    try:
-        from app.workers.sms_tasks import send_sms_task  # noqa: PLC0415
-        send_sms_task.delay(
-            mobile_number=user.mobile_number,
-            message=(
-                f"Welcome to SmartHealth Hub. Your temporary password is: {temp_pw}. "
-                f"Please log in and change your password immediately."
-            ),
-        )
-    except Exception:
-        logger.warning(
-            "create_user: failed to enqueue welcome SMS for user %s — account created anyway.",
-            user.id,
-            exc_info=True,
-        )
+    #    For passkey-only accounts we send a welcome message without a password.
+    if data.send_welcome_sms:
+        try:
+            from app.workers.sms_tasks import send_sms_task  # noqa: PLC0415
+            if data.credential_mode == "password" and temp_pw is not None:
+                sms_message = (
+                    f"Welcome to SmartHealth Hub. Your temporary password is: {temp_pw}. "
+                    f"Please log in and change your password immediately."
+                )
+            else:
+                sms_message = (
+                    "Welcome to SmartHealth Hub. Your account has been created. "
+                    "Please register your passkey on first login."
+                )
+            send_sms_task.delay(
+                mobile_number=user.mobile_number,
+                message=sms_message,
+            )
+        except Exception:
+            logger.warning(
+                "create_user: failed to enqueue welcome SMS for user %s — account created anyway.",
+                user.id,
+                exc_info=True,
+            )
 
     return user, temp_pw
 
@@ -369,41 +398,88 @@ async def update_user(
     return user
 
 
-async def deactivate_user(
+async def delete_user(
     db: AsyncSession,
     user_id: uuid.UUID,
-    deactivated_by: uuid.UUID,
+    deleted_by: uuid.UUID,
 ) -> None:
     """
-    Soft-deactivate a staff user.
+    Permanently delete a staff user from the database.
 
-    Sets is_active=False and clears refresh_token_hash so the user's current
-    session is immediately invalidated (they cannot refresh their access token).
+    Steps (order matters):
+    1. Fetch the user — raise 404 if not found.
+    2. Write the DELETE audit log entry BEFORE the row is removed so the
+       record is preserved permanently.  audit_logs.user_id retains the UUID
+       as a historical soft-reference (the FK was dropped in migration 0024
+       because the audit_no_delete immutability rule made ON DELETE SET NULL
+       unworkable at the DB level).
+    3. Null out FK columns that have no cascade rule and would otherwise block
+       the DELETE with a FK violation:
+       - ``patients.created_by``  (RESTRICT, nullable)
+       - ``visits.recorded_by``   (RESTRICT, nullable)
+    4. Delete the user row.  ON DELETE CASCADE removes mfa_otps,
+       passkey_credentials, and trusted_devices automatically.
+    5. Attempt to revoke active JWT tokens via Redis (best-effort; token
+       expiry is the fallback if Redis is unavailable).
+    6. Commit.
 
     Args:
-        db:              Active async database session.
-        user_id:         UUID of the user to deactivate.
-        deactivated_by:  UUID of the Admin performing the deactivation.
+        db:         Active async database session.
+        user_id:    UUID of the user to permanently delete.
+        deleted_by: UUID of the Admin performing the deletion.
 
     Raises:
-        NotFoundError:  If user_id does not exist.
-        ConflictError:  If the user is already deactivated.
+        NotFoundError: If user_id does not exist.
     """
+    from app.models.patient import Patient  # noqa: PLC0415
+    from app.models.visit import Visit      # noqa: PLC0415
+
     user = await get_user(db, user_id)
 
-    if not user.is_active:
-        raise ConflictError("User is already deactivated.")
-
-    user.is_active = False
-    user.refresh_token_hash = None  # immediately invalidates outstanding session
-
+    # 1. Write audit log BEFORE deleting so the entry is permanently preserved.
+    #    audit_logs.user_id has no FK constraint (dropped in migration 0024),
+    #    so the UUID is stored as an immutable historical reference even after
+    #    the user account is removed.
     await write_audit_log(
         db=db,
         action="DELETE",
         entity_type="user",
         entity_id=user_id,
-        user_id=deactivated_by,
-        metadata={"reason": "admin_deactivation"},
+        user_id=deleted_by,
+        metadata={
+            "email": user.email,
+            "full_name": user.full_name,
+            "role": user.role.name if user.role else None,
+            "reason": "admin_hard_delete",
+        },
+    )
+    # Flush so the audit entry is visible within the transaction.
+    await db.flush()
+
+    # 2. Null out RESTRICT FKs (nullable, no cascade).
+    await db.execute(
+        sa.update(Patient)
+        .where(Patient.created_by == user_id)
+        .values(created_by=None)
+    )
+    await db.execute(
+        sa.update(Visit)
+        .where(Visit.recorded_by == user_id)
+        .values(recorded_by=None)
     )
 
+    # 3. Best-effort JWT token revocation — never blocks delete.
+    try:
+        from app.core.security import revoke_all_user_tokens  # noqa: PLC0415
+        await revoke_all_user_tokens(str(user_id))
+    except Exception:
+        logger.warning(
+            "delete_user: could not revoke tokens for user %s — proceeding with delete.",
+            user_id,
+            exc_info=True,
+        )
+
+    # 4. Delete the user row.  ON DELETE CASCADE removes mfa_otps,
+    #    passkey_credentials, and trusted_devices automatically.
+    await db.delete(user)
     await db.commit()

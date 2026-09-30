@@ -157,6 +157,32 @@ class Patient(Base):
     # Access to the photo file is gated behind JWT auth just like other PHI.
     photo_path: Mapped[str | None] = mapped_column(sa.String(512), nullable=True)
 
+    # Archive fields — distinct from is_active deactivation.
+    # An archived patient is hidden from normal list/search but all clinical
+    # records are preserved.  Only Admins can archive / unarchive.
+    archived_at: Mapped[datetime | None] = mapped_column(
+        sa.TIMESTAMP(timezone=True), nullable=True
+    )
+    archived_by: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        sa.ForeignKey("users.id", name="fk_patients_archived_by_users", ondelete="SET NULL"),
+        nullable=True,
+    )
+    archive_reason: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+
+    # SMS opt-out flag — set to True when the patient replies STOP to any
+    # reminder SMS.  The reminder scheduler skips patients with this flag.
+    sms_opt_out: Mapped[bool] = mapped_column(
+        sa.Boolean, nullable=False, default=False, server_default=sa.text("FALSE")
+    )
+
+    # Preferred language for SMS templates ('en' or 'fil').
+    # Defaults to English; used by the scheduler to select the correct template
+    # when Filipino ('fil') variants are added to the SMS_TEMPLATES registry.
+    preferred_language: Mapped[str] = mapped_column(
+        sa.String(5), nullable=False, default="en", server_default=sa.text("'en'")
+    )
+
     # How the patient record was entered.
     # Values: 'manual' (default) | 'ocr' (ID scan autofill) | 'pre_visit' (patient self-entry link)
     registration_data_source: Mapped[str] = mapped_column(

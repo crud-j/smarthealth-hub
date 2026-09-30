@@ -53,12 +53,45 @@ cp frontend/web/.env.local.example frontend/web/.env.local
 ```bash
 docker-compose -f infra/docker-compose.yml up db redis -d
 
+
+### Postgresql
+
+┌──────────────┬─────────────────────────────────────────┐
+│   Command    │              What it does               │
+├──────────────┼─────────────────────────────────────────┤
+│ \dt          │ List all tables                         │
+├──────────────┼─────────────────────────────────────────┤
+│ \d tablename │ Show columns/schema of a specific table │
+├──────────────┼─────────────────────────────────────────┤
+│ \dn          │ List schemas                            │
+├──────────────┼─────────────────────────────────────────┤
+│ \du          │ List users/roles                        │
+├──────────────┼─────────────────────────────────────────┤
+│ \l           │ List all databases                      │
+├──────────────┼─────────────────────────────────────────┤
+│ \q           │ Quit psql                               │
+└──────────────┴─────────────────────────────────────────┘
+
+`Quick example — view all patients:
+`SELECT patient_code, first_name, last_name, is_active FROM patients ORDER BY created_at DESC LIMIT 10;`
+
+`View all health cards:`
+`SELECT card_number, status, generation_status, issued_at FROM health_cards ORDER BY issued_at DESC;`
+
+
+Host:     localhost
+Port:     5445
+Database: smarthealthhub
+User:     shh_admin
+Password: SmartHealthHub
+
 ### Start cloudflare.
+
 
 ```bash
 cloudflared tunnel --url http://localhost:3000
 ```
-
+`unknownusers8273827@gmail.com`
 
 ### start windows celery
 
@@ -66,6 +99,9 @@ cloudflared tunnel --url http://localhost:3000
 celery -A app.workers.celery_app worker --loglevel=info -P solo
 celery -A app.workers.celery_app beat --loglevel=info
 ```
+
+### start nfc
+`python backend/scripts/nfc_relay_server.py`
 
 ### 4. Run database migrations
 
@@ -106,6 +142,42 @@ pnpm --filter web test
 
 # Backend only (from backend/)
 cd backend && pytest tests --cov=app --cov-report=term-missing
+```
+
+### Backend intake tests (fast, isolated)
+
+```bash
+# Run intake form submission tests (10 tests, ~5 seconds)
+cd backend
+pytest tests/test_intake_submission.py -v
+```
+
+### Seed real test data into dev database (visible in frontend)
+
+```bash
+# Seeds 3 intake tokens + 3 intake applications into the dev DB
+# Run while the backend dev server is running
+cd backend
+python -m tests.seed_intake_test_data
+```
+
+After seeding, open these URLs in the browser:
+
+| Token | URL |
+|---|---|
+| Token 1 (full draft) | http://localhost:3000/intake/aaaaaaaa-1111-1111-1111-aaaaaaaaaaaa |
+| Token 2 (partial) | http://localhost:3000/intake/bbbbbbbb-2222-2222-2222-bbbbbbbbbbbb |
+| Token 3 (fresh) | http://localhost:3000/intake/cccccccc-3333-3333-3333-cccccccccccc |
+
+View seeded applications in the dashboard:
+- `/registrations` — Pre-visit Drafts tab (tokens 1 & 2)
+- `/settings/intake-applications` — Online Applications (all 3 applications)
+
+### Full backend test suite with coverage
+
+```bash
+cd backend
+pytest tests --cov=app --cov-report=term-missing
 ```
 
 ---

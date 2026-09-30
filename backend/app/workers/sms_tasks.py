@@ -29,7 +29,7 @@ from celery import Task
 from app.workers.celery_app import celery_app
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.services.sms_service import SMSPermanentError, SMSTransientError
+from app.services.sms_service import SMSPermanentError, SMSService, SMSTransientError
 
 logger = get_logger(__name__)
 
@@ -150,11 +150,25 @@ async def _load_sms_log_and_send(sms_log_id: str) -> dict:  # type: ignore[type-
             raise
 
 
+class SendSmsTask(Task):
+    def on_failure(
+        self,
+        exc: Exception,
+        task_id: str,
+        args: list,  # type: ignore[type-arg]
+        kwargs: dict,  # type: ignore[type-arg]
+        einfo: object,
+    ) -> None:
+        _on_send_sms_task_failure(self, exc, task_id, args, kwargs, einfo)
+
+
 @celery_app.task(
+    base=SendSmsTask,
     bind=True,
     autoretry_for=(SMSTransientError,),
     retry_backoff=True,          # exponential backoff: 2s, 4s, 8s, …
-    retry_backoff_max=300,       # cap at 5 minutes between retries
+    retry_backoff_max=600,       # cap at 10 minutes between retries
+    retry_jitter=True,           # randomise backoff to avoid thundering herd
     max_retries=settings.SMS_MAX_RETRIES,
     name="sms.send_sms",
     acks_late=True,
@@ -236,11 +250,80 @@ def send_sms_task(self: Task, mobile_number: str, message: str) -> dict:  # type
     return _run_async(_send())
 
 
+def _on_send_sms_task_failure(
+    self: Task,
+    exc: Exception,
+    task_id: str,
+    args: list,  # type: ignore[type-arg]
+    kwargs: dict,  # type: ignore[type-arg]
+    einfo: object,
+) -> None:
+    """
+    Called by Celery when ``send_sms_task`` has exhausted all retries.
+
+    Actions:
+    1. Increment ``sms:failed_tasks:count`` in Redis (TTL 24 h) so the hourly
+       ``check_sms_failure_rate`` monitor can detect elevated failure rates.
+    2. Send an admin alert SMS via ``send_sms_sync`` if ``ADMIN_ALERT_PHONE``
+       is configured.  Alert failures are swallowed so they never mask the
+       original failure.
+    """
+    import redis as redis_lib
+
+    _log = logger
+
+    # Increment Redis failure counter (TTL 24 h).
+    try:
+        r = redis_lib.from_url(settings.REDIS_URL, decode_responses=True)
+        pipe = r.pipeline()
+        pipe.incr("sms:failed_tasks:count")
+        pipe.expire("sms:failed_tasks:count", 86400)  # 24 hours
+        pipe.execute()
+    except Exception as redis_exc:  # noqa: BLE001
+        _log.warning(
+            "send_sms_task on_failure: Redis counter update failed: %s",
+            redis_exc,
+        )
+
+    # Send admin alert SMS.
+    if settings.ADMIN_ALERT_PHONE:
+        from app.services.sms_service import send_sms_sync
+
+        mobile_number: str = args[0] if args else "unknown"
+        send_sms_sync(
+            phone=settings.ADMIN_ALERT_PHONE,
+            message=(
+                f"[SmartHealth Alert] send_sms_task failed permanently. "
+                f"Task ID: {task_id}. Target: {mobile_number}. "
+                f"Error: {type(exc).__name__}: {str(exc)[:80]}"
+            ),
+        )
+
+    _log.error(
+        "send_sms_task: all retries exhausted — permanent failure",
+        extra={"task_id": task_id, "exc_type": type(exc).__name__, "exc": str(exc)},
+    )
+
+
+class SendReminderTask(Task):
+    def on_failure(
+        self,
+        exc: Exception,
+        task_id: str,
+        args: list,  # type: ignore[type-arg]
+        kwargs: dict,  # type: ignore[type-arg]
+        einfo: object,
+    ) -> None:
+        _on_send_reminder_task_failure(self, exc, task_id, args, kwargs, einfo)
+
+
 @celery_app.task(
+    base=SendReminderTask,
     bind=True,
     autoretry_for=(SMSTransientError,),
     retry_backoff=True,          # exponential backoff: 2s, 4s, 8s, …
-    retry_backoff_max=300,       # cap at 5 minutes between retries
+    retry_backoff_max=600,       # cap at 10 minutes between retries
+    retry_jitter=True,           # randomise backoff to avoid thundering herd
     max_retries=settings.SMS_MAX_RETRIES,
     name="sms.send_reminder",
     # Ensure task ID is stable across retries so Flower shows one entry.
@@ -273,3 +356,72 @@ def send_reminder_task(self: Task, sms_log_id: str) -> dict:  # type: ignore[typ
         },
     )
     return _run_async(_load_sms_log_and_send(sms_log_id))
+
+
+def _on_send_reminder_task_failure(
+    self: Task,
+    exc: Exception,
+    task_id: str,
+    args: list,  # type: ignore[type-arg]
+    kwargs: dict,  # type: ignore[type-arg]
+    einfo: object,
+) -> None:
+    """
+    Called by Celery when ``send_reminder_task`` has exhausted all retries.
+
+    Actions:
+    1. Mark the ``sms_logs`` row status as ``'failed'`` in the database so the
+       SMS log viewer shows the correct final state (the row may still show
+       the transient ``'failed'`` state from the last retry attempt, but this
+       ensures it is committed even if the task body raised before its own
+       DB update could complete).
+    2. Increment ``sms:failed_tasks:count`` in Redis (TTL 24 h) for the hourly
+       ``check_sms_failure_rate`` monitoring task.
+    3. Send an admin alert SMS via ``send_sms_sync`` if ``ADMIN_ALERT_PHONE``
+       is configured.  Alert failures are swallowed so they never mask the
+       original failure.
+    """
+    import redis as redis_lib
+
+    _log = logger
+
+    sms_log_id: str = args[0] if args else "unknown"
+
+    # Increment Redis failure counter (TTL 24 h).
+    try:
+        r = redis_lib.from_url(settings.REDIS_URL, decode_responses=True)
+        pipe = r.pipeline()
+        pipe.incr("sms:failed_tasks:count")
+        pipe.expire("sms:failed_tasks:count", 86400)  # 24 hours
+        pipe.execute()
+    except Exception as redis_exc:  # noqa: BLE001
+        _log.warning(
+            "send_reminder_task on_failure: Redis counter update failed: %s",
+            redis_exc,
+        )
+
+    # Send admin alert SMS.
+    if settings.ADMIN_ALERT_PHONE:
+        from app.services.sms_service import send_sms_sync
+
+        send_sms_sync(
+            phone=settings.ADMIN_ALERT_PHONE,
+            message=(
+                f"[SmartHealth Alert] SMS reminder task failed permanently. "
+                f"Task ID: {task_id}. SMS log: {sms_log_id}. "
+                f"Error: {type(exc).__name__}: {str(exc)[:80]}"
+            ),
+        )
+
+    _log.error(
+        "send_reminder_task: all retries exhausted — permanent failure",
+        extra={
+            "task_id": task_id,
+            "sms_log_id": sms_log_id,
+            "exc_type": type(exc).__name__,
+            "exc": str(exc),
+        },
+    )
+
+
+

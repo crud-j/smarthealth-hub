@@ -69,6 +69,14 @@ class Appointment(Base):
         server_default=sa.text("'pending'"),
     )
     notes: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    # Set to True when the linked patient submits the pre-visit intake form.
+    # Updated automatically by the intake submission endpoint.
+    intake_completed: Mapped[bool] = mapped_column(
+        sa.Boolean, nullable=False, server_default=sa.false()
+    )
+    intake_submitted_at: Mapped[datetime | None] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         sa.ForeignKey(

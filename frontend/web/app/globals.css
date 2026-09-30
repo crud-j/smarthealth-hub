@@ -59,6 +59,7 @@
   --color-surface: #ffffff;
   --color-surface-alt: #f8fafc;
   --color-border: #e2e8f0;
+  --color-bg-canvas: #f2ece5;
 
   /* Text */
   --color-text-primary: #0f172a;
@@ -69,6 +70,24 @@
   --sidebar-width: 260px;
   --header-height: 64px;
   --border-radius: 8px;
+}
+
+/* ── Dark shell (sidebar + topbar) ──────────────────────────────────────── */
+[data-theme="dark-shell"] {
+  --shell-bg: #1a1a1a;
+  --shell-border: #2a2a2a;
+  --shell-accent: #D36969;
+  --shell-accent-subtle: rgba(211, 105, 105, 0.15);
+  --shell-text-primary: #ffffff;
+  --shell-text-muted: #666666;
+  --shell-text-secondary: #c0c0c0;
+}
+
+/* ── Display typeface for dashboard metric values ────────────────────────── */
+.font-display {
+  font-family: var(--font-dm-serif, Georgia, serif);
+  font-weight: 400;
+  letter-spacing: -0.02em;
 }
 
 /* Base reset / sensible defaults */

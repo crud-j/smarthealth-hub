@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <!--
   Health Card — Back Face Template (Jinja2 + WeasyPrint)
-  Shows medical summary, vitals, emergency contact, and patient flags.
-  Security invariant: no encrypted PHI (diagnosis/treatment_notes) is rendered here.
-  Layout: NFC-BACKDESIGN.svg as full-bleed background; data overlaid with targeted panels.
+  Comprehensive medical summary — dark red/rose theme (#8b1a1a).
+  Security invariant: no encrypted PHI (diagnosis/treatment_notes) rendered here.
+  Color theme: #8b1a1a matching the SVG front/back design.
 -->
 <html lang="en">
 <head>
@@ -21,29 +21,27 @@
     alt=""
   />
 
-  <!-- ── BHC Logo — top-left (small) ──────────────────────────────────────── -->
+  <!-- ── BHC Logo — top-left ───────────────────────────────────────────────── -->
   <img
     class="bhc-logo-back"
     src="../AssetsCardBackground/BHCFINALLOGO.svg"
     alt="BHC Seal"
   />
 
-  <!-- ── Header label ──────────────────────────────────────────────────────── -->
+  <!-- ── Header — right of logo ────────────────────────────────────────────── -->
   <div class="back-title-abs">
-    <span class="back-title-text">Medical Summary &amp; Emergency Information</span>
-    {%- if patient.photo_data_uri %}
-    <img
-      src="{{ patient.photo_data_uri }}"
-      alt="Patient Photo"
-      class="back-photo-thumb"
-    />
-    {%- endif %}
+    <span class="back-title-text">SmartHealth Hub</span>
+    <span class="back-card-no">{{ card.card_number }} &bull; V{{ card.card_version }}</span>
   </div>
 
   <!-- ── Main data panel ───────────────────────────────────────────────────── -->
+  <!--
+    right: 22mm keeps the circular BHC emblem in NFC-BACKDESIGN.svg visible.
+    Rows: address → blood type/allergies → vitals → emergency → philhealth → flags.
+  -->
   <div class="back-panel">
 
-    <!-- Address — prefer structured fields, fall back to legacy free-text address -->
+    <!-- Address -->
     <div class="bp-row bp-address">
       <span class="bp-label">Address</span>
       <span class="bp-value">
@@ -54,73 +52,76 @@
           {%- if patient.province %}, {{ patient.province }}{% endif -%}
         {%- elif patient.address and patient.address != "—" -%}
           {{ patient.address }}
-        {%- else -%}
-          —
-        {%- endif -%}
+        {%- else -%}—{%- endif -%}
       </span>
     </div>
 
-    <!-- Blood type + Allergies -->
+    <!-- Blood type (large) + Allergies/Alerts -->
     <div class="bp-row bp-two-col">
       <div class="bp-cell bp-blood">
         <span class="bp-label">Blood Type</span>
-        <span class="bp-blood-val">{{ patient.blood_type }}</span>
+        <span class="bp-blood-val">{{ patient.blood_type | default('—') }}</span>
       </div>
       <div class="bp-cell bp-allergy {% if patient.allergies and patient.allergies != 'None on record' and patient.allergies != 'None' %}has-allergies{% endif %}">
         <span class="bp-label">Allergies / Alerts</span>
-        <span class="bp-value">{{ patient.allergies }}</span>
+        <span class="bp-value">{{ patient.allergies | default('None on record') }}</span>
       </div>
     </div>
 
-    <!-- Vitals -->
+    <!-- Last vitals -->
     <div class="bp-row bp-vitals">
-      <span class="bp-label">Vital Signs</span>
+      <span class="bp-label">Last Vitals <span class="bp-visit-date">{{ patient.last_visit_date | default('—') }}</span></span>
       <div class="bp-vitals-grid">
         <div class="bp-vital">
           <span class="bpv-label">BP</span>
-          <span class="bpv-val">{{ patient.last_bp }}</span>
+          <span class="bpv-val">{{ patient.last_bp | default('—') }}</span>
         </div>
         <div class="bp-vital">
-          <span class="bpv-label">Wt</span>
-          <span class="bpv-val">{{ patient.last_weight }}kg</span>
+          <span class="bpv-label">Weight</span>
+          <span class="bpv-val">{{ patient.last_weight | default('—') }}</span>
         </div>
         <div class="bp-vital">
-          <span class="bpv-label">Ht</span>
-          <span class="bpv-val">{{ patient.last_height }}cm</span>
+          <span class="bpv-label">Height</span>
+          <span class="bpv-val">{{ patient.last_height | default('—') }}</span>
         </div>
         <div class="bp-vital">
           <span class="bpv-label">Temp</span>
-          <span class="bpv-val">{{ patient.last_temp }}°C</span>
+          <span class="bpv-val">{{ patient.last_temp | default('—') }}</span>
         </div>
       </div>
     </div>
 
-    <!-- Clinical notes -->
-    <div class="bp-row bp-notes">
-      <span class="bp-label">Clinical Notes</span>
-      <span class="bp-note-text">
-        {%- if patient.medical_notes -%}{{ patient.medical_notes }}{%- else -%}No additional notes.{%- endif -%}
-      </span>
-    </div>
-
-    <!-- Emergency contact — prefer dedicated emergency_contact fields, fall back to guardian -->
-    {%- if patient.emergency_contact_name and patient.emergency_contact_name != "—" %}
+    <!-- Emergency contact -->
+    {%- set ec_name = patient.emergency_contact_name
+          if patient.emergency_contact_name and patient.emergency_contact_name != "—"
+          else patient.guardian_name %}
+    {%- set ec_num  = patient.emergency_contact_number
+          if patient.emergency_contact_number and patient.emergency_contact_number != "—"
+          else patient.guardian_contact %}
+    {%- if ec_name and ec_name != "—" %}
     <div class="bp-row bp-guardian">
-      <span class="bp-label">Emergency Contact</span>
-      <span class="bp-value">{{ patient.emergency_contact_name }}
-        {%- if patient.emergency_contact_number and patient.emergency_contact_number != "—" %} &bull; {{ patient.emergency_contact_number }}{%- endif %}
-      </span>
-    </div>
-    {%- elif patient.guardian_name and patient.guardian_name != "—" %}
-    <div class="bp-row bp-guardian">
-      <span class="bp-label">Emergency Contact</span>
-      <span class="bp-value">{{ patient.guardian_name }}
-        {%- if patient.guardian_contact and patient.guardian_contact != "—" %} &bull; {{ patient.guardian_contact }}{%- endif %}
+      <span class="bp-label">Emergency</span>
+      <span class="bp-value">
+        {{ ec_name -}}
+        {%- if ec_num and ec_num != "—" %} &bull; {{ ec_num }}{%- endif %}
       </span>
     </div>
     {%- endif %}
 
-    <!-- Flags -->
+    <!-- PhilHealth — conditional -->
+    {%- if patient.philhealth_no and patient.philhealth_no != "—" %}
+    <div class="bp-row">
+      <span class="bp-label">PhilHealth</span>
+      <span class="bp-value bp-mono">
+        {{ patient.philhealth_no }}
+        {%- if patient.philhealth_member_type %}
+        <span class="ph-badge">{{ patient.philhealth_member_type | upper }}</span>
+        {%- endif %}
+      </span>
+    </div>
+    {%- endif %}
+
+    <!-- Priority flags -->
     {%- if patient.is_senior or patient.is_pwd or patient.is_pregnant %}
     <div class="bp-row bp-flags">
       {%- if patient.is_senior %}
@@ -139,8 +140,8 @@
 
   <!-- ── Footer ────────────────────────────────────────────────────────────── -->
   <div class="back-footer-abs">
-    <span class="back-footer-main">Property of {{ patient.barangay_name }}. If found, please return immediately.</span>
-    <span class="back-footer-sub">SmartHealth Hub — Thesis 2026</span>
+    <span class="back-footer-main">Property of {{ patient.barangay_name }}. If found, please return to nearest BHC.</span>
+    <span class="back-footer-sub">SmartHealth Hub &bull; Thesis 2026 &bull; {{ card.card_number }}</span>
   </div>
 
 </div>

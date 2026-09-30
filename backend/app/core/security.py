@@ -261,12 +261,14 @@ def create_refresh_token(subject: str) -> str:
     """
     Create a signed JWT refresh token.
 
-    Refresh tokens carry only the subject and no role claim — the role is
-    re-resolved from the DB when the access token is refreshed.
+    Refresh tokens include a unique JTI so rotation can distinguish the
+    current valid token from any older replayed token. The role is re-resolved
+    from the DB when the access token is refreshed.
 
     Payload fields:
       sub  — user UUID as string
       type — "refresh"
+      jti  — unique token ID for rotation tracking
       exp  — expiry (7 days by default)
       iat  — issued-at
 
@@ -281,6 +283,7 @@ def create_refresh_token(subject: str) -> str:
     payload: dict[str, Any] = {
         "sub": subject,
         "type": _TOKEN_TYPE_REFRESH,
+        "jti": str(uuid.uuid4()),
         "iat": now,
         "exp": expire,
     }

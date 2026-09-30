@@ -16,7 +16,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useUpdateVisit } from "@/hooks/usePatients";
 import { useCurrentUser } from "@/hooks/useAuth";
-import { swError } from "@/lib/swal";
+import { toast } from "@/lib/toast";
 import type { Visit } from "@/types/patient";
 import type { VisitUpdatePayload } from "@/types/patient";
 
@@ -148,7 +148,7 @@ export default function VisitEditModal({ visit, onClose, onSaved }: VisitEditMod
       onSaved();
       onClose();
     } else {
-      void swError("Failed to save visit. Please try again.");
+      toast.error("Failed to save visit. Please try again.");
     }
   }
 

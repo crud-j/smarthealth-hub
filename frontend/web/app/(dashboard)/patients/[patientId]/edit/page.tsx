@@ -1,19 +1,4 @@
 "use client";
-/**
- * Patient Edit Page.
- *
- * Pre-fills all registration fields from the existing patient record and
- * submits a PUT /patients/{id} with only the changed data.
- *
- * Visual style matches new/page.tsx (same inline-style constants, same
- * section card layout).
- *
- * RBAC:
- *   - All authenticated roles can reach this page (the Edit button is visible
- *     to all on the profile page).
- *   - isPwd and isPregnant flags are editable only by Admins; other roles see
- *     them as read-only text.
- */
 
 import { use, useEffect } from "react";
 import { useRouter } from "next/navigation";
@@ -22,64 +7,11 @@ import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { usePatient, useUpdatePatient } from "@/hooks/usePatients";
 import { useCurrentUser } from "@/hooks/useAuth";
-import { swSuccess, swError } from "@/lib/swal";
+import { toast } from "@/lib/toast";
 import { patientUpdateSchema, type PatientUpdateFormValues } from "@/lib/schemas/patient";
 
 // ---------------------------------------------------------------------------
-// Shared styles (identical to new/page.tsx)
-// ---------------------------------------------------------------------------
-
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  padding: "0.5rem 0.75rem",
-  border: "1px solid #e5d4cc",
-  borderRadius: "0.375rem",
-  fontSize: "0.875rem",
-  color: "#1a0808",
-  background: "white",
-  boxSizing: "border-box",
-};
-
-const labelStyle: React.CSSProperties = {
-  display: "block",
-  fontSize: "0.75rem",
-  fontWeight: 600,
-  color: "#3d2222",
-  marginBottom: "0.25rem",
-  textTransform: "uppercase",
-  letterSpacing: "0.05em",
-};
-
-const errorStyle: React.CSSProperties = {
-  color: "#dc2626",
-  fontSize: "0.75rem",
-  marginTop: "0.25rem",
-};
-
-const sectionStyle: React.CSSProperties = {
-  background: "white",
-  border: "1px solid #e5d4cc",
-  borderRadius: "1rem",
-  padding: "1.5rem",
-  marginBottom: "1.25rem",
-  boxShadow: "0 2px 10px rgba(160,80,80,0.06)",
-};
-
-const sectionHeadingStyle: React.CSSProperties = {
-  fontSize: "0.875rem",
-  fontWeight: 700,
-  color: "#1a0808",
-  marginBottom: "1rem",
-  paddingBottom: "0.5rem",
-  borderBottom: "1px solid #f0e4dd",
-  textTransform: "uppercase",
-  letterSpacing: "0.05em",
-  borderLeft: "3px solid #b5343e",
-  paddingLeft: "0.75rem",
-};
-
-// ---------------------------------------------------------------------------
-// Age computation helper
+// Helpers
 // ---------------------------------------------------------------------------
 
 function computeAge(birthDateStr: string): number {
@@ -92,47 +24,45 @@ function computeAge(birthDateStr: string): number {
   return Math.max(0, age);
 }
 
+// Shared classes
+const inputCls = "w-full rounded-lg border border-[#e5d4cc] bg-white px-3 py-2 text-sm text-[#1a0808] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e]";
+const labelCls = "mb-1 block text-xs font-semibold uppercase tracking-wider text-[#3d2222]";
+const errorCls = "mt-1 text-xs text-[#dc2626]";
+
 // ---------------------------------------------------------------------------
-// Read-only flag row (shown to non-Admin roles)
+// Section panel
 // ---------------------------------------------------------------------------
 
-function ReadOnlyFlag({
-  label,
-  active,
-  description,
-}: {
-  label: string;
-  active: boolean;
-  description: string;
-}) {
+function SectionPanel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div
-      style={{
-        display: "flex",
-        alignItems: "flex-start",
-        gap: "0.625rem",
-        fontSize: "0.875rem",
-        color: "#3d2222",
-        opacity: active ? 1 : 0.5,
-      }}
+      className="mb-4 overflow-hidden rounded-xl bg-white border border-[#e5d4cc]"
+      style={{ boxShadow: "0 2px 10px rgba(160,80,80,0.07)" }}
     >
+      <div className="flex items-center gap-2.5 px-5 py-4 bg-gradient-to-br from-[#fdf0eb] to-white border-b border-[#edd9d0]">
+        <span className="inline-block h-4 w-1 rounded-full bg-gradient-to-b from-[#b5343e] to-[#e07070]" aria-hidden="true" />
+        <h2 className="text-sm font-bold text-[#1a0808]">{title}</h2>
+      </div>
+      <div className="p-5">{children}</div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Read-only flag (non-admin roles)
+// ---------------------------------------------------------------------------
+
+function ReadOnlyFlag({ label, active, description }: { label: string; active: boolean; description: string }) {
+  return (
+    <div className={`flex items-start gap-3 text-sm text-[#3d2222] ${active ? "opacity-100" : "opacity-50"}`}>
       <span
-        style={{
-          display: "inline-block",
-          width: 18,
-          height: 18,
-          borderRadius: 3,
-          border: "2px solid #d4b0b0",
-          background: active ? "linear-gradient(135deg, #b5343e, #c94060)" : "white",
-          flexShrink: 0,
-          marginTop: 1,
-        }}
+        className="mt-0.5 h-4 w-4 shrink-0 rounded border-2 border-[#d4b0b0]"
+        style={{ background: active ? "linear-gradient(135deg, #b5343e, #c94060)" : "white" }}
       />
       <span>
-        <strong>{label}</strong>
-        {active ? " (set)" : " (not set)"}
+        <strong>{label}</strong> {active ? "(set)" : "(not set)"}
         <br />
-        <span style={{ color: "#9b6e6e", fontSize: "0.75rem" }}>{description}</span>
+        <span className="text-xs text-[#9b6e6e]">{description}</span>
       </span>
     </div>
   );
@@ -142,11 +72,7 @@ function ReadOnlyFlag({
 // Main component
 // ---------------------------------------------------------------------------
 
-export default function PatientEditPage({
-  params,
-}: {
-  params: Promise<{ patientId: string }>;
-}) {
+export default function PatientEditPage({ params }: { params: Promise<{ patientId: string }> }) {
   const { patientId } = use(params);
   const router = useRouter();
   const { data: patient, loading: patientLoading, error: patientError } = usePatient(patientId);
@@ -154,337 +80,147 @@ export default function PatientEditPage({
   const { user: currentUser } = useCurrentUser();
   const isAdmin = currentUser?.role === "admin";
 
-  const {
-    register,
-    handleSubmit,
-    control,
-    watch,
-    reset,
-    formState: { errors },
-  } = useForm<PatientUpdateFormValues>({
+  const { register, handleSubmit, control, watch, reset, formState: { errors } } = useForm<PatientUpdateFormValues>({
     resolver: zodResolver(patientUpdateSchema),
     mode: "onBlur",
-    defaultValues: {
-      isPwd: false,
-      isPregnant: false,
-      confirmDuplicate: false,
-      sex: undefined,
-      philhealthMemberType: null,
-      bloodType: null,
-    },
+    defaultValues: { isPwd: false, isPregnant: false, confirmDuplicate: false, sex: undefined, philhealthMemberType: null, bloodType: null },
   });
 
-  // Populate form once patient data arrives (only once via reset)
   useEffect(() => {
     if (patient) {
       reset({
-        firstName: patient.firstName,
-        middleName: patient.middleName ?? null,
-        lastName: patient.lastName,
-        birthDate: patient.birthDate,
-        sex: patient.sex,
-        civilStatus: patient.civilStatus ?? null,
-        mobileNumber: patient.mobileNumber ?? null,
-        address: patient.address,
-        guardianName: patient.guardianName ?? null,
-        guardianContact: patient.guardianContact ?? null,
-        philhealthNo: patient.philhealthNo ?? null,
-        philhealthMemberType: patient.philhealthMemberType ?? null,
-        isPwd: patient.isPwd,
-        isPregnant: patient.isPregnant,
-        bloodType: (patient.bloodType as PatientUpdateFormValues["bloodType"]) ?? null,
+        firstName: patient.firstName, middleName: patient.middleName ?? null,
+        lastName: patient.lastName, birthDate: patient.birthDate, sex: patient.sex,
+        civilStatus: patient.civilStatus ?? null, mobileNumber: patient.mobileNumber ?? null,
+        address: patient.address, guardianName: patient.guardianName ?? null,
+        guardianContact: patient.guardianContact ?? null, philhealthNo: patient.philhealthNo ?? null,
+        philhealthMemberType: patient.philhealthMemberType ?? null, isPwd: patient.isPwd,
+        isPregnant: patient.isPregnant, bloodType: (patient.bloodType as PatientUpdateFormValues["bloodType"]) ?? null,
         confirmDuplicate: false,
       });
     }
   }, [patient, reset]);
 
-  // Watch values needed for conditional rendering / display
   const birthDateValue = watch("birthDate") ?? "";
   const philhealthMemberTypeValue = watch("philhealthMemberType");
-
   const age = computeAge(birthDateValue);
 
   const onSubmit = async (data: PatientUpdateFormValues) => {
     const payload = {
-      firstName: data.firstName.trim(),
-      middleName: data.middleName?.trim() || undefined,
-      lastName: data.lastName.trim(),
-      birthDate: data.birthDate,
-      sex: data.sex,
-      civilStatus: data.civilStatus?.trim() || undefined,
-      mobileNumber: data.mobileNumber?.trim() || undefined,
-      address: data.address.trim(),
-      guardianName: data.guardianName?.trim() || undefined,
+      firstName: data.firstName.trim(), middleName: data.middleName?.trim() || undefined,
+      lastName: data.lastName.trim(), birthDate: data.birthDate, sex: data.sex,
+      civilStatus: data.civilStatus?.trim() || undefined, mobileNumber: data.mobileNumber?.trim() || undefined,
+      address: data.address.trim(), guardianName: data.guardianName?.trim() || undefined,
       guardianContact: data.guardianContact?.trim() || undefined,
       philhealthNo: data.philhealthNo?.trim() || undefined,
       philhealthMemberType: data.philhealthMemberType ?? undefined,
       isPwd: isAdmin ? (data.isPwd ?? false) : (patient?.isPwd ?? false),
       isPregnant: isAdmin ? (data.isPregnant ?? false) : (patient?.isPregnant ?? false),
-      bloodType: data.bloodType ?? null,
+      bloodType: data.bloodType === "" ? null : (data.bloodType ?? null),
     };
-
     const updated = await updatePatient(payload);
-    if (!updated) {
-      void swError(saveError?.message ?? "Failed to save patient record.");
-      return;
-    }
-
-    void swSuccess("Patient record updated successfully.");
+    if (!updated) { toast.error(saveError?.message ?? "Failed to save patient record."); return; }
+    toast.success("Patient record updated successfully.");
     router.push(`/patients/${patientId}`);
   };
 
-  // -------------------------------------------------------------------
-  // Loading / error states
-  // -------------------------------------------------------------------
-
   if (patientLoading) {
     return (
-      <div
-        style={{
-          padding: "3rem",
-          textAlign: "center",
-          color: "#b09090",
-          fontSize: "0.875rem",
-        }}
-      >
-        Loading patient record...
+      <div className="mx-auto max-w-[860px]">
+        <div className="mb-6 space-y-3">
+          <div className="h-8 w-64 animate-pulse rounded-lg bg-[#e8d5cc]" />
+          <div className="h-5 w-40 animate-pulse rounded bg-[#e8d5cc]" />
+        </div>
+        {Array.from({ length: 3 }).map((_, i) => (
+          <div key={i} className="mb-4 h-48 animate-pulse rounded-xl bg-[#e8d5cc]" />
+        ))}
       </div>
     );
   }
 
   if (patientError || !patient) {
     return (
-      <div
-        style={{
-          padding: "1.5rem",
-          background: "#fef2f2",
-          border: "1px solid #fca5a5",
-          borderRadius: "0.5rem",
-          color: "#dc2626",
-          fontSize: "0.875rem",
-        }}
-      >
+      <div role="alert" className="rounded-xl border border-[#fcc] bg-[#fef2f2] p-6 text-sm font-medium text-[#b91c1c]">
         {patientError?.message ?? "Patient not found."}
       </div>
     );
   }
 
-  // -------------------------------------------------------------------
-  // Render
-  // -------------------------------------------------------------------
-
   return (
-    <div style={{ maxWidth: 860, margin: "0 auto" }}>
+    <div className="mx-auto max-w-[860px]">
       {/* Page header */}
-      <div style={{ marginBottom: "1.5rem" }}>
+      <div className="mb-6">
         <Link
           href={`/patients/${patientId}`}
-          style={{
-            fontSize: "0.8125rem",
-            color: "#9b6e6e",
-            textDecoration: "none",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "0.25rem",
-            marginBottom: "0.5rem",
-          }}
+          className="mb-2 inline-flex items-center gap-1 text-xs font-medium text-[#9b6e6e] hover:text-[#b5343e] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e]"
         >
           &#8592; Back to Patient Profile
         </Link>
-        <h1
-          style={{
-            fontSize: "1.5rem",
-            fontFamily: "var(--font-dm-serif, Georgia, serif)",
-            fontWeight: 400,
-            color: "#1a0808",
-            marginBottom: "0.25rem",
-            marginTop: 0,
-          }}
-        >
-          Edit Patient: {patient.fullName}
-        </h1>
-        <div
-          style={{
-            fontFamily: "monospace",
-            fontSize: "0.8125rem",
-            color: "#9b6e6e",
-          }}
-        >
-          {patient.patientCode}
-        </div>
+        <h1 className="mt-1 text-3xl leading-tight text-[#1a0808] font-display">Edit Patient: {patient.fullName}</h1>
+        <p className="mt-1 font-mono text-sm text-[#9b6e6e]">{patient.patientCode}</p>
       </div>
 
       <form onSubmit={(e) => void handleSubmit(onSubmit)(e)} noValidate>
-        {/* ── Section 1: Patient Name ───────────────────────────────────── */}
-        <div style={sectionStyle}>
-          <div style={sectionHeadingStyle}>Patient&apos;s Full Name</div>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr 1fr",
-              gap: "1rem",
-            }}
-          >
-            {/* First Name */}
-            <div>
-              <label style={labelStyle} htmlFor="firstName">
-                First Name <span style={{ color: "#dc2626" }}>*</span>
-              </label>
-              <input
-                id="firstName"
-                type="text"
-                {...register("firstName")}
-                style={{
-                  ...inputStyle,
-                  borderColor: errors.firstName ? "#fca5a5" : "#e5d4cc",
-                }}
-                placeholder="e.g. Maria"
-              />
-              {errors.firstName && <p style={errorStyle}>{errors.firstName.message}</p>}
-            </div>
 
-            {/* Middle Name */}
+        {/* Name */}
+        <SectionPanel title="Patient's Full Name">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div>
-              <label style={labelStyle} htmlFor="middleName">
-                Middle Name
-              </label>
-              <input
-                id="middleName"
-                type="text"
-                {...register("middleName")}
-                style={inputStyle}
-                placeholder="e.g. Santos"
-              />
+              <label className={labelCls} htmlFor="firstName">First Name <span className="text-[#dc2626]">*</span></label>
+              <input id="firstName" type="text" {...register("firstName")}
+                className={`${inputCls} ${errors.firstName ? "border-[#fca5a5]" : ""}`} placeholder="e.g. Maria" />
+              {errors.firstName && <p className={errorCls}>{errors.firstName.message}</p>}
             </div>
-
-            {/* Last Name */}
             <div>
-              <label style={labelStyle} htmlFor="lastName">
-                Last Name <span style={{ color: "#dc2626" }}>*</span>
-              </label>
-              <input
-                id="lastName"
-                type="text"
-                {...register("lastName")}
-                style={{
-                  ...inputStyle,
-                  borderColor: errors.lastName ? "#fca5a5" : "#e5d4cc",
-                }}
-                placeholder="e.g. Dela Cruz"
-              />
-              {errors.lastName && <p style={errorStyle}>{errors.lastName.message}</p>}
+              <label className={labelCls} htmlFor="middleName">Middle Name</label>
+              <input id="middleName" type="text" {...register("middleName")} className={inputCls} placeholder="e.g. Santos" />
+            </div>
+            <div>
+              <label className={labelCls} htmlFor="lastName">Last Name <span className="text-[#dc2626]">*</span></label>
+              <input id="lastName" type="text" {...register("lastName")}
+                className={`${inputCls} ${errors.lastName ? "border-[#fca5a5]" : ""}`} placeholder="e.g. Dela Cruz" />
+              {errors.lastName && <p className={errorCls}>{errors.lastName.message}</p>}
             </div>
           </div>
-        </div>
+        </SectionPanel>
 
-        {/* ── Section 2: Demographics ───────────────────────────────────── */}
-        <div style={sectionStyle}>
-          <div style={sectionHeadingStyle}>Demographics</div>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr 1fr 1fr",
-              gap: "1rem",
-              marginBottom: "1rem",
-            }}
-          >
-            {/* Birthday */}
+        {/* Demographics */}
+        <SectionPanel title="Demographics">
+          <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-4">
             <div>
-              <label style={labelStyle} htmlFor="birthDate">
-                Birthday <span style={{ color: "#dc2626" }}>*</span>
-              </label>
-              <input
-                id="birthDate"
-                type="date"
-                max={new Date().toISOString().split("T")[0]}
-                {...register("birthDate")}
-                style={{
-                  ...inputStyle,
-                  borderColor: errors.birthDate ? "#fca5a5" : "#e5d4cc",
-                }}
-              />
-              {errors.birthDate && <p style={errorStyle}>{errors.birthDate.message}</p>}
+              <label className={labelCls} htmlFor="birthDate">Birthday <span className="text-[#dc2626]">*</span></label>
+              <input id="birthDate" type="date" max={new Date().toISOString().split("T")[0]} {...register("birthDate")}
+                className={`${inputCls} ${errors.birthDate ? "border-[#fca5a5]" : ""}`} />
+              {errors.birthDate && <p className={errorCls}>{errors.birthDate.message}</p>}
             </div>
-
-            {/* Age (computed — read-only) */}
             <div>
-              <label style={labelStyle}>Age</label>
-              <div
-                style={{
-                  ...inputStyle,
-                  background: "#fdf5f0",
-                  color: "#7a5252",
-                  display: "flex",
-                  alignItems: "center",
-                }}
-              >
+              <label className={labelCls}>Age</label>
+              <div className={`${inputCls} flex min-h-[40px] items-center gap-2 bg-[#fdf5f0] text-[#7a5252]`}>
                 {birthDateValue ? `${age} years old` : "—"}
-                {age >= 60 && (
-                  <span
-                    style={{
-                      marginLeft: "0.5rem",
-                      padding: "0.125rem 0.375rem",
-                      background: "#8b5cf6",
-                      color: "white",
-                      borderRadius: "9999px",
-                      fontSize: "0.625rem",
-                      fontWeight: 600,
-                    }}
-                  >
-                    SENIOR
-                  </span>
-                )}
+                {age >= 60 && <span className="rounded-full bg-violet-600 px-2 py-0.5 text-[0.625rem] font-bold text-white">SENIOR</span>}
               </div>
             </div>
-
-            {/* Sex */}
             <div>
-              <label style={labelStyle}>
-                Sex <span style={{ color: "#dc2626" }}>*</span>
-              </label>
+              <label className={labelCls}>Sex <span className="text-[#dc2626]">*</span></label>
               <Controller
                 name="sex"
                 control={control}
                 render={({ field }) => (
-                  <div style={{ display: "flex", gap: "1rem", paddingTop: "0.5rem" }}>
+                  <div className="flex gap-4 pt-2">
                     {(["male", "female"] as const).map((s) => (
-                      <label
-                        key={s}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "0.375rem",
-                          cursor: "pointer",
-                          fontSize: "0.875rem",
-                        }}
-                      >
-                        <input
-                          type="radio"
-                          name="sex"
-                          value={s}
-                          checked={field.value === s}
-                          onChange={() => field.onChange(s)}
-                          onBlur={field.onBlur}
-                        />
+                      <label key={s} className="flex cursor-pointer items-center gap-2 text-sm text-[#3d2222]">
+                        <input type="radio" name="sex" value={s} checked={field.value === s} onChange={() => field.onChange(s)} onBlur={field.onBlur} className="accent-[#b5343e]" />
                         {s.charAt(0).toUpperCase() + s.slice(1)}
                       </label>
                     ))}
                   </div>
                 )}
               />
-              {errors.sex && <p style={errorStyle}>{errors.sex.message}</p>}
+              {errors.sex && <p className={errorCls}>{errors.sex.message}</p>}
             </div>
-
-            {/* Civil Status */}
             <div>
-              <label style={labelStyle} htmlFor="civilStatus">
-                Civil Status
-              </label>
-              <select
-                id="civilStatus"
-                {...register("civilStatus")}
-                style={inputStyle}
-              >
+              <label className={labelCls} htmlFor="civilStatus">Civil Status</label>
+              <select id="civilStatus" {...register("civilStatus")} className={inputCls}>
                 <option value="">— Select —</option>
                 <option value="single">Single</option>
                 <option value="married">Married</option>
@@ -493,321 +229,122 @@ export default function PatientEditPage({
               </select>
             </div>
           </div>
-
-          {/* Blood Type — second row in Demographics */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 3fr", gap: "1rem" }}>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
             <div>
-              <label style={labelStyle} htmlFor="bloodType">
-                Blood Type
-              </label>
-              <select
-                id="bloodType"
-                {...register("bloodType")}
-                style={inputStyle}
-              >
+              <label className={labelCls} htmlFor="bloodType">Blood Type</label>
+              <select id="bloodType" {...register("bloodType")} className={inputCls}>
                 <option value="">— Unknown —</option>
-                <option value="A+">A+</option>
-                <option value="A-">A-</option>
-                <option value="B+">B+</option>
-                <option value="B-">B-</option>
-                <option value="AB+">AB+</option>
-                <option value="AB-">AB-</option>
-                <option value="O+">O+</option>
-                <option value="O-">O-</option>
-                <option value="Unknown">Unknown</option>
+                {["A+","A-","B+","B-","AB+","AB-","O+","O-","Unknown"].map((bt) => <option key={bt} value={bt}>{bt}</option>)}
               </select>
             </div>
           </div>
-        </div>
+        </SectionPanel>
 
-        {/* ── Section 3: PhilHealth ──────────────────────────────────────── */}
-        <div style={sectionStyle}>
-          <div style={sectionHeadingStyle}>PhilHealth</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
-            {/* PhilHealth Member Type */}
+        {/* PhilHealth */}
+        <SectionPanel title="PhilHealth">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <label style={labelStyle}>PhilHealth Member / Dependent</label>
+              <label className={labelCls}>PhilHealth Member / Dependent</label>
               <Controller
                 name="philhealthMemberType"
                 control={control}
                 render={({ field }) => (
-                  <div style={{ display: "flex", gap: "1rem", paddingTop: "0.5rem" }}>
-                    <label
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "0.375rem",
-                        cursor: "pointer",
-                        fontSize: "0.875rem",
-                      }}
-                    >
-                      <input
-                        type="radio"
-                        name="philhealthType"
-                        value=""
-                        checked={!field.value}
-                        onChange={() => field.onChange(null)}
-                        onBlur={field.onBlur}
-                      />
-                      No
-                    </label>
-                    <label
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "0.375rem",
-                        cursor: "pointer",
-                        fontSize: "0.875rem",
-                      }}
-                    >
-                      <input
-                        type="radio"
-                        name="philhealthType"
-                        value="member"
-                        checked={field.value === "member"}
-                        onChange={() => field.onChange("member")}
-                        onBlur={field.onBlur}
-                      />
-                      Member
-                    </label>
-                    <label
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "0.375rem",
-                        cursor: "pointer",
-                        fontSize: "0.875rem",
-                      }}
-                    >
-                      <input
-                        type="radio"
-                        name="philhealthType"
-                        value="dependent"
-                        checked={field.value === "dependent"}
-                        onChange={() => field.onChange("dependent")}
-                        onBlur={field.onBlur}
-                      />
-                      Dependent
-                    </label>
+                  <div className="flex gap-4 pt-2">
+                    {[{ value: null, label: "No" }, { value: "member", label: "Member" }, { value: "dependent", label: "Dependent" }].map((item) => (
+                      <label key={item.label} className="flex cursor-pointer items-center gap-2 text-sm text-[#3d2222]">
+                        <input type="radio" name="philhealthType" value={item.value ?? ""} checked={field.value === item.value}
+                          onChange={() => field.onChange(item.value)} onBlur={field.onBlur} className="accent-[#b5343e]" />
+                        {item.label}
+                      </label>
+                    ))}
                   </div>
                 )}
               />
             </div>
-
-            {/* PhilHealth No. */}
             <div>
-              <label style={labelStyle} htmlFor="philhealthNo">
-                PhilHealth No.
-              </label>
-              <input
-                id="philhealthNo"
-                type="text"
-                {...register("philhealthNo")}
-                style={inputStyle}
-                placeholder="e.g. 12-345678901-2"
-                disabled={!philhealthMemberTypeValue}
-              />
+              <label className={labelCls} htmlFor="philhealthNo">PhilHealth No.</label>
+              <input id="philhealthNo" type="text" {...register("philhealthNo")} className={inputCls}
+                placeholder="e.g. 12-345678901-2" disabled={!philhealthMemberTypeValue} />
             </div>
           </div>
-        </div>
+        </SectionPanel>
 
-        {/* ── Section 4: Contact ────────────────────────────────────────── */}
-        <div style={sectionStyle}>
-          <div style={sectionHeadingStyle}>Contact Information</div>
-          <div style={{ marginBottom: "1rem" }}>
-            <label style={labelStyle} htmlFor="mobileNumber">
-              Contact No.
-            </label>
-            <input
-              id="mobileNumber"
-              type="tel"
-              {...register("mobileNumber")}
-              style={{
-                ...inputStyle,
-                borderColor: errors.mobileNumber ? "#fca5a5" : "#e5d4cc",
-              }}
-              placeholder="e.g. 09171234567 or +639171234567"
-            />
-            {errors.mobileNumber && <p style={errorStyle}>{errors.mobileNumber.message}</p>}
-            <p style={{ fontSize: "0.75rem", color: "#b09090", marginTop: "0.25rem" }}>
-              Used for appointment reminders and SMS notifications
-            </p>
+        {/* Contact */}
+        <SectionPanel title="Contact Information">
+          <div className="mb-4">
+            <label className={labelCls} htmlFor="mobileNumber">Contact No.</label>
+            <input id="mobileNumber" type="tel" {...register("mobileNumber")}
+              className={`${inputCls} ${errors.mobileNumber ? "border-[#fca5a5]" : ""}`} placeholder="e.g. 09171234567 or +639171234567" />
+            {errors.mobileNumber && <p className={errorCls}>{errors.mobileNumber.message}</p>}
+            <p className="mt-1 text-xs text-[#9b6e6e]">Used for appointment reminders and SMS notifications</p>
           </div>
           <div>
-            <label style={labelStyle} htmlFor="address">
-              Complete Address <span style={{ color: "#dc2626" }}>*</span>
-            </label>
-            <textarea
-              id="address"
-              rows={3}
-              {...register("address")}
-              style={{
-                ...inputStyle,
-                resize: "vertical",
-                borderColor: errors.address ? "#fca5a5" : "#e5d4cc",
-              }}
-              placeholder="House No., Street, Barangay, Municipality, Province"
-            />
-            {errors.address && <p style={errorStyle}>{errors.address.message}</p>}
+            <label className={labelCls} htmlFor="address">Complete Address <span className="text-[#dc2626]">*</span></label>
+            <textarea id="address" rows={3} {...register("address")}
+              className={`${inputCls} resize-y ${errors.address ? "border-[#fca5a5]" : ""}`}
+              placeholder="House No., Street, Barangay, Municipality, Province" />
+            {errors.address && <p className={errorCls}>{errors.address.message}</p>}
           </div>
-        </div>
+        </SectionPanel>
 
-        {/* ── Section 5: Emergency Contact ─────────────────────────────── */}
-        <div style={sectionStyle}>
-          <div style={sectionHeadingStyle}>Emergency Contact</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+        {/* Emergency Contact */}
+        <SectionPanel title="Emergency Contact">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <label style={labelStyle} htmlFor="guardianName">
-                Contact Name
-              </label>
-              <input
-                id="guardianName"
-                type="text"
-                {...register("guardianName")}
-                style={inputStyle}
-                placeholder="Full name of emergency contact"
-              />
+              <label className={labelCls} htmlFor="guardianName">Contact Name</label>
+              <input id="guardianName" type="text" {...register("guardianName")} className={inputCls} placeholder="Full name of emergency contact" />
             </div>
             <div>
-              <label style={labelStyle} htmlFor="guardianContact">
-                Contact No.
-              </label>
-              <input
-                id="guardianContact"
-                type="tel"
-                {...register("guardianContact")}
-                style={{
-                  ...inputStyle,
-                  borderColor: errors.guardianContact ? "#fca5a5" : "#e5d4cc",
-                }}
-                placeholder="e.g. 09171234567"
-              />
-              {errors.guardianContact && (
-                <p style={errorStyle}>{errors.guardianContact.message}</p>
-              )}
+              <label className={labelCls} htmlFor="guardianContact">Contact No.</label>
+              <input id="guardianContact" type="tel" {...register("guardianContact")}
+                className={`${inputCls} ${errors.guardianContact ? "border-[#fca5a5]" : ""}`} placeholder="e.g. 09171234567" />
+              {errors.guardianContact && <p className={errorCls}>{errors.guardianContact.message}</p>}
             </div>
           </div>
-        </div>
+        </SectionPanel>
 
-        {/* ── Section 6: Special Flags ─────────────────────────────────── */}
-        <div style={sectionStyle}>
-          <div style={sectionHeadingStyle}>Special Status</div>
+        {/* Special Status */}
+        <SectionPanel title="Special Status">
           {isAdmin ? (
-            /* Admins can toggle flags */
-            <div style={{ display: "flex", gap: "2rem", flexWrap: "wrap" }}>
-              <label
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "0.625rem",
-                  cursor: "pointer",
-                  fontSize: "0.875rem",
-                  color: "#3d2222",
-                }}
-              >
-                <input
-                  type="checkbox"
-                  {...register("isPwd")}
-                  style={{ width: 18, height: 18 }}
-                />
-                <span>
-                  <strong>Person with Disability (PWD)</strong>
-                  <br />
-                  <span style={{ color: "#9b6e6e", fontSize: "0.75rem" }}>
-                    Priority queuing and accessibility accommodations
+            <div className="flex flex-wrap gap-6">
+              {[
+                { field: "isPwd" as const, label: "Person with Disability (PWD)", desc: "Priority queuing and accessibility accommodations" },
+                { field: "isPregnant" as const, label: "Currently Pregnant", desc: "Enables prenatal tracking and related reminders" },
+              ].map(({ field, label, desc }) => (
+                <label key={field} className="flex cursor-pointer items-start gap-3 text-sm text-[#3d2222]">
+                  <input type="checkbox" {...register(field)} className="mt-0.5 h-4 w-4 accent-[#b5343e]" />
+                  <span>
+                    <strong>{label}</strong>
+                    <br />
+                    <span className="text-xs text-[#9b6e6e]">{desc}</span>
                   </span>
-                </span>
-              </label>
-              <label
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "0.625rem",
-                  cursor: "pointer",
-                  fontSize: "0.875rem",
-                  color: "#3d2222",
-                }}
-              >
-                <input
-                  type="checkbox"
-                  {...register("isPregnant")}
-                  style={{ width: 18, height: 18 }}
-                />
-                <span>
-                  <strong>Currently Pregnant</strong>
-                  <br />
-                  <span style={{ color: "#9b6e6e", fontSize: "0.75rem" }}>
-                    Enables prenatal tracking and related reminders
-                  </span>
-                </span>
-              </label>
+                </label>
+              ))}
             </div>
           ) : (
-            /* Non-admins: read-only */
             <div>
-              <p
-                style={{
-                  fontSize: "0.75rem",
-                  color: "#b09090",
-                  marginBottom: "1rem",
-                  marginTop: 0,
-                }}
-              >
-                Special status flags can only be changed by an Administrator.
-              </p>
-              <div style={{ display: "flex", gap: "2rem", flexWrap: "wrap" }}>
-                <ReadOnlyFlag
-                  label="Person with Disability (PWD)"
-                  active={patient.isPwd}
-                  description="Priority queuing and accessibility accommodations"
-                />
-                <ReadOnlyFlag
-                  label="Currently Pregnant"
-                  active={patient.isPregnant}
-                  description="Enables prenatal tracking and related reminders"
-                />
+              <p className="mb-4 text-xs text-[#b09090]">Special status flags can only be changed by an Administrator.</p>
+              <div className="flex flex-wrap gap-6">
+                <ReadOnlyFlag label="Person with Disability (PWD)" active={patient.isPwd} description="Priority queuing and accessibility accommodations" />
+                <ReadOnlyFlag label="Currently Pregnant" active={patient.isPregnant} description="Enables prenatal tracking and related reminders" />
               </div>
             </div>
           )}
-        </div>
+        </SectionPanel>
 
-        {/* ── Submit controls ───────────────────────────────────────────── */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "flex-end",
-            gap: "0.75rem",
-            paddingTop: "0.5rem",
-          }}
-        >
+        {/* Submit controls */}
+        <div className="flex justify-end gap-3 pt-2">
           <Link
             href={`/patients/${patientId}`}
-            style={{
-              padding: "0.625rem 1.25rem",
-              border: "1px solid #e5d4cc",
-              borderRadius: "0.375rem",
-              fontSize: "0.875rem",
-              fontWeight: 500,
-              color: "#3d2222",
-              textDecoration: "none",
-              background: "white",
-            }}
+            className="rounded-lg border border-[#e5d4cc] bg-white px-5 py-2.5 text-sm font-semibold text-[#3d2222] hover:bg-[#fdf5f0] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e]"
           >
             Cancel
           </Link>
           <button
             type="submit"
             disabled={saving}
-            style={{
-              padding: "0.625rem 1.5rem",
-              background: saving ? "#d4a0a0" : "linear-gradient(135deg, #b5343e, #c94060)",
-              color: "white",
-              border: "none",
-              borderRadius: "0.375rem",
-              fontSize: "0.875rem",
-              fontWeight: 600,
-              cursor: saving ? "not-allowed" : "pointer",
-            }}
+            className="rounded-lg px-6 py-2.5 text-sm font-bold text-white disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e]"
+            style={{ background: saving ? "#d4a0a0" : "linear-gradient(135deg, #b5343e, #c94060)" }}
           >
             {saving ? "Saving..." : "Save Changes"}
           </button>

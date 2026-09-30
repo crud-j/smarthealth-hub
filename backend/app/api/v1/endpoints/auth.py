@@ -388,7 +388,7 @@ async def refresh_token(
         db=db,
         refresh_token=raw_refresh,
     )
-    # refresh_access_token is read-only (no DB mutations) — no commit needed.
+    await db.commit()
 
     set_auth_cookies(response, access_token=new_access, refresh_token=new_refresh)
 

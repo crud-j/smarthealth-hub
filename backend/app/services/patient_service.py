@@ -40,6 +40,7 @@ from app.schemas.patient import (
     PatientUpdate,
     PatientVerifySummary,
 )
+from app.services.analytics_service import _invalidate_analytics_cache
 from app.services.audit_service import write_audit_log
 from app.utils.encryption import decrypt_text, encrypt_text
 
@@ -144,6 +145,7 @@ async def list_patients(
     is_pwd: bool | None = None,
     is_pregnant: bool | None = None,
     sort: str | None = None,
+    include_archived: bool = False,
 ) -> tuple[list[Patient], int]:
     """
     Return a paginated list of active patients with optional text search and
@@ -160,19 +162,25 @@ async def list_patients(
         q:           Optional free-text search string.
         page:        1-based page number.
         page_size:   Number of results per page (max enforced by caller).
-        is_senior:   If not None, filter by is_senior flag.
-        is_pwd:      If not None, filter by is_pwd flag.
-        is_pregnant: If not None, filter by is_pregnant flag.
-        sort:        Optional sort key. ``"created_at"`` orders newest-first
-                     (used by the dashboard "Recently Registered Patients"
-                     panel). Any other value (or None) preserves the default
-                     alphabetical (last_name, first_name) ordering used by
-                     the patient list/search UI.
+        is_senior:        If not None, filter by is_senior flag.
+        is_pwd:           If not None, filter by is_pwd flag.
+        is_pregnant:      If not None, filter by is_pregnant flag.
+        sort:             Optional sort key. ``"created_at"`` orders newest-first
+                          (used by the dashboard "Recently Registered Patients"
+                          panel). Any other value (or None) preserves the default
+                          alphabetical (last_name, first_name) ordering used by
+                          the patient list/search UI.
+        include_archived: If True, include archived patients in results (Admin
+                          override). Defaults to False (archived excluded).
 
     Returns:
         Tuple of (list of Patient ORM objects, total_count).
     """
     base_query = sa.select(Patient).where(Patient.is_active.is_(True))
+
+    # Exclude archived patients unless caller explicitly opts in
+    if not include_archived:
+        base_query = base_query.where(Patient.archived_at.is_(None))
 
     if q:
         term = f"%{q}%"
@@ -392,6 +400,7 @@ async def create_patient(
 
     await db.commit()
     await db.refresh(patient)
+    await _invalidate_analytics_cache()
 
     logger.info(
         "Patient created",
@@ -474,6 +483,7 @@ async def update_patient(
 
     await db.commit()
     await db.refresh(patient)
+    await _invalidate_analytics_cache()
     return patient
 
 
@@ -510,6 +520,157 @@ async def deactivate_patient(
         "Patient deactivated",
         extra={"patient_id": str(patient_id), "by": str(by_id)},
     )
+
+
+async def archive_patient(
+    db: AsyncSession,
+    patient_id: uuid.UUID,
+    archived_by_id: uuid.UUID,
+    reason: str,
+    ip_address: str | None = None,
+) -> Patient:
+    """
+    Archive a patient — sets archived_at / archived_by / archive_reason.
+
+    Archived patients are excluded from the default list/search but all
+    clinical records are preserved and can be accessed by Admins.
+
+    Raises:
+        NotFoundError: If the patient does not exist.
+        ValueError:    If the patient is already archived.
+    """
+    patient = await get_patient(db, patient_id)
+
+    if patient.archived_at is not None:
+        raise ValueError(
+            f"Patient {patient.patient_code} is already archived."
+        )
+
+    patient.archived_at = datetime.now(UTC)
+    patient.archived_by = archived_by_id
+    patient.archive_reason = reason.strip()
+    patient.updated_at = datetime.now(UTC)  # type: ignore[assignment]
+
+    await write_audit_log(
+        db=db,
+        user_id=archived_by_id,
+        action="ARCHIVE",
+        entity_type="patient",
+        entity_id=patient_id,
+        metadata={
+            "patient_code": patient.patient_code,
+            "reason": reason,
+        },
+        ip_address=ip_address,
+    )
+
+    await db.commit()
+    await db.refresh(patient)
+    await _invalidate_analytics_cache()
+
+    logger.info(
+        "Patient archived",
+        extra={
+            "patient_id": str(patient_id),
+            "patient_code": patient.patient_code,
+            "by": str(archived_by_id),
+        },
+    )
+    return patient
+
+
+async def unarchive_patient(
+    db: AsyncSession,
+    patient_id: uuid.UUID,
+    unarchived_by_id: uuid.UUID,
+    ip_address: str | None = None,
+) -> Patient:
+    """
+    Unarchive (restore) a patient — clears archived_at / archived_by / archive_reason.
+
+    Raises:
+        NotFoundError: If the patient does not exist.
+        ValueError:    If the patient is not currently archived.
+    """
+    patient = await get_patient(db, patient_id)
+
+    if patient.archived_at is None:
+        raise ValueError(
+            f"Patient {patient.patient_code} is not currently archived."
+        )
+
+    previous_reason = patient.archive_reason
+    patient.archived_at = None
+    patient.archived_by = None
+    patient.archive_reason = None
+    patient.updated_at = datetime.now(UTC)  # type: ignore[assignment]
+
+    await write_audit_log(
+        db=db,
+        user_id=unarchived_by_id,
+        action="UNARCHIVE",
+        entity_type="patient",
+        entity_id=patient_id,
+        metadata={
+            "patient_code": patient.patient_code,
+            "previous_reason": previous_reason,
+        },
+        ip_address=ip_address,
+    )
+
+    await db.commit()
+    await db.refresh(patient)
+    await _invalidate_analytics_cache()
+
+    logger.info(
+        "Patient unarchived",
+        extra={
+            "patient_id": str(patient_id),
+            "patient_code": patient.patient_code,
+            "by": str(unarchived_by_id),
+        },
+    )
+    return patient
+
+
+async def list_archived_patients(
+    db: AsyncSession,
+    *,
+    q: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> tuple[list[Patient], int]:
+    """
+    Return a paginated list of archived patients.
+
+    Text search (``q``) matches last_name, first_name, patient_code, or
+    mobile_number — same logic as list_patients.
+    """
+    base_query = sa.select(Patient).where(Patient.archived_at.is_not(None))
+
+    if q:
+        term = f"%{q}%"
+        base_query = base_query.where(
+            Patient.last_name.ilike(term)
+            | Patient.first_name.ilike(term)
+            | Patient.patient_code.ilike(term)
+            | Patient.mobile_number.ilike(term)
+        )
+
+    count_result = await db.execute(
+        sa.select(sa.func.count()).select_from(base_query.subquery())
+    )
+    total: int = count_result.scalar_one()
+
+    rows = await db.execute(
+        base_query
+        .order_by(Patient.archived_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    patients: list[Patient] = list(rows.scalars().all())
+
+    return patients, total
 
 
 async def verify_patient(

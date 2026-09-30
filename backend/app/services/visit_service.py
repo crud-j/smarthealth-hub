@@ -35,6 +35,7 @@ from app.core.exceptions import NotFoundError
 from app.core.logging import get_logger
 from app.models.visit import Visit
 from app.schemas.visit import VisitCreate, VisitResponse, VisitSummary, VisitUpdate
+from app.services.analytics_service import _invalidate_analytics_cache
 from app.services.audit_service import write_audit_log
 from app.utils.encryption import decrypt_text, encrypt_text
 
@@ -231,6 +232,7 @@ async def create_visit(
 
     await db.commit()
     await db.refresh(visit)
+    await _invalidate_analytics_cache()
 
     logger.info(
         "Visit logged",

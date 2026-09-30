@@ -23,6 +23,14 @@ export type AppointmentType =
 // Core appointment record
 // ---------------------------------------------------------------------------
 
+export interface AppointmentIntakeSummary {
+  token: string;
+  visitPurpose: string | null;
+  purposeDetails: Record<string, unknown> | null;
+  draftSubmittedAt: string | null;
+  patientNameFromDraft: string | null;
+}
+
 export interface Appointment {
   id: string;
   patientId: string;
@@ -36,6 +44,12 @@ export interface Appointment {
   notes?: string | null;
   createdBy?: string | null;
   createdAt: string;
+  /** True when the patient has submitted the pre-visit intake form. */
+  intakeCompleted: boolean;
+  /** ISO datetime string when the patient submitted the intake form, or null. */
+  intakeSubmittedAt: string | null;
+  /** Nested intake summary — populated when intake_completed is true and a token exists. */
+  intakeSummary?: AppointmentIntakeSummary | null;
 }
 
 // ---------------------------------------------------------------------------

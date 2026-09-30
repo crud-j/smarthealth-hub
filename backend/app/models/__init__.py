@@ -28,6 +28,7 @@ from app.models.passkey_credential import PasskeyCredential  # noqa: F401
 from app.models.ai_risk_score import AiRiskScore  # noqa: F401
 from app.models.ai_anomaly_alert import AiAnomalyAlert  # noqa: F401
 from app.models.intake_token import PatientIntakeToken  # noqa: F401
+from app.models.intake_application import IntakeApplication  # noqa: F401
 
 __all__ = [
     "Role",
@@ -46,4 +47,5 @@ __all__ = [
     "AiRiskScore",
     "AiAnomalyAlert",
     "PatientIntakeToken",
+    "IntakeApplication",
 ]

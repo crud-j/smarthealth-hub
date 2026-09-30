@@ -25,7 +25,6 @@ from app.db.base import Base
 
 if TYPE_CHECKING:
     # Avoid circular imports at runtime; only needed for type checkers.
-    from app.models.audit_log import AuditLog
     from app.models.mfa_otp import MfaOtp
     from app.models.passkey_credential import PasskeyCredential
     from app.models.patient import Patient
@@ -101,7 +100,10 @@ class User(Base):
     full_name: Mapped[str] = mapped_column(sa.String(150), nullable=False)
     email: Mapped[str] = mapped_column(sa.String(150), unique=True, nullable=False)
     mobile_number: Mapped[str] = mapped_column(sa.String(20), unique=True, nullable=False)
-    password_hash: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    password_hash: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    refresh_token_hash: Mapped[str | None] = mapped_column(
+        sa.String(64), nullable=True, index=True
+    )
     role_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         sa.ForeignKey("roles.id", name="fk_users_role_id_roles"),
@@ -140,11 +142,9 @@ class User(Base):
         lazy="noload",
         cascade="all, delete-orphan",
     )
-    audit_logs: Mapped[list["AuditLog"]] = relationship(
-        "AuditLog",
-        back_populates="user",
-        lazy="noload",
-    )
+    # NOTE: audit_logs relationship removed — the FK from audit_logs.user_id
+    # to users.id was dropped in migration 0024 (incompatible with the
+    # audit_no_delete immutability rule).  Access audit logs via direct query.
     recorded_visits: Mapped[list["Visit"]] = relationship(
         "Visit",
         back_populates="recorder",

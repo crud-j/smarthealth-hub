@@ -158,3 +158,50 @@ export type PatientCreateFormValues = z.infer<typeof patientCreateSchema>;
  */
 export const patientUpdateSchema = patientCreateSchema;
 export type PatientUpdateFormValues = PatientCreateFormValues;
+
+/**
+ * Intake schema — used by the patient self-entry pre-visit form.
+ * Relaxed version of patientCreateSchema:
+ *   - Emergency contact fields are optional (patient may not have details on hand)
+ *   - Mobile number validated as PH format when non-empty, but not required
+ *   - civilStatus optional (BHW can fill this at finalization)
+ *   - address required (needed for patient record)
+ *   - All other required fields (name, birth date, sex, consent) are kept strict
+ */
+
+// PH mobile: validates format when non-empty, accepts empty/null as absent
+const optionalPhMobile = z
+  .string()
+  .max(20)
+  .optional()
+  .nullable()
+  .refine(
+    (v) => {
+      if (!v || !v.trim()) return true; // empty is fine — field is optional
+      const stripped = v.trim().replace(/[\s\-]/g, "");
+      return PH_MOBILE_RE.test(stripped);
+    },
+    {
+      message: "Must be a valid Philippine mobile number (e.g. 09171234567 or +639171234567).",
+    }
+  );
+
+export const patientIntakeSchema = patientCreateSchema.extend({
+  // Relax civil status — patient may not know the exact label
+  civilStatus: z.string().max(20).optional().nullable(),
+
+  // Mobile fields: validate format when provided, but not required
+  mobileNumber: optionalPhMobile,
+  emergencyContactName: z.string().max(150).optional().nullable(),
+  emergencyContactNumber: optionalPhMobile,
+  guardianContact: optionalPhMobile,
+
+  // birthDate: past date, not in the future, patient must be >= 0 years old
+  birthDate: z
+    .string()
+    .min(1, "Birth date is required.")
+    .refine((d) => !isNaN(new Date(d).getTime()), { message: "Enter a valid date." })
+    .refine((d) => new Date(d) <= new Date(), { message: "Birth date cannot be in the future." }),
+});
+
+export type PatientIntakeFormValues = z.infer<typeof patientIntakeSchema>;

@@ -61,6 +61,21 @@ class DashboardOverview(BaseSchema):
         ),
         ge=0,
     )
+    senior_count: int = Field(
+        default=0,
+        description="Number of active patients with is_senior=True.",
+        ge=0,
+    )
+    pwd_count: int = Field(
+        default=0,
+        description="Number of active patients with is_pwd=True.",
+        ge=0,
+    )
+    pregnant_count: int = Field(
+        default=0,
+        description="Number of active patients with is_pregnant=True.",
+        ge=0,
+    )
 
 
 class VaccinationCoverageItem(BaseSchema):
@@ -214,3 +229,32 @@ class VisitTrendsResponse(BaseSchema):
         description="Weekly visit counts ordered chronologically (earliest first).",
         default_factory=list,
     )
+
+
+class VisitTypeBreakdownItem(BaseSchema):
+    """
+    A single row in the visit-type breakdown.
+
+    visit_type: the string value stored in visits.visit_type
+                (e.g. 'consultation', 'prenatal_checkup', 'immunization_admin').
+    count:      number of visits of this type in the requested date range.
+    """
+
+    visit_type: str = Field(
+        description="Visit type label as stored in visits.visit_type."
+    )
+    count: int = Field(
+        description="Number of visits of this type in the requested date range.",
+        ge=0,
+    )
+
+
+class VisitTypeBreakdownResponse(BaseSchema):
+    """Full visit-type breakdown response including query parameters echoed back."""
+
+    items: list[VisitTypeBreakdownItem] = Field(
+        description="Visit-type counts ordered by count descending.",
+        default_factory=list,
+    )
+    from_date: date = Field(description="Start of the requested date range (inclusive).")
+    to_date: date = Field(description="End of the requested date range (inclusive).")

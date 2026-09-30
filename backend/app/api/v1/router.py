@@ -26,12 +26,14 @@ from app.api.v1.endpoints import (
     health_cards,
     immunizations,
     intake,
+    intake_applications,
     medical_history,
     mfa,
     passkey,
     patient_photos,
     patients,
     sms,
+    system_config,
     users,
 )
 
@@ -89,3 +91,11 @@ api_router.include_router(audit.router)
 # ── Pre-visit intake ──────────────────────────────────────────────────────────
 # intake.router carries prefix="/intake" — public routes (no JWT) + finalize (JWT required)
 api_router.include_router(intake.router)
+
+# ── Online intake applications (public self-registration) ─────────────────────
+# intake_applications.router carries prefix="/intake-applications"
+api_router.include_router(intake_applications.router)
+
+# ── System configuration ───────────────────────────────────────────────────────
+# system_config.router carries prefix="/system" — read-only, Admin only
+api_router.include_router(system_config.router)

@@ -7,7 +7,7 @@ import { apiFetch, ApiError } from "@/lib/api-client";
 import type { RecentPatientRow, UpcomingAppointmentRow } from "@/types/analytics";
 
 // ---------------------------------------------------------------------------
-// Panel data — parallel fetch, same logic as before
+// Backend Logic (Preserved)
 // ---------------------------------------------------------------------------
 
 interface PatientSummaryApiRow {
@@ -42,11 +42,25 @@ interface PaginatedAppointmentsApiResponse {
   page_size: number;
 }
 
+function usePendingRegistrationsCount() {
+  const [count, setCount] = useState<number | null>(null);
+  useEffect(() => {
+    void (async () => {
+      const [drafts, apps] = await Promise.allSettled([
+        apiFetch<{ token: string; has_draft: boolean }[]>("/intake/pending"),
+        apiFetch<{ total: number }>("/intake-applications?status=pending&page_size=1"),
+      ]);
+      const draftCount = drafts.status === "fulfilled" ? drafts.value.filter((t) => t.has_draft).length : 0;
+      const appCount = apps.status === "fulfilled" ? (apps.value as { total: number }).total : 0;
+      setCount(draftCount + appCount);
+    })();
+  }, []);
+  return count;
+}
+
 function usePanelData() {
   const [recentPatients, setRecentPatients] = useState<RecentPatientRow[]>([]);
-  const [upcomingAppointments, setUpcomingAppointments] = useState<
-    UpcomingAppointmentRow[]
-  >([]);
+  const [upcomingAppointments, setUpcomingAppointments] = useState<UpcomingAppointmentRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -55,12 +69,8 @@ function usePanelData() {
     async function loadPanels() {
       setLoading(true);
       const [patientsResult, appointmentsResult] = await Promise.allSettled([
-        apiFetch<PaginatedPatientsApiResponse>(
-          "/patients?sort=created_at&page_size=5"
-        ),
-        apiFetch<PaginatedAppointmentsApiResponse>(
-          "/appointments?status=pending&sort=scheduled_at&page_size=5"
-        ),
+        apiFetch<PaginatedPatientsApiResponse>("/patients?sort=created_at&page_size=5"),
+        apiFetch<PaginatedAppointmentsApiResponse>("/appointments?status=pending&sort=scheduled_at&page_size=5"),
       ]);
 
       if (cancelled) return;
@@ -109,19 +119,306 @@ function usePanelData() {
     }
 
     void loadPanels();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
 
   return { recentPatients, upcomingAppointments, loading };
 }
 
 // ---------------------------------------------------------------------------
-// Icons — accept size prop for watermark variants
+// UI Components
 // ---------------------------------------------------------------------------
 
-function IconPatients({ size = 22 }: { size?: number }) {
+const APPT_STATUS_CLASSES: Record<string, string> = {
+  pending:   "bg-yellow-50 text-yellow-800 ring-yellow-600/20",
+  confirmed: "bg-green-50 text-green-800 ring-green-600/20",
+  completed: "bg-slate-50 text-slate-800 ring-slate-600/20",
+  missed:    "bg-red-50 text-red-800 ring-red-600/20",
+  cancelled: "bg-slate-50 text-slate-500 ring-slate-500/20",
+};
+
+function StatusBadge({ status }: { status: string }) {
+  const badgeClass = APPT_STATUS_CLASSES[status] ?? APPT_STATUS_CLASSES.pending;
+  return (
+    <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ring-1 ring-inset ${badgeClass}`}>
+      {status.charAt(0).toUpperCase() + status.slice(1)}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Metric Card
+// ---------------------------------------------------------------------------
+
+type CardVariant = "primary" | "default" | "rose-tint";
+
+interface MetricCardProps {
+  title: string;
+  value: number | null;
+  icon: React.ReactNode;
+  variant?: CardVariant;
+  href?: string;
+  loading?: boolean;
+}
+
+function MetricCard({ title, value, icon, variant = "default", href, loading }: MetricCardProps) {
+  const isPrimary = variant === "primary";
+
+  const baseStyles = "relative flex h-full flex-col overflow-hidden rounded-xl p-6 transition-all shadow-sm focus-within:ring-2 focus-within:ring-rose-500 focus-within:ring-offset-2";
+  
+  const variants = {
+    primary: "bg-rose-600 text-white hover:bg-rose-700",
+    default: "bg-white text-slate-900 border border-slate-200 hover:border-slate-300",
+    "rose-tint": "bg-rose-50 text-rose-900 border border-rose-100 hover:border-rose-200",
+  };
+
+  const labelVariants = {
+    primary: "text-rose-100",
+    default: "text-slate-500",
+    "rose-tint": "text-rose-600",
+  };
+
+  const inner = (
+    <>
+      <h3 className={`text-sm font-medium ${labelVariants[variant]}`}>
+        {title}
+      </h3>
+      
+      {loading ? (
+        <div 
+          className="mt-4 h-10 w-24 animate-pulse rounded bg-current opacity-20" 
+          aria-hidden="true" 
+        />
+      ) : (
+        <p className={`mt-2 text-3xl font-semibold tracking-tight ${isPrimary ? 'text-4xl' : ''}`}>
+          {value?.toLocaleString() ?? "—"}
+        </p>
+      )}
+
+      {isPrimary && href && !loading && (
+        <div className="mt-auto pt-4 flex items-center gap-1.5 text-sm font-medium text-rose-100">
+          View all records <IconArrow />
+        </div>
+      )}
+
+      <div 
+        className={`absolute bottom-4 right-4 pointer-events-none transition-transform group-hover:scale-110 ${isPrimary ? 'text-rose-400 opacity-30' : 'text-slate-300 opacity-50'}`}
+        aria-hidden="true"
+      >
+        {icon}
+      </div>
+    </>
+  );
+
+  if (href) {
+    return (
+      <Link href={href} className={`group block focus-visible:outline-none ${baseStyles} ${variants[variant]}`}>
+        {inner}
+      </Link>
+    );
+  }
+
+  return <div className={`${baseStyles} ${variants[variant]}`}>{inner}</div>;
+}
+
+// ---------------------------------------------------------------------------
+// Page Layout
+// ---------------------------------------------------------------------------
+
+export default function DashboardPage() {
+  const { data, loading: overviewLoading, error } = useDashboardOverview();
+  const { recentPatients, upcomingAppointments, loading: panelsLoading } = usePanelData();
+  const pendingRegistrations = usePendingRegistrationsCount();
+
+  return (
+    <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      {/* Header */}
+      <header className="mb-8">
+        <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">Dashboard</h1>
+        <p className="mt-2 text-sm text-slate-500">
+          Real-time health center analytics and overview.
+        </p>
+      </header>
+
+      {/* Error State */}
+      {error && (
+        <div role="alert" className="mb-8 rounded-lg border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-800">
+          Could not load dashboard data: {error.message}
+        </div>
+      )}
+
+      {/* Metric Grid */}
+      <section className="mb-8 grid auto-rows-fr grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-4" aria-label="Key Metrics">
+        <div className="sm:col-span-2 lg:row-span-2">
+          <MetricCard
+            title="Total Active Patients"
+            value={data?.totalActivePatients ?? null}
+            icon={<IconPatients size={80} />}
+            variant="primary"
+            href="/patients"
+            loading={overviewLoading}
+          />
+        </div>
+        
+        <MetricCard
+          title="Visits This Week"
+          value={data?.visitsThisWeek ?? null}
+          icon={<IconVisits size={48} />}
+          variant="default"
+          loading={overviewLoading}
+        />
+        
+        <MetricCard
+          title="Upcoming Appointments"
+          value={data?.upcomingAppointments ?? null}
+          icon={<IconCalendar size={48} />}
+          variant="default"
+          href="/appointments"
+          loading={overviewLoading}
+        />
+        
+        <MetricCard
+          title="Immunizations Due"
+          value={data?.immunizationsDue ?? null}
+          icon={<IconSyringe size={48} />}
+          variant="rose-tint"
+          href="/immunizations"
+          loading={overviewLoading}
+        />
+
+        <MetricCard
+          title="Pending Registrations"
+          value={pendingRegistrations}
+          icon={<IconInbox size={48} />}
+          variant="rose-tint"
+          href="/registrations"
+          loading={pendingRegistrations === null}
+        />
+      </section>
+
+      {/* Data Panels */}
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-2">
+        
+        {/* Recent Patients Panel */}
+        <section className="flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <header className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-6 py-4">
+            <h2 className="text-base font-semibold text-slate-900">Recently Registered</h2>
+            <Link 
+              href="/patients" 
+              className="text-sm font-medium text-rose-600 hover:text-rose-500 focus-visible:outline-none focus-visible:underline"
+            >
+              View all
+            </Link>
+          </header>
+
+          <ul role="list" className="divide-y divide-slate-100" aria-busy={panelsLoading}>
+            {panelsLoading ? (
+              <PanelSkeleton />
+            ) : recentPatients.length === 0 ? (
+              <EmptyState message="No patients registered yet." />
+            ) : (
+              recentPatients.map((p) => (
+                <li key={p.id}>
+                  <Link
+                    href={`/patients/${p.id}`}
+                    className="flex items-center gap-4 px-6 py-4 hover:bg-slate-50 focus-visible:bg-slate-50 focus-visible:outline-none"
+                  >
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-rose-50 text-sm font-semibold text-rose-600 ring-1 ring-inset ring-rose-600/20" aria-hidden="true">
+                      {(p.fullName || "?").charAt(0).toUpperCase()}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-slate-900">{p.fullName || p.patientCode}</p>
+                      <p className="truncate text-sm text-slate-500 capitalize">{p.sex} • {p.age} yrs</p>
+                    </div>
+                    <div className="text-sm text-slate-400 font-mono">{p.patientCode}</div>
+                  </Link>
+                </li>
+              ))
+            )}
+          </ul>
+        </section>
+
+        {/* Upcoming Appointments Panel */}
+        <section className="flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <header className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-6 py-4">
+            <h2 className="text-base font-semibold text-slate-900">Upcoming Appointments</h2>
+            <Link 
+              href="/appointments" 
+              className="text-sm font-medium text-rose-600 hover:text-rose-500 focus-visible:outline-none focus-visible:underline"
+            >
+              View all
+            </Link>
+          </header>
+
+          <ul role="list" className="divide-y divide-slate-100" aria-busy={panelsLoading}>
+            {panelsLoading ? (
+              <PanelSkeleton />
+            ) : upcomingAppointments.length === 0 ? (
+              <EmptyState message="No upcoming appointments." />
+            ) : (
+              upcomingAppointments.map((a) => (
+                <li key={a.id}>
+                  <Link
+                    href={`/appointments/${a.id}`}
+                    className="flex items-center justify-between gap-4 px-6 py-4 hover:bg-slate-50 focus-visible:bg-slate-50 focus-visible:outline-none"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-slate-900">{a.patientName || a.patientCode}</p>
+                      <p className="truncate text-sm text-slate-500">
+                        {a.appointmentType.replace("_", " ")} • {" "}
+                        <time dateTime={a.scheduledAt}>
+                          {new Date(a.scheduledAt).toLocaleString("en-PH", {
+                            month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+                          })}
+                        </time>
+                      </p>
+                    </div>
+                    <StatusBadge status={a.status} />
+                  </Link>
+                </li>
+              ))
+            )}
+          </ul>
+        </section>
+
+      </div>
+    </main>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function PanelSkeleton() {
+  return (
+    <>
+      {Array.from({ length: 5 }).map((_, i) => (
+        <li key={i} className="flex items-center gap-4 px-6 py-4">
+          <div className="h-10 w-10 shrink-0 animate-pulse rounded-full bg-slate-100" />
+          <div className="flex-1 space-y-2">
+            <div className="h-4 w-32 animate-pulse rounded bg-slate-100" />
+            <div className="h-3 w-20 animate-pulse rounded bg-slate-100" />
+          </div>
+        </li>
+      ))}
+    </>
+  );
+}
+
+function EmptyState({ message }: { message: string }) {
+  return (
+    <li className="px-6 py-12 text-center text-sm text-slate-500">
+      {message}
+    </li>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Icons (Preserved SVGs)
+// ---------------------------------------------------------------------------
+
+function IconPatients({ size = 24 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
@@ -131,14 +428,14 @@ function IconPatients({ size = 22 }: { size?: number }) {
     </svg>
   );
 }
-function IconVisits({ size = 22 }: { size?: number }) {
+function IconVisits({ size = 24 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
     </svg>
   );
 }
-function IconCalendar({ size = 22 }: { size?: number }) {
+function IconCalendar({ size = 24 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
@@ -148,7 +445,7 @@ function IconCalendar({ size = 22 }: { size?: number }) {
     </svg>
   );
 }
-function IconSyringe({ size = 22 }: { size?: number }) {
+function IconSyringe({ size = 24 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M18 2l4 4" />
@@ -160,494 +457,19 @@ function IconSyringe({ size = 22 }: { size?: number }) {
     </svg>
   );
 }
-function IconArrow() {
+function IconInbox({ size = 24 }: { size?: number }) {
   return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <line x1="5" y1="12" x2="19" y2="12" />
-      <polyline points="12 5 19 12 12 19" />
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
+      <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
     </svg>
   );
 }
-
-// ---------------------------------------------------------------------------
-// Bento metric card
-// ---------------------------------------------------------------------------
-
-type CardVariant = "primary" | "default" | "rose-tint";
-
-interface SummaryCardProps {
-  title: string;
-  value: number | null;
-  watermark: React.ReactNode;
-  variant?: CardVariant;
-  href?: string;
-  loading?: boolean;
-}
-
-const CARD_STYLES: Record<
-  CardVariant,
-  { bg: string; border: string; shadow: string; labelColor: string; valueColor: string; skeletonBg: string; watermarkColor: string; watermarkOpacity: number }
-> = {
-  primary: {
-    bg: "linear-gradient(138deg, #b5343e 0%, #c94060 42%, #da6e7a 72%, #edaab2 100%)",
-    border: "none",
-    shadow: "0 12px 40px rgba(181,52,62,0.4), 0 0 0 1px rgba(181,52,62,0.15)",
-    labelColor: "rgba(255,255,255,0.65)",
-    valueColor: "#ffffff",
-    skeletonBg: "rgba(255,255,255,0.18)",
-    watermarkColor: "#ffffff",
-    watermarkOpacity: 0.13,
-  },
-  default: {
-    bg: "#fdf7f3",
-    border: "1px solid #e5d4cc",
-    shadow: "0 2px 10px rgba(160,80,80,0.07)",
-    labelColor: "#9b6e6e",
-    valueColor: "#1a0808",
-    skeletonBg: "#e8d5cc",
-    watermarkColor: "#c08080",
-    watermarkOpacity: 0.09,
-  },
-  "rose-tint": {
-    bg: "linear-gradient(138deg, #fdeef0 0%, #fdf7f3 100%)",
-    border: "1px solid #e5cfd0",
-    shadow: "0 2px 10px rgba(160,80,80,0.07)",
-    labelColor: "#9b6e6e",
-    valueColor: "#1a0808",
-    skeletonBg: "#e8d5cc",
-    watermarkColor: "#c08080",
-    watermarkOpacity: 0.09,
-  },
-};
-
-function SummaryCard({
-  title,
-  value,
-  watermark,
-  variant = "default",
-  href,
-  loading,
-}: SummaryCardProps) {
-  const s = CARD_STYLES[variant];
-  const isPrimary = variant === "primary";
-
-  const inner = (
-    <div
-      className="relative h-full overflow-hidden rounded-2xl p-6 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xl"
-      style={{
-        background: s.bg,
-        border: s.border,
-        boxShadow: s.shadow,
-      }}
-    >
-      {/* Dot texture for primary gradient card */}
-      {isPrimary && (
-        <div
-          className="pointer-events-none absolute inset-0"
-          style={{
-            backgroundImage:
-              "radial-gradient(circle, rgba(255,255,255,0.55) 1px, transparent 1px)",
-            backgroundSize: "22px 22px",
-            opacity: 0.07,
-          }}
-          aria-hidden="true"
-        />
-      )}
-
-      {/* Metric label */}
-      <p
-        className="text-[10px] font-semibold uppercase tracking-[0.2em]"
-        style={{ color: s.labelColor }}
-      >
-        {title}
-      </p>
-
-      {/* Metric value */}
-      {loading ? (
-        <div
-          className="mt-4 h-10 w-28 animate-pulse rounded-lg"
-          style={{ background: s.skeletonBg }}
-        />
-      ) : (
-        <p
-          className={`mt-3 leading-none tabular-nums ${isPrimary ? "text-6xl" : "text-4xl"}`}
-          style={{
-            color: s.valueColor,
-            fontFamily: "var(--font-dm-serif, Georgia, serif)",
-            fontWeight: 400,
-            letterSpacing: "-0.02em",
-          }}
-        >
-          {value?.toLocaleString() ?? "—"}
-        </p>
-      )}
-
-      {/* Link hint on primary */}
-      {isPrimary && href && !loading && (
-        <div className="mt-4 flex items-center gap-1.5" style={{ color: "rgba(255,255,255,0.75)" }}>
-          <span className="text-xs font-medium">View patients</span>
-          <IconArrow />
-        </div>
-      )}
-
-      {/* Watermark icon */}
-      <div
-        className="pointer-events-none absolute bottom-4 right-4"
-        style={{ color: s.watermarkColor, opacity: s.watermarkOpacity }}
-        aria-hidden="true"
-      >
-        {watermark}
-      </div>
-    </div>
-  );
-
-  return href ? (
-    <Link
-      href={href}
-      className="block h-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#c94060]"
-    >
-      {inner}
-    </Link>
-  ) : (
-    inner
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Appointment status badges
-// ---------------------------------------------------------------------------
-
-const APPT_STATUS_CLASSES: Record<string, string> = {
-  pending:   "bg-amber-100 text-amber-800 border border-amber-200",
-  confirmed: "bg-emerald-100 text-emerald-800 border border-emerald-200",
-  completed: "bg-stone-100 text-stone-600 border border-stone-200",
-  missed:    "bg-red-100 text-red-700 border border-red-200",
-  cancelled: "bg-stone-50 text-stone-400 border border-stone-200",
-};
-
-// ---------------------------------------------------------------------------
-// Page
-// ---------------------------------------------------------------------------
-
-export default function DashboardPage() {
-  const { data, loading, error } = useDashboardOverview();
-  const { recentPatients, upcomingAppointments, loading: panelsLoading } =
-    usePanelData();
-
+function IconArrow() {
   return (
-    <div>
-      {/* Page heading */}
-      <div className="mb-6">
-        <h1
-          className="text-3xl leading-tight"
-          style={{
-            color: "#1a0808",
-            fontFamily: "var(--font-dm-serif, Georgia, serif)",
-            fontWeight: 400,
-          }}
-        >
-          Dashboard
-        </h1>
-        <p className="mt-1 text-sm font-medium" style={{ color: "#7a5252" }}>
-          Real-time health center analytics and overview
-        </p>
-      </div>
-
-      {/* Error banner */}
-      {error && (
-        <div
-          className="mb-6 rounded-xl border p-4 text-sm font-medium"
-          style={{
-            background: "#fef2f2",
-            border: "1px solid #fcc",
-            color: "#b91c1c",
-          }}
-        >
-          Could not load dashboard data: {error.message}
-        </div>
-      )}
-
-      {/* ── Bento metric grid ─────────────────────────────────────────── */}
-      {/*
-       * Desktop (lg): 4-col grid, primary card is col-span-2 row-span-2.
-       *   [Primary 2×2] [Visits 1×1] [Appts 1×1]
-       *                 [Immunizations 2×1         ]
-       *
-       * Tablet (sm): 2-col grid, primary spans full width.
-       *   [Primary 2×1]
-       *   [Visits] [Appts]
-       *   [Immunizations 2×1]
-       *
-       * Mobile: single column stack.
-       */}
-      <div className="mb-5 grid auto-rows-[minmax(140px,auto)] grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {/* Primary: Active Patients — gradient, 2×2 on desktop */}
-        <div className="sm:col-span-2 lg:col-span-2 lg:row-span-2">
-          <SummaryCard
-            title="Total Active Patients"
-            value={data?.totalActivePatients ?? null}
-            watermark={<IconPatients size={96} />}
-            variant="primary"
-            href="/patients"
-            loading={loading}
-          />
-        </div>
-
-        {/* Visits This Week */}
-        <div className="lg:col-span-1">
-          <SummaryCard
-            title="Visits This Week"
-            value={data?.visitsThisWeek ?? null}
-            watermark={<IconVisits size={72} />}
-            variant="default"
-            loading={loading}
-          />
-        </div>
-
-        {/* Upcoming Appointments */}
-        <div className="lg:col-span-1">
-          <SummaryCard
-            title="Upcoming Appointments"
-            value={data?.upcomingAppointments ?? null}
-            watermark={<IconCalendar size={72} />}
-            variant="default"
-            href="/appointments"
-            loading={loading}
-          />
-        </div>
-
-        {/* Immunizations Due — spans 2 cols on desktop (fills the 2nd row beside primary) */}
-        <div className="sm:col-span-2 lg:col-span-2">
-          <SummaryCard
-            title="Immunizations Due"
-            value={data?.immunizationsDue ?? null}
-            watermark={<IconSyringe size={72} />}
-            variant="rose-tint"
-            href="/immunizations"
-            loading={loading}
-          />
-        </div>
-      </div>
-
-      {/* ── Data panels ──────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {/* Recent Patients */}
-        <div
-          className="overflow-hidden rounded-2xl"
-          style={{
-            background: "#ffffff",
-            border: "1px solid #e5d4cc",
-            boxShadow: "0 2px 10px rgba(160,80,80,0.06)",
-          }}
-        >
-          {/* Panel header */}
-          <div
-            className="flex items-center justify-between px-5 py-4"
-            style={{
-              background: "linear-gradient(135deg, #fdf0eb 0%, #ffffff 100%)",
-              borderBottom: "1px solid #edd9d0",
-            }}
-          >
-            <div className="flex items-center gap-2.5">
-              <span
-                className="inline-block h-4 w-1 rounded-full"
-                style={{ background: "linear-gradient(180deg, #b5343e, #e07070)" }}
-                aria-hidden="true"
-              />
-              <h2 className="text-sm font-bold" style={{ color: "#1a0808" }}>
-                Recently Registered Patients
-              </h2>
-            </div>
-            <Link
-              href="/patients"
-              className="flex items-center gap-1 text-xs font-semibold transition-opacity duration-150 hover:opacity-70"
-              style={{ color: "#c94040" }}
-            >
-              View all <IconArrow />
-            </Link>
-          </div>
-
-          {/* Patient rows */}
-          <div className="divide-y" style={{ borderColor: "#f0e4dd" }}>
-            {panelsLoading &&
-              Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className="flex items-center gap-3 px-5 py-3">
-                  <div
-                    className="h-9 w-9 animate-pulse rounded-full"
-                    style={{ background: "#edd9d0" }}
-                  />
-                  <div className="flex-1 space-y-2">
-                    <div
-                      className="h-3.5 w-36 animate-pulse rounded"
-                      style={{ background: "#edd9d0" }}
-                    />
-                    <div
-                      className="h-3 w-20 animate-pulse rounded"
-                      style={{ background: "#edd9d0" }}
-                    />
-                  </div>
-                </div>
-              ))}
-
-            {!panelsLoading && recentPatients.length === 0 && (
-              <p className="px-5 py-6 text-sm font-medium" style={{ color: "#9b6e6e" }}>
-                No patients registered yet.
-              </p>
-            )}
-
-            {!panelsLoading &&
-              recentPatients.map((p) => (
-                <Link
-                  key={p.id}
-                  href={`/patients/${p.id}`}
-                  className="flex items-center gap-3 px-5 py-3 transition-colors duration-150"
-                  style={{ background: "transparent" }}
-                  onMouseEnter={(e) =>
-                    ((e.currentTarget as HTMLAnchorElement).style.background = "#fdf5f0")
-                  }
-                  onMouseLeave={(e) =>
-                    ((e.currentTarget as HTMLAnchorElement).style.background = "transparent")
-                  }
-                >
-                  {/* Initial avatar */}
-                  <div
-                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold"
-                    style={{
-                      background: "rgba(181,52,62,0.1)",
-                      color: "#b5343e",
-                      border: "1.5px solid rgba(181,52,62,0.18)",
-                    }}
-                    aria-hidden="true"
-                  >
-                    {(p.fullName || "?").charAt(0).toUpperCase()}
-                  </div>
-
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold" style={{ color: "#1a0808" }}>
-                      {p.fullName || `${p.patientCode}`}
-                    </p>
-                    <p className="text-xs font-medium" style={{ color: "#9b6e6e" }}>
-                      {p.sex === "male" ? "Male" : "Female"} · {p.age} yrs
-                    </p>
-                  </div>
-
-                  <span
-                    className="shrink-0 font-mono text-xs"
-                    style={{ color: "#b5343e", opacity: 0.7 }}
-                  >
-                    {p.patientCode}
-                  </span>
-                </Link>
-              ))}
-          </div>
-        </div>
-
-        {/* Upcoming Appointments */}
-        <div
-          className="overflow-hidden rounded-2xl"
-          style={{
-            background: "#ffffff",
-            border: "1px solid #e5d4cc",
-            boxShadow: "0 2px 10px rgba(160,80,80,0.06)",
-          }}
-        >
-          {/* Panel header */}
-          <div
-            className="flex items-center justify-between px-5 py-4"
-            style={{
-              background: "linear-gradient(135deg, #fdf0eb 0%, #ffffff 100%)",
-              borderBottom: "1px solid #edd9d0",
-            }}
-          >
-            <div className="flex items-center gap-2.5">
-              <span
-                className="inline-block h-4 w-1 rounded-full"
-                style={{ background: "linear-gradient(180deg, #b5343e, #e07070)" }}
-                aria-hidden="true"
-              />
-              <h2 className="text-sm font-bold" style={{ color: "#1a0808" }}>
-                Upcoming Appointments
-              </h2>
-            </div>
-            <Link
-              href="/appointments"
-              className="flex items-center gap-1 text-xs font-semibold transition-opacity duration-150 hover:opacity-70"
-              style={{ color: "#c94040" }}
-            >
-              View all <IconArrow />
-            </Link>
-          </div>
-
-          {/* Appointment rows */}
-          <div className="divide-y" style={{ borderColor: "#f0e4dd" }}>
-            {panelsLoading &&
-              Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className="flex items-center gap-3 px-5 py-3">
-                  <div className="flex-1 space-y-2">
-                    <div
-                      className="h-3.5 w-40 animate-pulse rounded"
-                      style={{ background: "#edd9d0" }}
-                    />
-                    <div
-                      className="h-3 w-28 animate-pulse rounded"
-                      style={{ background: "#edd9d0" }}
-                    />
-                  </div>
-                  <div
-                    className="h-5 w-20 animate-pulse rounded-full"
-                    style={{ background: "#edd9d0" }}
-                  />
-                </div>
-              ))}
-
-            {!panelsLoading && upcomingAppointments.length === 0 && (
-              <p className="px-5 py-6 text-sm font-medium" style={{ color: "#9b6e6e" }}>
-                No upcoming appointments.
-              </p>
-            )}
-
-            {!panelsLoading &&
-              upcomingAppointments.map((a) => (
-                <Link
-                  key={a.id}
-                  href={`/appointments/${a.id}`}
-                  className="flex items-center justify-between gap-3 px-5 py-3 transition-colors duration-150"
-                  style={{ background: "transparent" }}
-                  onMouseEnter={(e) =>
-                    ((e.currentTarget as HTMLAnchorElement).style.background = "#fdf5f0")
-                  }
-                  onMouseLeave={(e) =>
-                    ((e.currentTarget as HTMLAnchorElement).style.background = "transparent")
-                  }
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold" style={{ color: "#1a0808" }}>
-                      {a.patientName || a.patientCode || "—"}
-                    </p>
-                    <p className="text-xs font-medium" style={{ color: "#9b6e6e" }}>
-                      {a.appointmentType.replace("_", " ")} ·{" "}
-                      {new Date(a.scheduledAt).toLocaleString("en-PH", {
-                        month: "short",
-                        day: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </p>
-                  </div>
-
-                  <span
-                    className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                      APPT_STATUS_CLASSES[a.status] ??
-                      "bg-stone-100 text-stone-600 border border-stone-200"
-                    }`}
-                  >
-                    {a.status.charAt(0).toUpperCase() + a.status.slice(1)}
-                  </span>
-                </Link>
-              ))}
-          </div>
-        </div>
-      </div>
-    </div>
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="5" y1="12" x2="19" y2="12" />
+      <polyline points="12 5 19 12 12 19" />
+    </svg>
   );
 }

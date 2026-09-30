@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import csv
 import io
+import json
+import logging
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal
 
@@ -32,11 +34,39 @@ from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import and_
 
+from app.core.security import get_shared_redis
 from app.models.appointment import Appointment
 from app.models.immunization import Immunization
 from app.models.medical_history import MedicalHistory
 from app.models.patient import Patient
 from app.models.visit import Visit
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Cache helpers
+# ---------------------------------------------------------------------------
+
+_ANALYTICS_OVERVIEW_KEY = "analytics:overview"
+_ANALYTICS_OVERVIEW_TTL = 300  # seconds (5 minutes)
+
+
+async def _invalidate_analytics_cache() -> None:
+    """
+    Delete the cached analytics overview from Redis.
+
+    Called by write-path services (create_patient, update_patient,
+    create_visit, create_appointment) so the next read re-computes
+    fresh counts from the database.
+
+    On Redis error: logs a WARNING and returns — never raises.
+    """
+    try:
+        redis = get_shared_redis()
+        await redis.delete(_ANALYTICS_OVERVIEW_KEY)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Failed to invalidate analytics cache: %s", e)
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -103,8 +133,22 @@ async def get_dashboard_overview(db: AsyncSession) -> dict[str, int]:
       upcoming_appointments_count  int
       immunizations_due_this_week  int
 
+    Caches the result in Redis for 5 minutes (TTL=300 s).  On cache hit the
+    DB queries are skipped entirely.  On Redis error (unavailable, timeout)
+    the function falls through to the DB queries and returns the live result
+    without caching — Redis errors never surface to the HTTP caller.
+
     Never raises on empty tables — all counts default to 0.
     """
+    # -- Cache read (best-effort) -----------------------------------------------
+    try:
+        redis = get_shared_redis()
+        cached = await redis.get(_ANALYTICS_OVERVIEW_KEY)
+        if cached:
+            return json.loads(cached)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Redis unavailable for analytics cache: %s", e)
+
     now = _now_utc()
     week_start = _start_of_week(now)
     month_start = _start_of_month(now)
@@ -155,13 +199,51 @@ async def get_dashboard_overview(db: AsyncSession) -> dict[str, int]:
     )
     immunizations_due_this_week: int = result.scalar() or 0
 
-    return {
+    # -- Priority demographic counts (active patients only) -------------------
+    result = await db.execute(
+        select(func.count(Patient.id)).where(
+            Patient.is_senior.is_(True), Patient.is_active.is_(True)
+        )
+    )
+    senior_count: int = result.scalar() or 0
+
+    result = await db.execute(
+        select(func.count(Patient.id)).where(
+            Patient.is_pwd.is_(True), Patient.is_active.is_(True)
+        )
+    )
+    pwd_count: int = result.scalar() or 0
+
+    result = await db.execute(
+        select(func.count(Patient.id)).where(
+            Patient.is_pregnant.is_(True), Patient.is_active.is_(True)
+        )
+    )
+    pregnant_count: int = result.scalar() or 0
+
+    overview = {
         "total_active_patients": total_active_patients,
         "visits_this_week": visits_this_week,
         "visits_this_month": visits_this_month,
         "upcoming_appointments_count": upcoming_appointments_count,
         "immunizations_due_this_week": immunizations_due_this_week,
+        "senior_count": senior_count,
+        "pwd_count": pwd_count,
+        "pregnant_count": pregnant_count,
     }
+
+    # -- Cache write (best-effort) -----------------------------------------------
+    try:
+        redis = get_shared_redis()
+        await redis.set(
+            _ANALYTICS_OVERVIEW_KEY,
+            json.dumps(overview, default=str),
+            ex=_ANALYTICS_OVERVIEW_TTL,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Redis unavailable for analytics cache: %s", e)
+
+    return overview
 
 
 async def get_vaccination_coverage(db: AsyncSession) -> dict[str, list[dict[str, Any]]]:
@@ -626,6 +708,56 @@ async def get_visit_trends(
                 f"{row.week_start.year}-W{row.week_start.isocalendar()[1]:02d}"
             ),
             "visit_count": row.visit_count,
+        }
+        for row in rows
+    ]
+
+
+async def get_visit_type_breakdown(
+    db: AsyncSession,
+    from_date: date,
+    to_date: date,
+) -> list[dict[str, Any]]:
+    """
+    Return visit counts grouped by visit_type for the given date range.
+
+    Args:
+        db:        Async DB session.
+        from_date: Inclusive start date applied to visits.visit_date.
+        to_date:   Inclusive end date.
+
+    Returns:
+        List of dicts:
+        [{"visit_type": "consultation", "count": 42}, ...]
+
+        Ordered by count descending (most common type first).
+        Returns [] if no visits exist in the date range.
+
+    Column used: visits.visit_date (TIMESTAMPTZ).
+    """
+    from_dt = datetime(from_date.year, from_date.month, from_date.day, tzinfo=timezone.utc)
+    to_dt = datetime(to_date.year, to_date.month, to_date.day, 23, 59, 59, tzinfo=timezone.utc)
+
+    q = await db.execute(
+        select(
+            Visit.visit_type,
+            func.count(Visit.id).label("count"),
+        )
+        .where(
+            and_(
+                Visit.visit_date >= from_dt,
+                Visit.visit_date <= to_dt,
+            )
+        )
+        .group_by(Visit.visit_type)
+        .order_by(func.count(Visit.id).desc())
+    )
+    rows = q.fetchall()
+
+    return [
+        {
+            "visit_type": row.visit_type,
+            "count": row.count,
         }
         for row in rows
     ]

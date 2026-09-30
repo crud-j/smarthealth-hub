@@ -56,6 +56,7 @@ body {
 
 /* ══════════════════════════════════════════════════════════════════════════
    FRONT FACE
+   Measured directly from the reference design image (85.6 × 54 mm CR80).
    ══════════════════════════════════════════════════════════════════════════ */
 
 .card-front {
@@ -66,55 +67,47 @@ body {
   background: #ffffff;
 }
 
-/* ── BHC Logo — top-left ─────────────────────────────────────────────────── */
+/* ── BHC Seal — top-left ─────────────────────────────────────────────────── */
+/* Reference: large circular seal, approx 15 mm dia, 2.5 mm from each edge */
 .bhc-logo {
   position: absolute;
-  top: 2mm;
-  left: 2mm;
-  width: 16mm;
-  height: 16mm;
+  top: 2.5mm;
+  left: 2.5mm;
+  width: 15mm;
+  height: 15mm;
   z-index: 2;
   display: block;
 }
 
-/* ── NFC tap waves — top-right ───────────────────────────────────────────── */
-.nfc-tap-abs {
-  position: absolute;
-  top: 3.5mm;
-  right: 3mm;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-}
-
 /* ── Patient photo — left center ─────────────────────────────────────────── */
+/* 15 mm wide × 17 mm tall ID-style. Left:14mm keeps the pink diagonal clear. */
 .photo-abs {
   position: absolute;
-  top: 20mm;
-  left: 4mm;
-  width: 18mm;
+  top: 21mm;
+  left: 14mm;
+  width: 15mm;
   z-index: 2;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.5mm;
 }
 
 .photo-img {
-  width: 18mm;
-  height: 21mm;
+  width: 15mm;
+  height: 17mm;
   object-fit: cover;
-  border-radius: 2pt;
-  border: 0.5pt solid #cbd5e1;
+  border-radius: 1mm;
+  border: 0.7pt solid #5f6368;
   display: block;
+  background: #f0f0f0;
 }
 
 .photo-placeholder {
-  width: 18mm;
-  height: 21mm;
-  background: #e2e8f0;
+  width: 15mm;
+  height: 17mm;
+  background: rgba(226, 232, 240, 0.90);
   border: 0.5pt dashed #94a3b8;
-  border-radius: 2pt;
+  border-radius: 1mm;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -124,27 +117,20 @@ body {
 
 .photo-placeholder-text {
   font-size: 3.8pt;
-  font-weight: bold;
+  font-weight: 700;
   color: #64748b;
-  letter-spacing: 0.4pt;
+  letter-spacing: 0.3pt;
 }
 
-.photo-card-no {
-  font-size: 3.5pt;
-  font-family: "Courier New", "DejaVu Sans Mono", monospace;
-  color: #334155;
-  text-align: center;
-  letter-spacing: 0.1pt;
-  line-height: 1;
-  font-weight: 600;
-}
-
-/* ── Patient info table — center ─────────────────────────────────────────── */
+/* ── Patient info — 5-row label/value block ──────────────────────────────── */
+/* Left = 14 (photo) + 15 (photo width) + 2 (gap) = 31 mm.                  */
+/* right: 3 mm — info text ends well before QR (rows finish at ~37 mm,       */
+/* QR image starts at ~38 mm from top). No visual overlap.                   */
 .info-abs {
   position: absolute;
-  top: 20mm;
-  left: 24mm;
-  right: 22mm;
+  top: 21mm;
+  left: 31mm;
+  right: 3mm;
   z-index: 2;
   display: flex;
   flex-direction: column;
@@ -155,31 +141,44 @@ body {
   display: flex;
   flex-direction: row;
   align-items: baseline;
-  gap: 1.5mm;
+  gap: 2mm;
+  white-space: nowrap;
 }
 
 .info-label {
   font-size: 5.5pt;
-  font-weight: 800;
-  color: #1e293b;
+  font-weight: 700;
+  color: #111111;
   text-transform: uppercase;
-  letter-spacing: 0.1pt;
-  flex-shrink: 0;
-  min-width: 17mm;
+  letter-spacing: 0.05pt;
+  flex: 0 0 13.5mm;
+  min-width: 13.5mm;
+  line-height: 1.2;
 }
 
 .info-value {
   font-size: 5.5pt;
-  font-weight: 500;
-  color: #0f172a;
+  font-weight: 400;
+  color: #111111;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
-/* ── PhilHealth — below photo ────────────────────────────────────────────── */
-.philhealth-abs {
+/* ── Beneficiary section — directly below photo ──────────────────────────── */
+/* Top = 21 (photo top) + 17 (height) + 1.5 (gap) = 39.5 mm.               */
+.bene-section-abs {
   position: absolute;
-  bottom: 7mm;
-  left: 4mm;
+  top: 39.5mm;
+  left: 14mm;
   z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 1.2mm;
+  max-width: 54mm;
+}
+
+/* ── PhilHealth row ──────────────────────────────────────────────────────── */
+.ph-row {
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -190,102 +189,129 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 6mm;
-  height: 6mm;
-  background: rgba(255, 255, 255, 0.85);
-  border-radius: 1.5pt;
-  border: 0.4pt solid #d1d5db;
+  width: 6.5mm;
+  height: 6.5mm;
+  background: rgba(255, 255, 255, 0.90);
+  border-radius: 1mm;
+  border: 0.3pt solid #d1d5db;
   flex-shrink: 0;
 }
 
 .ph-text-col {
   display: flex;
   flex-direction: column;
+  justify-content: center;
 }
 
 .ph-label {
-  font-size: 4.5pt;
-  font-weight: 800;
-  color: #0f172a;
-  text-transform: uppercase;
-  letter-spacing: 0.2pt;
+  font-size: 5.5pt;
+  font-weight: 700;
+  color: #111111;
+  line-height: 1.15;
 }
 
 .ph-number {
   font-size: 5pt;
-  font-weight: 700;
-  color: #1e293b;
+  font-weight: 500;
+  color: #111111;
   font-family: "Courier New", "DejaVu Sans Mono", monospace;
+  line-height: 1.15;
 }
 
 .ph-badge {
   font-size: 3.5pt;
-  font-weight: bold;
+  font-weight: 800;
   color: #ffffff;
   background: #059669;
-  padding: 0.1mm 0.8mm;
+  padding: 0.2mm 1mm;
   border-radius: 1pt;
-  margin-left: 0.8mm;
+  margin-left: 1mm;
   text-transform: uppercase;
 }
 
+/* ── Beneficiary programme badges ────────────────────────────────────────── */
+.ben-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 1mm;
+}
+
+.ben-badge {
+  font-size: 3.8pt;
+  font-weight: 800;
+  padding: 0.4mm 1.3mm;
+  border-radius: 1.5pt;
+  text-transform: uppercase;
+  letter-spacing: 0.15pt;
+  color: #ffffff;
+}
+
+.ben-4ps      { background: #0891b2; }
+.ben-pwd      { background: #1d4ed8; }
+.ben-senior   { background: #7c3aed; }
+.ben-pregnant { background: #be185d; }
+
 /* ── QR code — bottom-right ──────────────────────────────────────────────── */
+/*
+ * Reference: ~13 mm QR image with "Scan to verify" label below.
+ * Anchored to bottom-right with small margin.
+ */
 .qr-abs {
   position: absolute;
-  bottom: 2mm;
-  right: 2mm;
+  bottom: 2.5mm;
+  right: 2.5mm;
   z-index: 2;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.5mm;
+  gap: 0.7mm;
 }
 
 .qr-image {
-  width: 17mm;
-  height: 17mm;
+  width: 13mm;
+  height: 13mm;
   display: block;
   background: #ffffff;
-  padding: 0.4mm;
-  border-radius: 1.5pt;
-  border: 0.4pt solid #e2e8f0;
+  padding: 0.3mm;
+  border: 0.3pt solid #e2e8f0;
 }
 
 .qr-label {
-  font-size: 4pt;
-  color: #334155;
+  font-size: 3.8pt;
+  color: #111111;
   text-align: center;
-  letter-spacing: 0.1pt;
-  font-weight: 500;
+  font-weight: 400;
+  line-height: 1;
 }
 
-/* ── Footer info — bottom-left ───────────────────────────────────────────── */
+/* ── Footer — bottom-left (dim text matching reference) ─────────────────── */
 .footer-abs {
   position: absolute;
   bottom: 1.5mm;
-  left: 3mm;
+  left: 2mm;
   z-index: 2;
   display: flex;
   flex-direction: column;
-  gap: 0.3mm;
+  gap: 0.4mm;
 }
 
 .footer-issued {
-  font-size: 3.8pt;
-  color: #64748b;
+  font-size: 3.5pt;
+  color: rgba(255, 255, 255, 0.80);
   font-weight: 400;
-  letter-spacing: 0.1pt;
 }
 
 .footer-version {
-  font-size: 3.8pt;
-  color: #475569;
-  font-weight: 700;
-  letter-spacing: 0.2pt;
+  font-size: 3.5pt;
+  color: rgba(255, 255, 255, 0.80);
+  font-weight: 600;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
-   BACK FACE
+   BACK FACE — comprehensive medical summary, dark red/rose theme (#8b1a1a).
+   Rows: address · blood type+allergies · vitals · emergency · philhealth · flags.
+   right:22mm on back-panel keeps the SVG circular emblem visible.
    ══════════════════════════════════════════════════════════════════════════ */
 
 .card-back {
@@ -297,72 +323,75 @@ body {
   background: #ffffff;
 }
 
-/* ── BHC Logo — top-left (smaller on back) ───────────────────────────────── */
+/* ── BHC Logo — top-left ─────────────────────────────────────────────────── */
 .bhc-logo-back {
   position: absolute;
   top: 1.5mm;
   left: 2mm;
-  width: 10mm;
-  height: 10mm;
+  width: 9mm;
+  height: 9mm;
   z-index: 2;
   display: block;
 }
 
-/* ── Back title — top, offset right of logo ──────────────────────────────── */
+/* ── Back header — right of logo ─────────────────────────────────────────── */
 .back-title-abs {
   position: absolute;
-  top: 2mm;
-  left: 14mm;
+  top: 2.5mm;
+  left: 13mm;
   right: 3mm;
   z-index: 2;
   display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  justify-content: center;
 }
 
 .back-title-text {
-  font-size: 4.5pt;
+  font-size: 5pt;
   font-weight: 800;
-  color: #0f172a;
+  color: #8b1a1a;
   text-transform: uppercase;
-  letter-spacing: 0.3pt;
-  background: rgba(255, 255, 255, 0.80);
-  padding: 0.4mm 1mm;
-  border-radius: 1.5pt;
+  letter-spacing: 0.4pt;
+  line-height: 1.2;
 }
 
-.back-photo-thumb {
-  width: 6mm;
-  height: 6mm;
-  object-fit: cover;
-  border-radius: 50%;
-  border: 0.5pt solid rgba(0, 0, 0, 0.25);
-  flex-shrink: 0;
+.back-card-no {
+  font-size: 4pt;
+  font-weight: 600;
+  color: #5a5a5a;
+  font-family: "Courier New", "DejaVu Sans Mono", monospace;
+  letter-spacing: 0.2pt;
+  line-height: 1.2;
 }
 
-/* ── Main data panel ─────────────────────────────────────────────────────── */
+/* ── Main info panel ─────────────────────────────────────────────────────── */
+/*
+ * right: 22mm keeps the circular BHC emblem in NFC-BACKDESIGN.svg visible.
+ * Minimal content: blood type, emergency contact, flags, NFC hint only.
+ * Semi-transparent so SVG background patterns show through.
+ */
 .back-panel {
   position: absolute;
   top: 12mm;
   left: 2mm;
-  right: 2mm;
+  right: 22mm;
   bottom: 8mm;
   z-index: 2;
-  background-color: rgba(255, 255, 255, 0.86);
+  background-color: rgba(255, 255, 255, 0.80);
   border-radius: 2pt;
   overflow: hidden;
   display: flex;
   flex-direction: column;
 }
 
-/* ── Generic data row inside panel ──────────────────────────────────────── */
+/* ── Generic data row ────────────────────────────────────────────────────── */
+/* ── Generic data row ────────────────────────────────────────────────────── */
 .bp-row {
   display: flex;
   flex-direction: row;
   align-items: baseline;
   padding: 0.6mm 2mm;
-  border-bottom: 0.3pt solid rgba(203, 213, 225, 0.6);
+  border-bottom: 0.3pt solid rgba(139, 26, 26, 0.12);
   gap: 1.5mm;
   flex-shrink: 0;
 }
@@ -370,25 +399,32 @@ body {
 .bp-label {
   font-size: 3.8pt;
   font-weight: 800;
-  color: #0d7c6e;
+  color: #8b1a1a;
   text-transform: uppercase;
   letter-spacing: 0.2pt;
   flex-shrink: 0;
-  min-width: 14mm;
+  min-width: 13mm;
 }
 
 .bp-value {
-  font-size: 5pt;
+  font-size: 4.8pt;
   font-weight: 500;
   color: #1e293b;
   line-height: 1.2;
 }
 
-.bp-address .bp-value {
+.bp-mono {
+  font-family: "Courier New", "DejaVu Sans Mono", monospace;
   font-size: 4.5pt;
 }
 
-/* Two-column row */
+.bp-address .bp-value {
+  font-size: 4.3pt;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* Two-column row: blood type left, allergies right */
 .bp-two-col {
   padding: 0;
   gap: 0;
@@ -399,18 +435,20 @@ body {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: 0.6mm 1.5mm;
+  padding: 0.5mm 1.5mm;
 }
 
 .bp-blood {
-  flex: 0 0 18mm;
-  border-right: 0.3pt solid rgba(203, 213, 225, 0.6);
+  flex: 0 0 15mm;
+  border-right: 0.3pt solid rgba(139, 26, 26, 0.15);
+  align-items: center;
 }
 
 .bp-blood-val {
-  font-size: 9pt;
+  font-size: 10pt;
   font-weight: 900;
-  color: #0f172a;
+  color: #8b1a1a;
+  line-height: 1;
 }
 
 .bp-allergy {
@@ -418,7 +456,7 @@ body {
 }
 
 .has-allergies {
-  background-color: rgba(254, 242, 242, 0.95);
+  background-color: rgba(254, 242, 242, 0.92);
   border-left: 2pt solid #dc2626;
 }
 
@@ -428,7 +466,7 @@ body {
 
 .has-allergies .bp-value {
   color: #991b1b;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 /* Vitals row */
@@ -446,48 +484,46 @@ body {
 .bp-vital {
   display: flex;
   flex-direction: column;
+  gap: 0.2mm;
 }
 
 .bpv-label {
-  font-size: 3.5pt;
-  font-weight: bold;
-  color: #64748b;
+  font-size: 3.2pt;
+  font-weight: 800;
+  color: #8b1a1a;
   text-transform: uppercase;
+  letter-spacing: 0.2pt;
 }
 
 .bpv-val {
-  font-size: 5.5pt;
+  font-size: 5pt;
   font-weight: 700;
   color: #0f172a;
+  line-height: 1;
 }
 
-/* Notes row */
-.bp-notes {
-  flex: 1;
-  align-items: flex-start;
+.bp-visit-date {
+  font-size: 3.5pt;
+  font-weight: 400;
+  color: #64748b;
+  text-transform: none;
+  letter-spacing: 0;
+  margin-left: 0.8mm;
 }
 
-.bp-note-text {
-  font-size: 4.5pt;
-  color: #475569;
-  font-style: italic;
-  line-height: 1.2;
-}
-
-/* Guardian row */
+/* Emergency contact */
 .bp-guardian {
-  background: rgba(240, 253, 244, 0.95);
-  border-top: 0.3pt solid rgba(209, 250, 229, 0.8);
+  background: rgba(139, 26, 26, 0.04);
 }
 
 .bp-guardian .bp-label {
-  color: #065f46;
+  color: #8b1a1a;
 }
 
 .bp-guardian .bp-value {
   font-size: 4.8pt;
   font-weight: 700;
-  color: #064e3b;
+  color: #1e293b;
 }
 
 /* Flags row */
@@ -497,36 +533,37 @@ body {
   gap: 1mm;
   padding: 0.5mm 2mm;
   border-bottom: none;
+  flex-wrap: nowrap;
 }
 
 .flag-badge {
-  font-size: 3.8pt;
+  font-size: 3.5pt;
   font-weight: 800;
   padding: 0.3mm 1.2mm;
   border-radius: 1.5pt;
   text-transform: uppercase;
-  letter-spacing: 0.2pt;
+  letter-spacing: 0.15pt;
 }
 
 .flag-senior {
-  background: #fef9c3;
-  color: #854d0e;
-  border: 0.3pt solid #fde047;
+  background: rgba(139, 26, 26, 0.10);
+  color: #8b1a1a;
+  border: 0.3pt solid rgba(139, 26, 26, 0.35);
 }
 
 .flag-pwd {
-  background: #dbeafe;
-  color: #1e3a8a;
-  border: 0.3pt solid #93c5fd;
+  background: rgba(29, 78, 216, 0.08);
+  color: #1d4ed8;
+  border: 0.3pt solid rgba(29, 78, 216, 0.30);
 }
 
 .flag-pregnant {
-  background: #fce7f3;
-  color: #9d174d;
-  border: 0.3pt solid #f9a8d4;
+  background: rgba(190, 24, 93, 0.08);
+  color: #be185d;
+  border: 0.3pt solid rgba(190, 24, 93, 0.30);
 }
 
-/* ── Back footer ─────────────────────────────────────────────────────────── */
+/* ── Footer — dark red/rose bar ──────────────────────────────────────────── */
 .back-footer-abs {
   position: absolute;
   bottom: 0;
@@ -534,7 +571,7 @@ body {
   right: 0;
   height: 7mm;
   z-index: 2;
-  background: rgba(8, 92, 81, 0.82);
+  background: rgba(139, 26, 26, 0.84);
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -543,15 +580,16 @@ body {
 }
 
 .back-footer-main {
-  font-size: 4pt;
-  color: #ccfbf1;
+  font-size: 3.8pt;
+  color: rgba(255, 235, 235, 0.95);
   line-height: 1.2;
   font-weight: 400;
 }
 
 .back-footer-sub {
-  font-size: 3.5pt;
-  color: rgba(204, 251, 241, 0.65);
-  margin-top: 0.2mm;
+  font-size: 3.2pt;
+  color: rgba(255, 220, 220, 0.65);
+  margin-top: 0.3mm;
   letter-spacing: 0.1pt;
+  font-family: "Courier New", "DejaVu Sans Mono", monospace;
 }

@@ -63,3 +63,16 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+addopts = "--tb=short -q"
+
+[tool.coverage.run]
+source = ["app"]
+omit = [
+    "app/alembic/*",
+    "app/scripts/*",
+    "app/workers/celery_app.py",
+]
+
+[tool.coverage.report]
+fail_under = 70
+show_missing = true

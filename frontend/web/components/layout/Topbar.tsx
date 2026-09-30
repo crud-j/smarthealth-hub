@@ -51,20 +51,6 @@ function IconSignOut() {
 }
 
 // ---------------------------------------------------------------------------
-// Shared button style helpers
-// ---------------------------------------------------------------------------
-
-function onDarkHover(e: React.MouseEvent<HTMLButtonElement>, active = true) {
-  if (!active) return;
-  (e.currentTarget as HTMLButtonElement).style.color = "#D36969";
-  (e.currentTarget as HTMLButtonElement).style.background = "#252525";
-}
-function onDarkLeave(e: React.MouseEvent<HTMLButtonElement>) {
-  (e.currentTarget as HTMLButtonElement).style.color = "#666";
-  (e.currentTarget as HTMLButtonElement).style.background = "transparent";
-}
-
-// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -87,8 +73,8 @@ export default function Topbar({
 
   return (
     <header
-      className="flex h-16 shrink-0 items-center justify-between px-4 lg:px-3"
-      style={{ background: "#1a1a1a", borderBottom: "1px solid #2a2a2a" }}
+      data-theme="dark-shell"
+      className="flex h-16 shrink-0 items-center justify-between px-4 lg:px-3 bg-[var(--shell-bg)] border-b border-[var(--shell-border)]"
     >
       {/* ── Left: hamburger (mobile) + sidebar toggle (desktop) ──── */}
       <div className="flex items-center gap-1">
@@ -97,10 +83,7 @@ export default function Topbar({
           type="button"
           onClick={onMenuToggle}
           aria-label="Toggle navigation menu"
-          className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#D36969] lg:hidden"
-          style={{ color: "#666", background: "transparent" }}
-          onMouseEnter={(e) => onDarkHover(e)}
-          onMouseLeave={(e) => onDarkLeave(e)}
+          className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--shell-accent)] lg:hidden text-[var(--shell-text-muted)] hover:text-[var(--shell-accent)] hover:bg-[#252525]"
         >
           <IconHamburger />
         </button>
@@ -110,10 +93,7 @@ export default function Topbar({
           type="button"
           onClick={onToggleCollapse}
           aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          className="hidden lg:flex h-9 w-9 items-center justify-center rounded-lg transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#D36969]"
-          style={{ color: "#666", background: "transparent" }}
-          onMouseEnter={(e) => onDarkHover(e)}
-          onMouseLeave={(e) => onDarkLeave(e)}
+          className="hidden lg:flex h-9 w-9 items-center justify-center rounded-lg transition-colors duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--shell-accent)] text-[var(--shell-text-muted)] hover:text-[var(--shell-accent)] hover:bg-[#252525]"
           suppressHydrationWarning
         >
           {isCollapsed ? <IconChevronRight /> : <IconChevronLeft />}
@@ -124,27 +104,17 @@ export default function Topbar({
       <div className="flex items-center gap-3">
         {user && (
           <>
-            <div className="hidden h-5 w-px sm:block" style={{ background: "#2a2a2a" }} />
+            <div className="hidden h-5 w-px sm:block bg-[var(--shell-border)]" />
 
-            <span
-              className="hidden rounded-md px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest sm:inline-block"
-              style={{
-                background: "rgba(211,105,105,0.1)",
-                color: "#D36969",
-                border: "1px solid rgba(211,105,105,0.2)",
-              }}
-            >
+            <span className="hidden rounded-md px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest sm:inline-block bg-[rgba(211,105,105,0.1)] text-[var(--shell-accent)] border border-[rgba(211,105,105,0.2)]">
               {roleLabel}
             </span>
 
-            <span
-              className="hidden text-sm font-medium sm:block"
-              style={{ color: "#c0c0c0" }}
-            >
+            <span className="hidden text-sm font-medium sm:block text-[var(--shell-text-secondary)]">
               {user.full_name}
             </span>
 
-            <div className="hidden h-5 w-px sm:block" style={{ background: "#2a2a2a" }} />
+            <div className="hidden h-5 w-px sm:block bg-[var(--shell-border)]" />
           </>
         )}
 
@@ -154,21 +124,8 @@ export default function Topbar({
           onClick={() => void performLogout()}
           disabled={logoutLoading}
           aria-label="Log out"
-          className="flex min-h-[36px] items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#D36969] disabled:opacity-40"
-          style={{ color: "#888", border: "1px solid #2e2e2e", background: "transparent" }}
+          className="flex min-h-[36px] items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-150 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--shell-accent)] disabled:opacity-40 disabled:pointer-events-none text-[#888] border border-[#2e2e2e] hover:text-[var(--shell-accent)] hover:border-[rgba(211,105,105,0.35)] hover:bg-[rgba(211,105,105,0.06)]"
           suppressHydrationWarning
-          onMouseEnter={(e) => {
-            if (!logoutLoading) {
-              (e.currentTarget as HTMLButtonElement).style.color = "#D36969";
-              (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(211,105,105,0.35)";
-              (e.currentTarget as HTMLButtonElement).style.background = "rgba(211,105,105,0.06)";
-            }
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.color = "#888";
-            (e.currentTarget as HTMLButtonElement).style.borderColor = "#2e2e2e";
-            (e.currentTarget as HTMLButtonElement).style.background = "transparent";
-          }}
         >
           <IconSignOut />
           <span className="hidden sm:inline">

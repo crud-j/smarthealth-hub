@@ -16,10 +16,11 @@ SDP Reference: Section 6.9 (Audit), Section 5.7 (Security & Audit)
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Query
+from fastapi.responses import StreamingResponse
 
 from app.core.security import require_role
 from app.db.session import DbDep
@@ -91,4 +92,56 @@ async def list_audit_logs(
         total=total,
         page=page,
         page_size=page_size,
+    )
+
+
+@router.get(
+    "/export",
+    summary="Export audit trail as CSV (Admin only)",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "content": {"text/csv": {}},
+            "description": "CSV file containing all matching audit log entries.",
+        }
+    },
+)
+async def export_audit_logs(
+    current_user: Annotated[User, AdminOnly],
+    db: DbDep,
+    user_id: uuid.UUID | None = Query(None, description="Filter by acting user UUID"),
+    action: str | None = Query(None, description="Filter by action (CREATE, UPDATE, DELETE, VIEW_PHI, LOGIN, etc.)"),
+    entity_type: str | None = Query(None, description="Filter by entity type (patient, user, health_card, etc.)"),
+    entity_id: uuid.UUID | None = Query(None, description="Filter by affected entity UUID"),
+    date_from: date | None = Query(None, description="Include entries on or after this date (YYYY-MM-DD)"),
+    date_to: date | None = Query(None, description="Include entries on or before this date (YYYY-MM-DD)"),
+) -> StreamingResponse:
+    """
+    Export the audit trail as a CSV download.
+
+    Applies the same filters as the list endpoint but returns the full
+    matching result set (no pagination limit) as a downloadable CSV file.
+
+    CSV columns: id, created_at, user_id, user_email, action, entity_type,
+    entity_id, ip_address, metadata.
+
+    Auth: Admin only.
+    """
+    csv_content = await audit_query_service.export_audit_logs_csv(
+        db,
+        user_id=user_id,
+        action=action,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        date_from=date_from,
+        date_to=date_to,
+    )
+
+    today = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
+    filename = f"audit_log_{today}.csv"
+
+    return StreamingResponse(
+        iter([csv_content]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

@@ -1,0 +1,6 @@
+# Global owners — all PRs require review from the project owner
+* @crud-j
+
+# Dependency update PRs auto-assigned to project owner
+/backend/pyproject.toml @crud-j
+/frontend/web/package.json @crud-j

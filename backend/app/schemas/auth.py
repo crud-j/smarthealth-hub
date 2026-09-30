@@ -320,3 +320,30 @@ class ChangePasswordResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     message: str = Field(default="Password changed successfully.")
+
+
+# ---------------------------------------------------------------------------
+# MFA status (authenticated read — GET /mfa/status)
+# ---------------------------------------------------------------------------
+
+
+class MfaStatusResponse(BaseModel):
+    """Current MFA configuration for the authenticated user."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    mfa_enabled: bool = Field(
+        ...,
+        description="Whether MFA is active for this account.",
+    )
+    otp_method: str = Field(
+        default="email",
+        description="Delivery channel for OTPs (always 'email' in this version).",
+    )
+    masked_contact: str = Field(
+        ...,
+        description=(
+            "Obfuscated email address shown to the user for confirmation "
+            "(e.g. 'j***@gmail.com').  Never exposes the full address."
+        ),
+    )

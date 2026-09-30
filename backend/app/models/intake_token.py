@@ -19,6 +19,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 if TYPE_CHECKING:
+    from app.models.appointment import Appointment
     from app.models.patient import Patient
     from app.models.user import User
 
@@ -41,6 +42,18 @@ class PatientIntakeToken(Base):
         sa.ForeignKey("users.id", name="fk_intake_tokens_created_by_users", ondelete="SET NULL"),
         nullable=True,
     )
+    # When this token was created to pre-fill an existing appointment, this
+    # foreign key links it so that form submission auto-marks the appointment
+    # as intake-complete.
+    appointment_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        sa.ForeignKey(
+            "appointments.id",
+            name="fk_intake_tokens_appointment_id_appointments",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
     expires_at: Mapped[datetime] = mapped_column(
         sa.TIMESTAMP(timezone=True), nullable=False
     )
@@ -48,6 +61,8 @@ class PatientIntakeToken(Base):
         sa.TIMESTAMP(timezone=True), nullable=True
     )
     draft_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    visit_purpose: Mapped[str | None] = mapped_column(sa.String(200), nullable=True)
+    purpose_details: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     patient_id: Mapped[uuid.UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         sa.ForeignKey("patients.id", name="fk_intake_tokens_patient_id_patients", ondelete="SET NULL"),
@@ -62,6 +77,11 @@ class PatientIntakeToken(Base):
     created_by_user: Mapped["User | None"] = relationship(
         "User",
         foreign_keys=[created_by_id],
+        lazy="noload",
+    )
+    appointment: Mapped["Appointment | None"] = relationship(
+        "Appointment",
+        foreign_keys=[appointment_id],
         lazy="noload",
     )
     patient: Mapped["Patient | None"] = relationship(

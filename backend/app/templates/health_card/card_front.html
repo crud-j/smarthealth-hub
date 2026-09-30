@@ -29,15 +29,6 @@
     alt="BHC Seal"
   />
 
-  <!-- ── NFC tap indicator — top-right ─────────────────────────────────────── -->
-  <div class="nfc-tap-abs">
-    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#1a1a1a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M8.5 16.5a7 7 0 0 1 0-9"></path>
-      <path d="M12 19a10.5 10.5 0 0 1 0-14"></path>
-      <path d="M15.5 21.5a14 14 0 0 1 0-19"></path>
-    </svg>
-  </div>
-
   <!-- ── Patient photo — left center ──────────────────────────────────────── -->
   <div class="photo-abs">
     {%- if patient.photo_data_uri %}
@@ -48,23 +39,23 @@
     />
     {%- else %}
     <div class="photo-placeholder">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
         <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
         <circle cx="12" cy="7" r="4"></circle>
       </svg>
       <span class="photo-placeholder-text">PHOTO</span>
     </div>
     {%- endif %}
-    <div class="photo-card-no">{{ card.card_number }}</div>
   </div>
 
-  <!-- ── Patient info table — center ──────────────────────────────────────── -->
+  <!-- ── Patient info — center ─────────────────────────────────────────────── -->
   <div class="info-abs">
     <div class="info-row">
       <span class="info-label">FULLNAME:</span>
       <span class="info-value">
-        {{ patient.last_name | upper }}, {{ patient.first_name }}
-        {%- if patient.middle_name %} {{ patient.middle_name[0] }}.{%- endif %}
+        {{- patient.first_name | upper -}}
+        {%- if patient.middle_name %} {{ patient.middle_name | upper }}{%- endif %}
+        {{ patient.last_name | upper -}}
       </span>
     </div>
     <div class="info-row">
@@ -85,24 +76,62 @@
     </div>
   </div>
 
-  <!-- ── PhilHealth row — below photo ──────────────────────────────────────── -->
-  <div class="philhealth-abs">
-    <div class="ph-icon-box">
-      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <rect x="2" y="5" width="20" height="14" rx="2"></rect>
-        <line x1="2" y1="10" x2="22" y2="10"></line>
-      </svg>
+  <!-- ── Beneficiary section — below photo ─────────────────────────────────── -->
+  <!--
+    PhilHealth only shown when a number is recorded.
+    Beneficiary badges (4Ps, PWD, Senior, Pregnant) shown when applicable.
+    Both sit in one flex-column container so vertical spacing is automatic.
+  -->
+  {%- set philhealth_present = patient.philhealth_no and patient.philhealth_no != "—" %}
+  {%- set is_4ps = patient.philhealth_member_type and patient.philhealth_member_type | lower == "4ps" %}
+  {%- set has_badges = is_4ps or patient.is_pwd or patient.is_senior or patient.is_pregnant %}
+  {%- if philhealth_present or has_badges %}
+  <div class="bene-section-abs">
+
+    {%- if philhealth_present %}
+    <!-- PhilHealth row -->
+    <div class="ph-row">
+      <!-- Two-person PhilHealth icon -->
+      <div class="ph-icon-box">
+        <svg width="13" height="13" viewBox="0 0 28 28" fill="none">
+          <circle cx="8"  cy="6"  r="4.5" fill="#c8a200"/>
+          <path d="M0 24 Q0 14 8 14 Q16 14 16 24Z" fill="#c8a200"/>
+          <circle cx="20" cy="6"  r="4.5" fill="#059669"/>
+          <path d="M12 24 Q12 14 20 14 Q28 14 28 24Z" fill="#059669"/>
+        </svg>
+      </div>
+      <div class="ph-text-col">
+        <span class="ph-label">PhilHealth</span>
+        <span class="ph-number">
+          {{ patient.philhealth_no -}}
+          {%- if patient.philhealth_member_type and not is_4ps %}
+          <span class="ph-badge">{{ patient.philhealth_member_type | upper }}</span>
+          {%- endif %}
+        </span>
+      </div>
     </div>
-    <div class="ph-text-col">
-      <span class="ph-label">PhilHealth</span>
-      <span class="ph-number">
-        {{ patient.philhealth_no if patient.philhealth_no else "—" }}
-        {%- if patient.philhealth_member_type %}
-        <span class="ph-badge">{{ patient.philhealth_member_type }}</span>
-        {%- endif %}
-      </span>
+    {%- endif %}
+
+    {%- if has_badges %}
+    <!-- Beneficiary programme badges -->
+    <div class="ben-row">
+      {%- if is_4ps %}
+      <span class="ben-badge ben-4ps">4Ps</span>
+      {%- endif %}
+      {%- if patient.is_pwd %}
+      <span class="ben-badge ben-pwd">PWD</span>
+      {%- endif %}
+      {%- if patient.is_senior %}
+      <span class="ben-badge ben-senior">Senior</span>
+      {%- endif %}
+      {%- if patient.is_pregnant %}
+      <span class="ben-badge ben-pregnant">Pregnant</span>
+      {%- endif %}
     </div>
+    {%- endif %}
+
   </div>
+  {%- endif %}
 
   <!-- ── QR code — bottom-right ────────────────────────────────────────────── -->
   <div class="qr-abs">
@@ -114,7 +143,7 @@
     <div class="qr-label">Scan to verify</div>
   </div>
 
-  <!-- ── Footer info — bottom-left ─────────────────────────────────────────── -->
+  <!-- ── Footer — bottom-left ──────────────────────────────────────────────── -->
   <div class="footer-abs">
     <span class="footer-issued">Issued: {{ card.issued_at }}</span>
     <span class="footer-version">CARD: V{{ card.card_version }}</span>

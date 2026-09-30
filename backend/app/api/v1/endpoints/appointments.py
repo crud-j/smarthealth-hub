@@ -218,6 +218,109 @@ async def update_appointment(
     )
 
 
+@router.post(
+    "/{appointment_id}/send-reminder",
+    summary="Send or resend an SMS reminder for an appointment",
+    dependencies=[_read_roles],
+)
+async def send_appointment_reminder(
+    appointment_id: uuid.UUID,
+    db: DbDep,
+) -> dict:  # type: ignore[type-arg]
+    """
+    Send (or resend) an SMS reminder to the patient for a specific appointment.
+
+    Fetches the appointment and its associated patient, then dispatches an SMS
+    via ``SMSService``.  SMS failures are caught and returned as
+    ``{"sent": false, "error": "..."}`` — this endpoint **never** returns HTTP
+    500 for an SMS delivery failure.
+
+    **Required roles:** admin, bhw, physician, admin_staff
+
+    **Returns:**
+    - ``{"sent": true}`` on success.
+    - ``{"sent": false, "error": "<reason>"}`` when the patient has no mobile
+      number or the SMS provider returns an error.
+
+    **Raises:**
+    - 404 if the appointment does not exist.
+    """
+    from sqlalchemy import select
+
+    from app.core.config import settings
+    from app.core.exceptions import NotFoundError
+    from app.core.logging import get_logger
+    from app.models.appointment import Appointment
+    from app.models.patient import Patient
+    from app.services.sms_service import SMSPermanentError, SMSService, SMSTransientError
+
+    _log = get_logger(__name__)
+
+    # Load appointment + patient in one JOIN query.
+    result = await db.execute(
+        select(Appointment, Patient)
+        .join(Patient, Patient.id == Appointment.patient_id)
+        .where(Appointment.id == appointment_id)
+    )
+    row = result.first()
+    if row is None:
+        raise NotFoundError(f"Appointment '{appointment_id}' not found.")
+
+    appt: Appointment = row[0]
+    patient: Patient = row[1]
+
+    if not patient.mobile_number:
+        return {"sent": False, "error": "Patient has no registered mobile number."}
+
+    # Format scheduled_at for the SMS body.
+    formatted_date = appt.scheduled_at.strftime("%B %d, %Y at %I:%M %p")
+
+    # Human-readable appointment type (replace underscores, title-case).
+    appointment_type_label = appt.appointment_type.replace("_", " ").title()
+
+    bhc_name: str = getattr(settings, "BHC_NAME", "Barangay Health Center")
+    message = (
+        f"Hi {patient.first_name}, this is a reminder for your "
+        f"{appointment_type_label} appointment at {bhc_name} on "
+        f"{formatted_date}. Please arrive on time."
+    )
+
+    try:
+        await SMSService().send_sms(
+            mobile_number=patient.mobile_number,
+            message=message,
+        )
+        _log.info(
+            "Appointment reminder SMS sent",
+            extra={
+                "appointment_id": str(appointment_id),
+                "patient_id": str(patient.id),
+            },
+        )
+        return {"sent": True}
+
+    except (SMSPermanentError, SMSTransientError) as exc:
+        _log.warning(
+            "Appointment reminder SMS failed",
+            extra={
+                "appointment_id": str(appointment_id),
+                "patient_id": str(patient.id),
+                "error": str(exc),
+            },
+        )
+        return {"sent": False, "error": str(exc)}
+
+    except Exception as exc:  # noqa: BLE001
+        _log.error(
+            "Unexpected error sending appointment reminder SMS",
+            extra={
+                "appointment_id": str(appointment_id),
+                "error": str(exc),
+            },
+        )
+        return {"sent": False, "error": "Unexpected error — see server logs."}
+
+
 @router.delete(
     "/{appointment_id}",
     summary="Cancel an appointment",

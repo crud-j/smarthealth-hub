@@ -123,6 +123,20 @@ class HealthCard(Base):
         ),
         nullable=True,
     )
+    # Async PDF generation status — set to "pending" when a generate task is
+    # dispatched to Celery, "ready" when the PDF is on disk, "failed" on error.
+    generation_status: Mapped[str] = mapped_column(
+        sa.String(20),
+        nullable=False,
+        server_default=sa.text("'pending'"),
+    )
+    # Relative file path or URL to the rendered PDF — populated by the Celery
+    # task when generation_status transitions to "ready".  Never contains PHI.
+    pdf_url: Mapped[str | None] = mapped_column(
+        sa.Text,
+        nullable=True,
+        default=None,
+    )
 
     # Relationships
     patient: Mapped["Patient"] = relationship(

@@ -19,6 +19,21 @@ every coroutine test function runs automatically without ``@pytest.mark.asyncio`
 
 from __future__ import annotations
 
+# ---------------------------------------------------------------------------
+# Test-environment encryption key — must be set BEFORE app.core.config is
+# imported so that pydantic_settings picks it up during Settings() construction.
+# This is a deterministic 32-byte key (b"smarthealthhubtest!key32bytes!!!" is
+# exactly 32 bytes) encoded as base64.  It is a test-only value — NEVER use
+# this in production.
+# ---------------------------------------------------------------------------
+import base64
+import os
+
+os.environ.setdefault(
+    "ENCRYPTION_KEY",
+    base64.b64encode(b"smarthealthhubtest!key32bytes!!!").decode(),
+)
+
 import re
 import uuid
 from collections.abc import AsyncGenerator
@@ -27,7 +42,7 @@ from typing import Any
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import event
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
     AsyncSession,
@@ -39,8 +54,6 @@ from sqlalchemy.pool import NullPool
 from app.core.config import settings
 from app.core.security import create_access_token, hash_password
 from app.db.base import Base
-from app.db.session import get_db
-from app.main import app
 from app.models.user import Role, User
 
 
@@ -64,6 +77,11 @@ def _test_database_url(base_url: str) -> str:
 
 
 _TEST_DATABASE_URL = _test_database_url(settings.DATABASE_URL)
+settings.DATABASE_URL = _TEST_DATABASE_URL
+
+from app.db.session import get_db
+from app.main import app
+from app.workers.db import set_test_session
 
 
 # ---------------------------------------------------------------------------
@@ -113,6 +131,13 @@ async def db_tables(engine):
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        for sql in (
+            "DROP RULE IF EXISTS audit_no_update ON audit_logs;",
+            "DROP RULE IF EXISTS audit_no_delete ON audit_logs;",
+            "CREATE RULE audit_no_update AS ON UPDATE TO audit_logs DO INSTEAD NOTHING;",
+            "CREATE RULE audit_no_delete AS ON DELETE TO audit_logs DO INSTEAD NOTHING;",
+        ):
+            await conn.execute(text(sql))
 
     yield
 
@@ -162,9 +187,11 @@ async def db_session(engine) -> AsyncGenerator[AsyncSession, None]:
                 # Synchronously restart the savepoint.
                 session_.begin_nested()
 
+        set_test_session(session)
         try:
             yield session
         finally:
+            set_test_session(None)
             await session.close()
             # Roll back the outer transaction — discards everything.
             await conn.rollback()

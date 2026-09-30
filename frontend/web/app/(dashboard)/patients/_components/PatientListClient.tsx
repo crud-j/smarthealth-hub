@@ -1,305 +1,24 @@
 "use client";
-/**
- * PatientListClient — interactive patient list with search, filters, and
- * pagination.
- *
- * This Client Component is responsible for:
- *   - Search input that debounces and passes ``q`` to ``usePatientList``
- *   - Flag filter toggles (Senior, PWD, Pregnant)
- *   - Rendering the patient table with a selectable checkbox column
- *   - "Print Selected" batch PDF button (admin/bhw only, up to 50 patients)
- *   - Pagination controls
- *   - "Register Patient" button (links to /patients/new)
- */
 
 import { useState, useCallback, useEffect } from "react";
 import Link from "next/link";
 import { usePatientList, useBatchPdf } from "@/hooks/usePatients";
 import { useCurrentUser } from "@/hooks/useAuth";
-import { useGenerateIntakeToken, usePendingIntakes } from "@/hooks/useIntake";
-import { apiFetch } from "@/lib/api-client";
-import type { PendingIntakeSummary } from "@/hooks/useIntake";
 import type { PatientSummary } from "@/types/patient";
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
 const PAGE_SIZE = 20;
+const BATCH_PRINT_MAX = 50;
 
 // ---------------------------------------------------------------------------
-// Flag badge helper
+// Flag badge
 // ---------------------------------------------------------------------------
 
-function FlagBadge({
-  active,
-  label,
-  color,
-}: {
-  active: boolean;
-  label: string;
-  color: string;
-}) {
+function FlagBadge({ active, label, colorClass }: { active: boolean; label: string; colorClass: string }) {
   if (!active) return null;
   return (
-    <span
-      style={{
-        display: "inline-block",
-        padding: "0.125rem 0.5rem",
-        borderRadius: "9999px",
-        fontSize: "0.625rem",
-        fontWeight: 600,
-        textTransform: "uppercase",
-        letterSpacing: "0.05em",
-        background: color,
-        color: "white",
-        marginRight: "0.25rem",
-      }}
-    >
+    <span className={`inline-block rounded-full px-2 py-0.5 text-[0.625rem] font-semibold uppercase tracking-wider ${colorClass}`}>
       {label}
     </span>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Pending intakes panel
-// ---------------------------------------------------------------------------
-
-function PendingIntakesPanel({
-  items,
-  onFinalize,
-  finalizingToken,
-}: {
-  items: PendingIntakeSummary[];
-  onFinalize: (token: string) => void;
-  finalizingToken: string | null;
-}) {
-  const submitted = items.filter((i) => i.has_draft);
-  const waiting = items.filter((i) => !i.has_draft);
-
-  if (items.length === 0) return null;
-
-  return (
-    <div
-      style={{
-        background: "#fffbeb",
-        border: "1px solid #fde68a",
-        borderRadius: "0.75rem",
-        padding: "1rem 1.25rem",
-        marginBottom: "1.25rem",
-      }}
-    >
-      <div style={{ fontWeight: 700, fontSize: "0.875rem", color: "#92400e", marginBottom: "0.75rem" }}>
-        Pending Pre-Visit Intakes ({items.length})
-      </div>
-
-      {submitted.length > 0 && (
-        <>
-          <div style={{ fontSize: "0.75rem", fontWeight: 600, color: "#78350f", marginBottom: "0.5rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-            Ready to finalize ({submitted.length})
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginBottom: "0.75rem" }}>
-            {submitted.map((item) => (
-              <div
-                key={item.token}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  background: "white",
-                  border: "1px solid #fde68a",
-                  borderRadius: "0.5rem",
-                  padding: "0.625rem 0.875rem",
-                  gap: "1rem",
-                  flexWrap: "wrap",
-                }}
-              >
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: "0.875rem", color: "#1a0808" }}>
-                    {item.patient_name ?? "Patient (name pending)"}
-                  </div>
-                  <div style={{ fontSize: "0.75rem", color: "#78350f" }}>
-                    Form submitted · expires {new Date(item.expires_at).toLocaleString("en-PH", { dateStyle: "medium", timeStyle: "short" })}
-                  </div>
-                </div>
-                <button
-                  onClick={() => onFinalize(item.token)}
-                  disabled={finalizingToken === item.token}
-                  style={{
-                    padding: "0.4rem 1rem",
-                    background: finalizingToken === item.token
-                      ? "#d4a0a0"
-                      : "linear-gradient(135deg, #166534, #15803d)",
-                    color: "white",
-                    border: "none",
-                    borderRadius: "0.375rem",
-                    fontWeight: 700,
-                    fontSize: "0.8125rem",
-                    cursor: finalizingToken === item.token ? "not-allowed" : "pointer",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {finalizingToken === item.token ? "Finalizing..." : "Finalize →"}
-                </button>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-
-      {waiting.length > 0 && (
-        <>
-          <div style={{ fontSize: "0.75rem", fontWeight: 600, color: "#78350f", marginBottom: "0.5rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-            Waiting for patient ({waiting.length})
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.375rem" }}>
-            {waiting.map((item) => (
-              <div
-                key={item.token}
-                style={{
-                  fontSize: "0.8125rem",
-                  color: "#92400e",
-                  padding: "0.375rem 0.5rem",
-                  background: "rgba(254,243,199,0.5)",
-                  borderRadius: "0.375rem",
-                }}
-              >
-                Link sent · expires {new Date(item.expires_at).toLocaleString("en-PH", { dateStyle: "medium", timeStyle: "short" })}
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Intake link modal
-// ---------------------------------------------------------------------------
-
-function IntakeLinkModal({
-  intakeUrl,
-  expiresAt,
-  onClose,
-}: {
-  intakeUrl: string;
-  expiresAt: string;
-  onClose: () => void;
-}) {
-  const [copied, setCopied] = useState(false);
-
-  function handleCopy() {
-    void navigator.clipboard.writeText(intakeUrl).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2500);
-    });
-  }
-
-  const expiryDate = new Date(expiresAt).toLocaleString("en-PH", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-
-  return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.45)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 9999,
-        padding: "1rem",
-      }}
-      onClick={onClose}
-    >
-      <div
-        style={{
-          background: "white",
-          borderRadius: "1rem",
-          padding: "1.5rem",
-          maxWidth: 520,
-          width: "100%",
-          boxShadow: "0 20px 60px rgba(0,0,0,0.2)",
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1rem" }}>
-          <h2 style={{ fontSize: "1rem", fontWeight: 700, color: "#1a0808", margin: 0 }}>
-            Pre-Visit Form Link
-          </h2>
-          <button
-            onClick={onClose}
-            style={{ background: "none", border: "none", fontSize: "1.25rem", cursor: "pointer", color: "#6b7280", lineHeight: 1 }}
-            aria-label="Close"
-          >
-            &times;
-          </button>
-        </div>
-
-        <p style={{ fontSize: "0.8125rem", color: "#475569", marginBottom: "1rem", lineHeight: 1.5 }}>
-          Share this link with the patient. They can fill in their details on their own device before arriving.
-          The link expires on <strong>{expiryDate}</strong> and can only be used once.
-        </p>
-
-        <div
-          style={{
-            background: "#f8fafc",
-            border: "1px solid #e2e8f0",
-            borderRadius: "0.5rem",
-            padding: "0.75rem 1rem",
-            marginBottom: "1rem",
-            wordBreak: "break-all",
-            fontSize: "0.8125rem",
-            color: "#0f172a",
-            fontFamily: "monospace",
-          }}
-        >
-          {intakeUrl}
-        </div>
-
-        <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
-          <button
-            onClick={handleCopy}
-            style={{
-              padding: "0.5rem 1.25rem",
-              background: copied
-                ? "linear-gradient(135deg, #166534, #15803d)"
-                : "linear-gradient(135deg, #0f766e, #0d9488)",
-              color: "white",
-              border: "none",
-              borderRadius: "0.375rem",
-              fontWeight: 700,
-              fontSize: "0.875rem",
-              cursor: "pointer",
-            }}
-          >
-            {copied ? "✓ Copied!" : "Copy Link"}
-          </button>
-          <button
-            onClick={onClose}
-            style={{
-              padding: "0.5rem 1.25rem",
-              background: "white",
-              color: "#374151",
-              border: "1px solid #d1d5db",
-              borderRadius: "0.375rem",
-              fontWeight: 600,
-              fontSize: "0.875rem",
-              cursor: "pointer",
-            }}
-          >
-            Close
-          </button>
-        </div>
-
-        <p style={{ marginTop: "0.75rem", fontSize: "0.7rem", color: "#9ca3af" }}>
-          After the patient submits, find their draft in Patients → Pending Intake and click Finalize to create the record.
-        </p>
-      </div>
-    </div>
   );
 }
 
@@ -319,106 +38,51 @@ function PatientRow({
   showCheckbox: boolean;
 }) {
   return (
-    <tr
-      style={{
-        borderBottom: "1px solid #f0e4dd",
-        transition: "background 0.1s",
-        background: selected ? "#fff0ee" : "white",
-      }}
-      onMouseEnter={(e) => {
-        if (!selected)
-          (e.currentTarget as HTMLTableRowElement).style.background = "#fdf5f0";
-      }}
-      onMouseLeave={(e) => {
-        if (!selected)
-          (e.currentTarget as HTMLTableRowElement).style.background = "white";
-      }}
-    >
-      {/* Checkbox — only rendered for roles that can batch-print */}
+    <tr className={`border-b border-[#f0e4dd] transition-colors duration-150 hover:bg-[#fdf5f0] ${selected ? "bg-[#fff0ee]" : "bg-white"}`}>
       {showCheckbox && (
-        <td
-          style={{ padding: "0.75rem 0.75rem", textAlign: "center", width: "2.5rem" }}
-        >
+        <td className="w-10 px-3 py-3 text-center">
           <input
             type="checkbox"
             checked={selected}
             onChange={(e) => onToggle(patient.id, e.target.checked)}
             aria-label={`Select ${patient.fullName}`}
-            style={{ cursor: "pointer", width: "1rem", height: "1rem" }}
+            className="h-4 w-4 cursor-pointer accent-[#b5343e]"
           />
         </td>
       )}
 
-      {/* Patient Code */}
-      <td
-        style={{
-          padding: "0.75rem 1rem",
-          fontSize: "0.875rem",
-          fontFamily: "monospace",
-          color: "#1a0808",
-          fontWeight: 500,
-          whiteSpace: "nowrap",
-        }}
-      >
+      <td className="px-4 py-3 font-mono text-sm font-medium text-[#1a0808] whitespace-nowrap">
         {patient.patientCode}
       </td>
 
-      {/* Full Name */}
-      <td style={{ padding: "0.75rem 1rem" }}>
-        <div style={{ fontSize: "0.875rem", fontWeight: 600, color: "#1a0808" }}>
-          {patient.fullName}
-        </div>
+      <td className="px-4 py-3">
+        <p className="text-sm font-semibold text-[#1a0808]">{patient.fullName}</p>
       </td>
 
-      {/* Age / Sex */}
-      <td
-        style={{
-          padding: "0.75rem 1rem",
-          fontSize: "0.875rem",
-          color: "#7a5252",
-          whiteSpace: "nowrap",
-        }}
-      >
+      <td className="px-4 py-3 text-sm text-[#7a5252] whitespace-nowrap">
         {patient.age} / {patient.sex.charAt(0).toUpperCase() + patient.sex.slice(1)}
       </td>
 
-      {/* Contact No. */}
-      <td
-        style={{
-          padding: "0.75rem 1rem",
-          fontSize: "0.875rem",
-          color: "#7a5252",
-        }}
-      >
-        {patient.mobileNumber ?? (
-          <span style={{ color: "#d4b0b0", fontStyle: "italic" }}>—</span>
-        )}
+      <td className="px-4 py-3 text-sm text-[#7a5252]">
+        {patient.mobileNumber ?? <span className="italic text-[#d4b0b0]">—</span>}
       </td>
 
-      {/* Flags */}
-      <td style={{ padding: "0.75rem 1rem", whiteSpace: "nowrap" }}>
-        <FlagBadge active={patient.isSenior} label="Senior" color="#8b5cf6" />
-        <FlagBadge active={patient.isPwd} label="PWD" color="#0891b2" />
-        <FlagBadge active={patient.isPregnant} label="Pregnant" color="#db2777" />
-        {!patient.isSenior && !patient.isPwd && !patient.isPregnant && (
-          <span style={{ color: "#d4b0b0", fontSize: "0.75rem" }}>—</span>
-        )}
+      <td className="px-4 py-3 whitespace-nowrap">
+        <div className="flex flex-wrap gap-1">
+          <FlagBadge active={patient.isSenior} label="Senior" colorClass="bg-violet-100 text-violet-700" />
+          <FlagBadge active={patient.isPwd} label="PWD" colorClass="bg-sky-100 text-sky-700" />
+          <FlagBadge active={patient.isPregnant} label="Pregnant" colorClass="bg-pink-100 text-pink-700" />
+          {!patient.isSenior && !patient.isPwd && !patient.isPregnant && (
+            <span className="text-xs text-[#d4b0b0]">—</span>
+          )}
+        </div>
       </td>
 
-      {/* Actions */}
-      <td style={{ padding: "0.75rem 1rem", textAlign: "right" }}>
+      <td className="px-4 py-3 text-right">
         <Link
           href={`/patients/${patient.id}`}
-          style={{
-            display: "inline-block",
-            padding: "0.375rem 0.875rem",
-            background: "linear-gradient(135deg, #b5343e, #c94060)",
-            color: "white",
-            borderRadius: "0.375rem",
-            fontSize: "0.75rem",
-            fontWeight: 500,
-            textDecoration: "none",
-          }}
+          className="inline-flex items-center rounded-lg px-3 py-1.5 text-xs font-semibold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e]"
+          style={{ background: "linear-gradient(135deg, #b5343e, #c94060)" }}
         >
           View
         </Link>
@@ -426,9 +90,6 @@ function PatientRow({
     </tr>
   );
 }
-
-// Maximum patients that can be batch-printed in a single request.
-const BATCH_PRINT_MAX = 50;
 
 // ---------------------------------------------------------------------------
 // Debounce hook
@@ -453,64 +114,17 @@ export default function PatientListClient() {
   const [filterPwd, setFilterPwd] = useState<boolean | undefined>(undefined);
   const [filterPregnant, setFilterPregnant] = useState<boolean | undefined>(undefined);
   const [page, setPage] = useState(1);
-
-  // Selection state: Set of patient UUIDs selected for batch print.
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  // Warning shown when the user tries to select more than BATCH_PRINT_MAX patients.
   const [selectionWarning, setSelectionWarning] = useState<string | null>(null);
 
-  // Batch PDF hook (admin/bhw only — role check below gates the button).
   const { printBatch, loading: batchLoading } = useBatchPdf();
 
-  // Intake token generation
-  const { generate: generateIntake, loading: intakeLoading, result: intakeResult, clear: clearIntake } = useGenerateIntakeToken();
-  const [showIntakeModal, setShowIntakeModal] = useState(false);
-
-  async function handleGenerateIntake() {
-    const data = await generateIntake();
-    if (data) setShowIntakeModal(true);
-  }
-
-  // Pending intakes
-  const { data: pendingIntakes, refresh: refreshPending } = usePendingIntakes();
-  const [finalizingToken, setFinalizingToken] = useState<string | null>(null);
-  const [finalizeError, setFinalizeError] = useState<string | null>(null);
-
-  const handleFinalize = useCallback(async (token: string) => {
-    setFinalizingToken(token);
-    setFinalizeError(null);
-    try {
-      await apiFetch(`/intake/${token}/finalize`, { method: "POST" });
-      await refreshPending();
-      setPage(1);
-    } catch (err) {
-      setFinalizeError(err instanceof Error ? err.message : "Finalization failed.");
-    } finally {
-      setFinalizingToken(null);
-    }
-  }, [refreshPending]);
-
-  // Current user — used to gate buttons by role.
   const { user } = useCurrentUser();
-  const canBatchPrint =
-    user?.role === "admin" || user?.role === "bhw";
-  // BHW, physician, admin_staff, and admin can generate intake links.
-  const canGenerateIntake =
-    user?.role === "admin" ||
-    user?.role === "bhw" ||
-    user?.role === "physician" ||
-    user?.role === "admin_staff";
+  const canBatchPrint = user?.role === "admin" || user?.role === "bhw";
 
-  // Debounce the search input so we don't fire on every keystroke.
   const q = useDebounced(searchInput, 300);
 
-  // Reset page when search/filters change.
-  useEffect(() => {
-    setPage(1);
-  }, [q, filterSenior, filterPwd, filterPregnant]);
-
-  // Clear selection when filters / search / page changes (avoids cross-page
-  // selection confusion where the user doesn't see which rows are selected).
+  useEffect(() => { setPage(1); }, [q, filterSenior, filterPwd, filterPregnant]);
   useEffect(() => {
     setSelectedIds(new Set());
     setSelectionWarning(null);
@@ -526,393 +140,218 @@ export default function PatientListClient() {
   });
 
   const totalPages = data ? Math.ceil(data.total / PAGE_SIZE) : 1;
-
-  // IDs visible on the current page.
   const pageIds: string[] = data?.items.map((p) => p.id) ?? [];
+  const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
+  const somePageSelected = !allPageSelected && pageIds.some((id) => selectedIds.has(id));
 
-  // Master-select state: true when all visible rows are selected.
-  const allPageSelected =
-    pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
-  const somePageSelected =
-    !allPageSelected && pageIds.some((id) => selectedIds.has(id));
+  const handleRowToggle = useCallback((id: string, checked: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) {
+        if (next.size >= BATCH_PRINT_MAX) {
+          setSelectionWarning(`Maximum ${BATCH_PRINT_MAX} patients can be selected for batch print.`);
+          return prev;
+        }
+        next.add(id);
+      } else {
+        next.delete(id);
+      }
+      if (next.size < BATCH_PRINT_MAX) setSelectionWarning(null);
+      return next;
+    });
+  }, []);
 
-  // ---------------------------------------------------------------------------
-  // Selection handlers
-  // ---------------------------------------------------------------------------
-
-  const handleRowToggle = useCallback(
-    (id: string, checked: boolean) => {
-      setSelectedIds((prev) => {
-        const next = new Set(prev);
-        if (checked) {
+  const handleMasterToggle = useCallback((checked: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) {
+        for (const id of pageIds) {
           if (next.size >= BATCH_PRINT_MAX) {
-            setSelectionWarning(
-              `Maximum ${BATCH_PRINT_MAX} patients can be selected for batch print.`
-            );
-            return prev; // reject the addition
+            setSelectionWarning(`Maximum ${BATCH_PRINT_MAX} patients can be selected for batch print.`);
+            break;
           }
           next.add(id);
-        } else {
-          next.delete(id);
         }
-        if (next.size < BATCH_PRINT_MAX) setSelectionWarning(null);
-        return next;
-      });
-    },
-    []
-  );
+      } else {
+        for (const id of pageIds) { next.delete(id); }
+        setSelectionWarning(null);
+      }
+      return next;
+    });
+  }, [pageIds]);
 
-  const handleMasterToggle = useCallback(
-    (checked: boolean) => {
-      setSelectedIds((prev) => {
-        const next = new Set(prev);
-        if (checked) {
-          // Only add page rows that won't push us over the cap.
-          for (const id of pageIds) {
-            if (next.size >= BATCH_PRINT_MAX) {
-              setSelectionWarning(
-                `Maximum ${BATCH_PRINT_MAX} patients can be selected for batch print.`
-              );
-              break;
-            }
-            next.add(id);
-          }
-        } else {
-          for (const id of pageIds) {
-            next.delete(id);
-          }
-          setSelectionWarning(null);
-        }
-        return next;
-      });
-    },
-    [pageIds]
-  );
-
-  // ---------------------------------------------------------------------------
-  // Filter toggle helpers
-  // ---------------------------------------------------------------------------
-
-  function toggleFilter(
-    current: boolean | undefined,
-    setter: (v: boolean | undefined) => void
-  ) {
+  function toggleFilter(current: boolean | undefined, setter: (v: boolean | undefined) => void) {
     if (current === undefined) setter(true);
     else if (current === true) setter(false);
     else setter(undefined);
   }
 
-  function filterButtonStyle(active: boolean | undefined, activeColor: string) {
-    const base: React.CSSProperties = {
-      padding: "0.375rem 0.75rem",
-      borderRadius: "0.375rem",
-      fontSize: "0.75rem",
-      fontWeight: 500,
-      border: "1px solid",
-      cursor: "pointer",
-      transition: "all 0.15s",
-    };
-    if (active === true)
-      return { ...base, background: activeColor, color: "white", borderColor: activeColor };
-    if (active === false)
-      return { ...base, background: "#fef2f2", color: "#dc2626", borderColor: "#fca5a5" };
-    return { ...base, background: "white", color: "#9b6e6e", borderColor: "#e5d4cc" };
+  function filterButtonClass(active: boolean | undefined, trueClass: string, falseClass: string): string {
+    if (active === true) return trueClass;
+    if (active === false) return falseClass;
+    return "rounded-lg border border-[#e5d4cc] bg-white px-3 py-1.5 text-xs font-medium text-[#9b6e6e] cursor-pointer hover:bg-[#fdf5f0] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e]";
   }
 
   return (
     <div>
       {/* Controls bar */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "0.75rem",
-          marginBottom: "1rem",
-          flexWrap: "wrap",
-        }}
-      >
-        {/* Search */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <input
           type="search"
           placeholder="Search by name, code, or mobile..."
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value)}
           aria-label="Search patients"
-          style={{
-            flex: "1 1 250px",
-            padding: "0.5rem 0.875rem",
-            border: "1px solid #e5d4cc",
-            borderRadius: "0.375rem",
-            fontSize: "0.875rem",
-            color: "#1a0808",
-            outline: "none",
-            minWidth: 200,
-          }}
+          className="min-w-[200px] flex-1 rounded-lg border border-[#e5d4cc] bg-white px-3 py-2 text-sm text-[#1a0808] placeholder-[#c08080] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e]"
         />
 
-        {/* Flag filters */}
         <button
           onClick={() => toggleFilter(filterSenior, setFilterSenior)}
-          style={filterButtonStyle(filterSenior, "#8b5cf6")}
-          title="Toggle Senior filter (click for Yes, again for No, again to clear)"
+          className={filterButtonClass(
+            filterSenior,
+            "rounded-lg border border-violet-400 bg-violet-100 px-3 py-1.5 text-xs font-semibold text-violet-700 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-violet-600",
+            "rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-red-500"
+          )}
+          title="Toggle Senior filter"
         >
           Senior {filterSenior === true ? "✓" : filterSenior === false ? "✗" : ""}
         </button>
         <button
           onClick={() => toggleFilter(filterPwd, setFilterPwd)}
-          style={filterButtonStyle(filterPwd, "#0891b2")}
+          className={filterButtonClass(
+            filterPwd,
+            "rounded-lg border border-sky-400 bg-sky-100 px-3 py-1.5 text-xs font-semibold text-sky-700 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-600",
+            "rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-red-500"
+          )}
           title="Toggle PWD filter"
         >
           PWD {filterPwd === true ? "✓" : filterPwd === false ? "✗" : ""}
         </button>
         <button
           onClick={() => toggleFilter(filterPregnant, setFilterPregnant)}
-          style={filterButtonStyle(filterPregnant, "#db2777")}
+          className={filterButtonClass(
+            filterPregnant,
+            "rounded-lg border border-pink-400 bg-pink-100 px-3 py-1.5 text-xs font-semibold text-pink-700 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-pink-600",
+            "rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-red-500"
+          )}
           title="Toggle Pregnant filter"
         >
           Pregnant {filterPregnant === true ? "✓" : filterPregnant === false ? "✗" : ""}
         </button>
 
-        {/* "Print Selected" button — admin/bhw only, visible when ≥1 selected */}
         {canBatchPrint && selectedIds.size >= 1 && (
           <button
             onClick={() => void printBatch([...selectedIds])}
             disabled={batchLoading}
-            title={`Print health cards for ${selectedIds.size} selected patient${selectedIds.size !== 1 ? "s" : ""}`}
-            style={{
-              padding: "0.5rem 1rem",
-              background: batchLoading ? "#d4a0a0" : "linear-gradient(135deg, #b5343e, #c94060)",
-              color: "white",
-              borderRadius: "0.375rem",
-              fontSize: "0.875rem",
-              fontWeight: 600,
-              border: "none",
-              cursor: batchLoading ? "not-allowed" : "pointer",
-              whiteSpace: "nowrap",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "0.5rem",
-              transition: "background 0.15s",
-            }}
+            className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e] whitespace-nowrap"
+            style={{ background: batchLoading ? "#d4a0a0" : "linear-gradient(135deg, #b5343e, #c94060)" }}
           >
             {batchLoading ? (
               <>
-                {/* Inline CSS spinner — no external component dependency */}
-                <span
-                  style={{
-                    display: "inline-block",
-                    width: "0.875rem",
-                    height: "0.875rem",
-                    border: "2px solid rgba(255,255,255,0.4)",
-                    borderTopColor: "white",
-                    borderRadius: "50%",
-                    animation: "spin 0.7s linear infinite",
-                  }}
-                  aria-hidden="true"
-                />
+                <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                  <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
+                  <path d="M12 2a10 10 0 0 1 10 10" />
+                </svg>
                 Generating...
               </>
-            ) : (
-              `Print Selected (${selectedIds.size})`
-            )}
+            ) : `Print Selected (${selectedIds.size})`}
           </button>
         )}
 
-        {/* Send pre-visit form link button */}
-        {canGenerateIntake && (
-          <button
-            onClick={() => void handleGenerateIntake()}
-            disabled={intakeLoading}
-            style={{
-              marginLeft: "auto",
-              padding: "0.5rem 1rem",
-              background: intakeLoading
-                ? "#94a3b8"
-                : "linear-gradient(135deg, #0f766e, #0d9488)",
-              color: "white",
-              borderRadius: "0.375rem",
-              fontSize: "0.875rem",
-              fontWeight: 600,
-              border: "none",
-              cursor: intakeLoading ? "not-allowed" : "pointer",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {intakeLoading ? "Generating..." : "Send Pre-Visit Form"}
-          </button>
-        )}
-
-        {/* Register button */}
         <Link
           href="/patients/new"
-          style={{
-            marginLeft: canGenerateIntake ? "0" : "auto",
-            padding: "0.5rem 1rem",
-            background: "linear-gradient(135deg, #b5343e, #c94060)",
-            color: "white",
-            borderRadius: "0.375rem",
-            fontSize: "0.875rem",
-            fontWeight: 600,
-            textDecoration: "none",
-            whiteSpace: "nowrap",
-          }}
+          className="ml-auto flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white whitespace-nowrap focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e]"
+          style={{ background: "linear-gradient(135deg, #b5343e, #c94060)" }}
         >
-          + Register Patient
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true">
+            <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+          Register Patient
         </Link>
       </div>
 
-      {/* Intake link modal */}
-      {showIntakeModal && intakeResult && (
-        <IntakeLinkModal
-          intakeUrl={intakeResult.intake_url}
-          expiresAt={intakeResult.expires_at}
-          onClose={() => { setShowIntakeModal(false); clearIntake(); }}
-        />
-      )}
-
-      {/* Inline keyframes for spinner — injected once in the DOM */}
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-
-      {/* Pending intakes panel */}
-      {canGenerateIntake && pendingIntakes.length > 0 && (
-        <PendingIntakesPanel
-          items={pendingIntakes}
-          onFinalize={(token) => void handleFinalize(token)}
-          finalizingToken={finalizingToken}
-        />
-      )}
-
-      {/* Finalize error */}
-      {finalizeError && (
-        <div style={{ padding: "0.625rem 1rem", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "0.375rem", color: "#991b1b", fontSize: "0.875rem", marginBottom: "0.75rem" }}>
-          {finalizeError}
-        </div>
-      )}
-
-      {/* Selection cap warning */}
+      {/* Selection warning */}
       {selectionWarning && (
-        <div
-          style={{
-            padding: "0.75rem 1rem",
-            background: "#fffbeb",
-            border: "1px solid #fcd34d",
-            borderRadius: "0.375rem",
-            color: "#92400e",
-            fontSize: "0.875rem",
-            marginBottom: "0.75rem",
-          }}
-          role="alert"
-        >
+        <div role="alert" className="mb-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
           {selectionWarning}
         </div>
       )}
 
       {/* Error state */}
       {error && (
-        <div
-          style={{
-            padding: "1rem",
-            background: "#fef2f2",
-            border: "1px solid #fca5a5",
-            borderRadius: "0.375rem",
-            color: "#dc2626",
-            fontSize: "0.875rem",
-            marginBottom: "1rem",
-          }}
-        >
+        <div role="alert" className="mb-4 rounded-xl border border-[#fcc] bg-[#fef2f2] p-4 text-sm font-medium text-[#b91c1c]">
           {error.message}
         </div>
       )}
 
       {/* Table */}
       <div
-        style={{
-          background: "white",
-          border: "1px solid #e5d4cc",
-          borderRadius: "1rem",
-          overflow: "hidden",
-          boxShadow: "0 2px 10px rgba(160,80,80,0.06)",
-        }}
+        className="overflow-hidden rounded-xl bg-white border border-[#e5d4cc]"
+        style={{ boxShadow: "0 2px 10px rgba(160,80,80,0.07)" }}
       >
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead>
-            <tr style={{ background: "linear-gradient(135deg, #fdf0eb 0%, #ffffff 100%)", borderBottom: "2px solid #e5d4cc" }}>
-              {/* Master checkbox column — only for admin/bhw */}
-              {canBatchPrint && (
-                <th
-                  style={{
-                    padding: "0.625rem 0.75rem",
-                    textAlign: "center",
-                    width: "2.5rem",
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={allPageSelected}
-                    ref={(el) => {
-                      if (el) el.indeterminate = somePageSelected;
-                    }}
-                    onChange={(e) => handleMasterToggle(e.target.checked)}
-                    aria-label="Select all patients on this page"
-                    style={{ cursor: "pointer", width: "1rem", height: "1rem" }}
-                    disabled={pageIds.length === 0}
-                  />
-                </th>
-              )}
-              {["Patient Code", "Full Name", "Age / Sex", "Contact No.", "Flags", ""].map(
-                (h) => (
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse" aria-label="Patient records">
+            <thead>
+              <tr
+                className="border-b-2 border-[#e5d4cc]"
+                style={{ background: "linear-gradient(135deg, #fdf0eb 0%, #ffffff 100%)" }}
+              >
+                {canBatchPrint && (
+                  <th className="w-10 px-3 py-3 text-center">
+                    <input
+                      type="checkbox"
+                      checked={allPageSelected}
+                      ref={(el) => { if (el) el.indeterminate = somePageSelected; }}
+                      onChange={(e) => handleMasterToggle(e.target.checked)}
+                      aria-label="Select all patients on this page"
+                      disabled={pageIds.length === 0}
+                      className="h-4 w-4 cursor-pointer accent-[#b5343e]"
+                    />
+                  </th>
+                )}
+                {["Patient Code", "Full Name", "Age / Sex", "Contact No.", "Flags", ""].map((h) => (
                   <th
                     key={h}
-                    style={{
-                      padding: "0.625rem 1rem",
-                      textAlign: h === "" ? "right" : "left",
-                      fontSize: "0.75rem",
-                      fontWeight: 600,
-                      color: "#9b6e6e",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.05em",
-                      whiteSpace: "nowrap",
-                    }}
+                    className={`px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-[#9b6e6e] whitespace-nowrap ${h === "" ? "text-right" : ""}`}
                   >
                     {h}
                   </th>
-                )
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {loading && Array.from({ length: 5 }).map((_, i) => (
+                <tr key={i} className="border-b border-[#f0e4dd]">
+                  {Array.from({ length: canBatchPrint ? 7 : 6 }).map((__, j) => (
+                    <td key={j} className="px-4 py-3">
+                      <div className="h-4 animate-pulse rounded bg-[#e8d5cc]" />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+
+              {!loading && data && data.items.length === 0 && (
+                <tr>
+                  <td colSpan={canBatchPrint ? 7 : 6}>
+                    <div role="status" className="flex flex-col items-center justify-center py-16 text-center">
+                      <div className="mb-3 text-[#c08080]">
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+                          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                          <circle cx="9" cy="7" r="4" />
+                        </svg>
+                      </div>
+                      <p className="text-sm font-medium text-[#9b6e6e]">
+                        {q ? `No patients match "${q}"` : "No patients registered yet."}
+                      </p>
+                      <p className="mt-1 text-xs text-[#c08080]">
+                        {q ? "Try a different search term." : "Register the first patient to get started."}
+                      </p>
+                    </div>
+                  </td>
+                </tr>
               )}
-            </tr>
-          </thead>
-          <tbody>
-            {loading && (
-              <tr>
-                <td
-                  colSpan={canBatchPrint ? 7 : 6}
-                  style={{
-                    padding: "3rem",
-                    textAlign: "center",
-                    color: "#b09090",
-                    fontSize: "0.875rem",
-                  }}
-                >
-                  Loading...
-                </td>
-              </tr>
-            )}
-            {!loading && data && data.items.length === 0 && (
-              <tr>
-                <td
-                  colSpan={canBatchPrint ? 7 : 6}
-                  style={{
-                    padding: "3rem",
-                    textAlign: "center",
-                    color: "#b09090",
-                    fontSize: "0.875rem",
-                  }}
-                >
-                  {q ? `No patients match "${q}"` : "No patients registered yet."}
-                </td>
-              </tr>
-            )}
-            {!loading &&
-              data?.items.map((p) => (
+
+              {!loading && data?.items.map((p) => (
                 <PatientRow
                   key={p.id}
                   patient={p}
@@ -921,75 +360,39 @@ export default function PatientListClient() {
                   showCheckbox={canBatchPrint}
                 />
               ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Pagination + count */}
-      {data && data.total > 0 && (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            marginTop: "1rem",
-            fontSize: "0.875rem",
-            color: "#9b6e6e",
-          }}
-        >
-          <span>
-            Showing {(page - 1) * PAGE_SIZE + 1}–
-            {Math.min(page * PAGE_SIZE, data.total)} of {data.total} patient
-            {data.total !== 1 ? "s" : ""}
-            {selectedIds.size > 0 && (
-              <span style={{ marginLeft: "0.5rem", color: "#c94040", fontWeight: 500 }}>
-                ({selectedIds.size} selected)
-              </span>
-            )}
-          </span>
-          <div style={{ display: "flex", gap: "0.5rem" }}>
-            <button
-              disabled={page <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              style={{
-                padding: "0.375rem 0.75rem",
-                border: "1px solid #e5d4cc",
-                borderRadius: "0.375rem",
-                fontSize: "0.875rem",
-                cursor: page <= 1 ? "not-allowed" : "pointer",
-                background: "white",
-                color: page <= 1 ? "#d4b0b0" : "#1a0808",
-              }}
-            >
-              Previous
-            </button>
-            <span
-              style={{
-                padding: "0.375rem 0.75rem",
-                fontSize: "0.875rem",
-                color: "#1a0808",
-              }}
-            >
-              {page} / {totalPages}
-            </span>
-            <button
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              style={{
-                padding: "0.375rem 0.75rem",
-                border: "1px solid #e5d4cc",
-                borderRadius: "0.375rem",
-                fontSize: "0.875rem",
-                cursor: page >= totalPages ? "not-allowed" : "pointer",
-                background: "white",
-                color: page >= totalPages ? "#d4b0b0" : "#1a0808",
-              }}
-            >
-              Next
-            </button>
-          </div>
+            </tbody>
+          </table>
         </div>
-      )}
+
+        {/* Pagination */}
+        {data && data.total > 0 && (
+          <div className="flex items-center justify-between px-5 py-3 border-t border-[#e5d4cc]">
+            <span className="text-sm font-medium text-[#9b6e6e]">
+              Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, data.total)} of {data.total} patient{data.total !== 1 ? "s" : ""}
+              {selectedIds.size > 0 && (
+                <span className="ml-2 font-semibold text-[#c94040]">({selectedIds.size} selected)</span>
+              )}
+            </span>
+            <div className="flex gap-2">
+              <button
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                className="rounded-lg border border-[#e5d4cc] bg-white px-3 py-1.5 text-sm font-medium text-[#1a0808] disabled:text-[#d4b0b0] disabled:cursor-not-allowed hover:bg-[#fdf5f0] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e]"
+              >
+                Previous
+              </button>
+              <span className="flex items-center px-2 text-sm text-[#9b6e6e]">{page} / {totalPages}</span>
+              <button
+                disabled={page >= totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                className="rounded-lg border border-[#e5d4cc] bg-white px-3 py-1.5 text-sm font-medium text-[#1a0808] disabled:text-[#d4b0b0] disabled:cursor-not-allowed hover:bg-[#fdf5f0] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e]"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

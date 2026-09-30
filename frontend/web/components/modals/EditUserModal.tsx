@@ -16,7 +16,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { apiFetch, ApiError } from "@/lib/api-client";
-import { swError } from "@/lib/swal";
+import { toast } from "@/lib/toast";
 import type { StaffUser } from "@/app/(dashboard)/settings/users/page";
 
 // ---------------------------------------------------------------------------
@@ -186,7 +186,7 @@ export default function EditUserModal({
       });
       onUpdated();
     } catch (err) {
-      void swError(err instanceof ApiError ? (err.message || "Failed to update user.") : "Network error. Please try again.");
+      toast.error(err instanceof ApiError ? (err.message || "Failed to update user.") : "Network error. Please try again.");
     } finally {
       setSubmitting(false);
     }

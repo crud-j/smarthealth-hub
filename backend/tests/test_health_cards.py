@@ -73,7 +73,8 @@ async def _register_patient(client: AsyncClient, token: str) -> dict:
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 201, f"Patient registration failed: {resp.text}"
-    return resp.json()
+    body = resp.json()
+    return body.get("patient", body)
 
 
 # ============================================================================

@@ -6,7 +6,12 @@
     "dev": "next dev -H 0.0.0.0",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "generate:api": "openapi-typescript http://localhost:8000/openapi.json -o types/api.generated.d.ts",
+    "generate:api:check": "openapi-typescript http://localhost:8000/openapi.json -o /tmp/api.check.d.ts && diff types/api.generated.d.ts /tmp/api.check.d.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.3.4",
@@ -19,23 +24,29 @@
     "react-dom": "^19.0.0",
     "react-hook-form": "^7.53.0",
     "recharts": "^3.10.1",
-    "sweetalert2": "^11.26.25",
-    "sweetalert2-react-content": "^5.1.2",
+    "sweetalert2": "^11.14.5",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
+    "openapi-typescript": "^7.0.0",
     "@playwright/test": "^1.49.0",
     "@tailwindcss/postcss": "^4",
+    "@testing-library/jest-dom": "^6.0.0",
+    "@testing-library/react": "^16.0.0",
+    "@testing-library/user-event": "^14.0.0",
     "@types/node": "^22",
     "@types/qrcode": "^1.5.5",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^4.0.0",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
+    "jsdom": "^25.0.0",
     "postcss": "^8",
     "tailwindcss": "^4",
     "typescript": "^5",
+    "vitest": "^2.0.0",
     "wait-on": "^8.0.1"
   }
 }

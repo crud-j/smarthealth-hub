@@ -500,5 +500,9 @@ async def revoke_credential(
         action="PASSKEY_REVOKED",
         entity_type="passkey_credential",
         entity_id=credential_id,
-        metadata={"revoked_by": str(revoked_by), "owner_user_id": str(user_id)},
+        metadata={
+            "credential_id": str(credential_id),
+            "revoked_by": str(revoked_by),
+            "owner_user_id": str(user_id),
+        },
     )
