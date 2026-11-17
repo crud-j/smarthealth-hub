@@ -1,0 +1,29 @@
+# SmartHealth Hub — HTTPS reverse proxy for the FastAPI backend.
+#
+# API_DOMAIN comes from .env.server (e.g. api.203-0-113-10.sslip.io).
+# Caddy obtains and renews the Let's Encrypt certificate automatically;
+# ports 80 and 443 must be open on the server firewall.
+#
+# Traffic reaching this host:
+#   - Vercel's server proxying /api/v1/* and /media/* for the web app
+#   - Phones opening signed NFC chip links (/view/...)
+#   - The NFC relay / Android reader app (/api/v1/health-cards/scan-uid)
+
+{$API_DOMAIN} {
+	encode zstd gzip
+
+	# Patient photos are capped at 5 MiB by the API; leave headroom for
+	# multipart overhead and ID scans.
+	request_body {
+		max_size 15MB
+	}
+
+	reverse_proxy backend:8000
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}

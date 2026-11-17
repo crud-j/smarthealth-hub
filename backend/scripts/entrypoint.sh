@@ -1,28 +1,40 @@
 #!/bin/sh
+# SmartHealth Hub backend container entrypoint.
+#
+# 1. Waits until PostgreSQL (from DATABASE_URL) accepts TCP connections.
+# 2. Runs `alembic upgrade head` when RUN_MIGRATIONS=true (set it on the API
+#    service only, so worker/beat don't race the migration).
+# 3. Execs the container command (uvicorn by default, or celery worker/beat),
+#    so signals (SIGTERM/SIGINT) reach the process directly.
 set -e
 
-# Wait for PostgreSQL to accept connections
-MAX_ATTEMPTS=30
-ATTEMPT=0
-
 echo "[entrypoint] Waiting for PostgreSQL..."
-until pg_isready -q 2>/dev/null; do
-  ATTEMPT=$((ATTEMPT + 1))
-  if [ "$ATTEMPT" -ge "$MAX_ATTEMPTS" ]; then
-    echo "[entrypoint] ERROR: PostgreSQL did not become ready after ${MAX_ATTEMPTS} attempts. Aborting."
-    exit 1
-  fi
-  echo "[entrypoint] Attempt ${ATTEMPT}/${MAX_ATTEMPTS} — retrying in 2s..."
-  sleep 2
-done
+python - <<'PY'
+import os
+import socket
+import sys
+import time
+from urllib.parse import urlsplit
 
-echo "[entrypoint] PostgreSQL is ready."
+url = urlsplit(os.environ.get("DATABASE_URL", ""))
+host, port = url.hostname or "localhost", url.port or 5432
+for attempt in range(1, 61):
+    try:
+        with socket.create_connection((host, port), timeout=2):
+            print(f"[entrypoint] PostgreSQL is reachable at {host}:{port}.")
+            sys.exit(0)
+    except OSError:
+        print(f"[entrypoint] Attempt {attempt}/60: {host}:{port} not ready, retrying in 2s...")
+        time.sleep(2)
+print(f"[entrypoint] ERROR: PostgreSQL at {host}:{port} never became reachable.")
+sys.exit(1)
+PY
 
-# Run Alembic migrations — exit immediately if migration fails
-echo "[entrypoint] Running database migrations..."
-alembic upgrade head
-echo "[entrypoint] Migrations complete."
+if [ "${RUN_MIGRATIONS:-false}" = "true" ]; then
+  echo "[entrypoint] Running database migrations..."
+  alembic upgrade head
+  echo "[entrypoint] Migrations complete."
+fi
 
-# Replace shell with uvicorn so signals (SIGTERM, SIGINT) are forwarded correctly
-echo "[entrypoint] Starting uvicorn..."
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+echo "[entrypoint] Starting: $*"
+exec "$@"

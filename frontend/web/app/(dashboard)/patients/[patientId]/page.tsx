@@ -481,7 +481,7 @@ export default function PatientProfilePage({ params }: { params: Promise<{ patie
                         </svg>
                       </div>
                       <p className="text-sm font-medium text-[#9b6e6e]">No visits recorded yet.</p>
-                      <p className="mt-1 text-xs text-[#c08080]">Add the first visit to start tracking this patient's care history.</p>
+                      <p className="mt-1 text-xs text-[#c08080]">Add the first visit to start tracking this patient&apos;s care history.</p>
                     </div>
                   </td>
                 </tr>

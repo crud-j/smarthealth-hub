@@ -3,8 +3,8 @@
 /**
  * NFC Wi-Fi Relay Monitor — /nfc-monitor
  *
- * Public page (no auth required). Accessible at:
- *   http://192.168.100.6:3000/nfc-monitor
+ * Staff-only page (login required — the proxy middleware redirects to /login).
+ * Accessible at <frontend-origin>/nfc-monitor, e.g. https://<project>.vercel.app/nfc-monitor
  *
  * Polls GET /api/v1/health-cards/last-scan every 2 seconds.
  * When a scan result arrives, displays patient name, DOB, blood type,
@@ -18,6 +18,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { apiFetch, ApiError } from '@/lib/api-client';
 
 // ---------------------------------------------------------------------------
 // Types matching the FastAPI NfcScanPatientInfo + LastScanResponse schemas
@@ -49,9 +50,6 @@ interface LastScanResult {
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://192.168.100.6:8000/api/v1';
 
 const POLL_INTERVAL_MS = 2000;
 
@@ -117,14 +115,11 @@ export default function NfcMonitorPage() {
 
     async function poll() {
       try {
-        const res = await fetch(`${API_BASE}/health-cards/last-scan`, {
+        // apiFetch sends the staff session cookie (same-origin /api/v1 proxy),
+        // refreshes an expired token, and redirects to /login if signed out.
+        const data = await apiFetch<LastScanResult>('/health-cards/last-scan', {
           cache: 'no-store',
         });
-        if (!res.ok) {
-          setError(`Backend returned ${res.status}`);
-          return;
-        }
-        const data: LastScanResult = await res.json() as LastScanResult;
         setError(null);
         setLastPollAt(new Date().toLocaleTimeString('en-PH'));
 
@@ -138,7 +133,11 @@ export default function NfcMonitorPage() {
           setScanResult(data);
         }
       } catch (err) {
-        setError(`Cannot reach backend: ${String(err)}`);
+        setError(
+          err instanceof ApiError
+            ? `Backend returned ${err.status}: ${err.message}`
+            : `Cannot reach backend: ${String(err)}`
+        );
       }
     }
 

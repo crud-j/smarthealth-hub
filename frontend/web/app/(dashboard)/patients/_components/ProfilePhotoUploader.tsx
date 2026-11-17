@@ -168,7 +168,7 @@ export default function ProfilePhotoUploader({ patientId, currentPhotoUrl, onPho
         {activeTab === "upload" && (
           <div>
             <p className="mb-3 text-sm text-[#7a5252]">
-              Select a JPEG, PNG, or WebP image (max 5 MiB). The image will be converted to JPEG and used on the patient's health card.
+              Select a JPEG, PNG, or WebP image (max 5 MiB). The image will be converted to JPEG and used on the patient&apos;s health card.
             </p>
             <input
               ref={fileInputRef}
@@ -198,7 +198,7 @@ export default function ProfilePhotoUploader({ patientId, currentPhotoUrl, onPho
             <canvas ref={canvasRef} className="hidden" />
             {cameraState === "idle" && !capturedPreview && (
               <div>
-                <p className="mb-3 text-sm text-[#7a5252]">Click "Start Camera" to open your webcam and take a photo. Your browser will ask for camera permission.</p>
+                <p className="mb-3 text-sm text-[#7a5252]">Click &quot;Start Camera&quot; to open your webcam and take a photo. Your browser will ask for camera permission.</p>
                 <button type="button" onClick={() => void startCamera()}
                   className={primaryBtnCls}
                   style={{ background: "linear-gradient(135deg, #b5343e, #c94060)" }}>

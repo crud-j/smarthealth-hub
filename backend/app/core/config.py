@@ -60,7 +60,22 @@ class Settings(BaseSettings):
     # NFC Tools encodes this URL on the chip; tapping the chip does a GET to
     # http://<NFC_VIEW_BASE_URL>/view/{card_number}.
     # Set to your machine's LAN IP + the port uvicorn listens on (port 9000).
+    # Cloud deployment: the backend's public HTTPS origin, e.g.
+    # https://api.203-0-113-10.sslip.io — chips then point straight at FastAPI.
     NFC_VIEW_BASE_URL: str = "http://192.168.100.6:9000"
+
+    # When True, GET /view/{card_number} (and /api/v1/health-cards/view/...)
+    # only answers links carrying a valid ?sig= HMAC — card numbers are
+    # sequential, so unsigned links would let anyone enumerate patients.
+    # Leave unset to require signatures in production only (LAN chips written
+    # with unsigned links keep working in development).
+    NFC_REQUIRE_SIGNED_LINKS: bool | None = None
+
+    @property
+    def nfc_signed_links_required(self) -> bool:
+        if self.NFC_REQUIRE_SIGNED_LINKS is not None:
+            return self.NFC_REQUIRE_SIGNED_LINKS
+        return self.ENVIRONMENT == "production"
 
     # ── SMS provider selection ────────────────────────────────────────────────
     # Controls which provider SMSService uses.

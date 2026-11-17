@@ -295,7 +295,7 @@ export default function HealthCardVerifyPage() {
   return (
     <div className="mx-auto max-w-[540px] px-4 py-6">
       <h1 className="mb-1 text-3xl leading-tight text-[#1a0808] font-display">Verify Health Card</h1>
-      <p className="mb-5 text-sm font-medium text-[#9b6e6e]">Scan the patient's QR code or tap their NFC card to verify identity.</p>
+      <p className="mb-5 text-sm font-medium text-[#9b6e6e]">Scan the patient&apos;s QR code or tap their NFC card to verify identity.</p>
 
       {/* Tab switcher */}
       <div className="mb-5 flex border-b border-[#e5d4cc]" role="tablist">

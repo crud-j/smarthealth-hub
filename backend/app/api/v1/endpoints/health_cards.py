@@ -44,8 +44,10 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
 
+from app.core.config import settings
 from app.core.exceptions import ForbiddenError, NotFoundError
 from app.core.logging import get_logger
+from app.core.rate_limit import limiter
 from app.core.security import CurrentUser, require_role
 from app.db.session import DbDep
 from app.models.appointment import Appointment
@@ -85,16 +87,55 @@ logger = get_logger(__name__)
 router = APIRouter(tags=["health-cards"])
 
 # ---------------------------------------------------------------------------
-# In-memory last-scan cache — for NFC Wi-Fi relay testing only.
-# Module-level dict; cleared when the process restarts.
+# Last-scan cache — feeds the /nfc-monitor page.
+# Stored in Redis so every uvicorn worker / container sees the same latest
+# scan (a module-level dict is per-process, so with several workers the scan
+# and the monitor's poll could land on different processes). The dict below
+# is only a fallback for when Redis is unreachable.
 # Never stores diagnosis, treatment_notes, or encrypted PHI.
 # ---------------------------------------------------------------------------
+_LAST_SCAN_REDIS_KEY = "nfc:last_scan"
+_LAST_SCAN_TTL_SECONDS = 24 * 60 * 60
+
 _last_scan_cache: dict[str, Any] = {
     "scanned_at": None,
     "found": False,
     "uid": None,
     "patient": None,
 }
+
+
+async def _record_last_scan(**fields: Any) -> None:
+    """Store the latest NFC scan result for the /nfc-monitor page."""
+    import json  # noqa: PLC0415
+
+    _last_scan_cache.update(fields)
+    try:
+        from app.core.security import get_shared_redis  # noqa: PLC0415
+
+        await get_shared_redis().set(
+            _LAST_SCAN_REDIS_KEY,
+            json.dumps(_last_scan_cache, default=str),
+            ex=_LAST_SCAN_TTL_SECONDS,
+        )
+    except Exception as exc:  # noqa: BLE001 — monitor cache must never break a scan
+        logger.warning("Could not store NFC last-scan in Redis: %s", exc)
+
+
+async def _read_last_scan() -> dict[str, Any]:
+    """Return the latest NFC scan result (Redis first, in-process fallback)."""
+    import json  # noqa: PLC0415
+
+    try:
+        from app.core.security import get_shared_redis  # noqa: PLC0415
+
+        raw = await get_shared_redis().get(_LAST_SCAN_REDIS_KEY)
+        if raw:
+            data: dict[str, Any] = json.loads(raw)
+            return data
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Could not read NFC last-scan from Redis: %s", exc)
+    return dict(_last_scan_cache)
 
 
 # ---------------------------------------------------------------------------
@@ -860,6 +901,10 @@ def _render_nfc_not_found_html(identifier: str, reason: str = "Health card not f
 # BHW, Physician, Admin Staff, and Admin may mutate cards.
 _BHW_PLUS = require_role("bhw", "physician", "admin_staff", "admin")
 
+# Per-IP, per-minute limits for the public NFC endpoints (per worker process).
+_NFC_SCAN_RATE_LIMIT = 60
+_NFC_VIEW_RATE_LIMIT = 20
+
 
 # ---------------------------------------------------------------------------
 # Generic verify 403 — identical message for ALL failure modes (no info leak)
@@ -904,24 +949,32 @@ async def scan_nfc_uid_early(
     db: DbDep,
 ) -> NfcScanResponse:
     """Thin shim — delegates to the implementation function below."""
+    # Public endpoint: throttle UID guessing. Generous enough for a clinic
+    # relay scanning cards back-to-back from one IP.
+    await limiter.check_rate_limit(
+        key=f"nfc-scan:{_get_client_ip(request)}",
+        max_attempts=_NFC_SCAN_RATE_LIMIT,
+        window_seconds=60,
+    )
     return await _scan_nfc_uid_impl(body, request, db)
 
 
 # ---------------------------------------------------------------------------
-# GET /health-cards/last-scan  [PUBLIC — no JWT]
+# GET /health-cards/last-scan  [STAFF LOGIN REQUIRED]
 # ---------------------------------------------------------------------------
 
 
 @router.get(
     "/health-cards/last-scan",
     response_model=LastScanResponse,
-    summary="Return the most recent NFC scan result from in-memory cache (no auth required)",
+    summary="Return the most recent NFC scan result (staff only)",
     description=(
-        "Returns the last NFC UID scan result cached by POST /health-cards/scan-uid.  "
-        "Intended for the /nfc-monitor polling page during Wi-Fi relay testing.  "
-        "No JWT required.  Cache resets when the FastAPI process restarts.  "
-        "Returns scanned_at=None when no scan has been received yet."
+        "Returns the last NFC scan result recorded by POST /health-cards/scan-uid "
+        "or a /view tap.  Polled by the /nfc-monitor page.  Requires a logged-in "
+        "staff user — the result contains patient name, DOB, blood type and "
+        "allergies.  Returns scanned_at=None when no scan has been received yet."
     ),
+    dependencies=[_BHW_PLUS],
 )
 async def get_last_scan_early() -> LastScanResponse:
     """Thin shim — delegates to the implementation function below."""
@@ -948,7 +1001,8 @@ async def get_last_scan_early() -> LastScanResponse:
         "encrypted notes are NEVER shown), upcoming appointments, last immunization, "
         "and emergency contact.  "
         "Writes a PHI-VIEW audit log entry on every successful lookup.  "
-        "No JWT required — the NFC chip itself is the access credential.  "
+        "No JWT required — the signed link on the NFC chip is the access credential "
+        "(?sig= HMAC; required when NFC_REQUIRE_SIGNED_LINKS is on, the production default).  "
         "PHI invariants: diagnosis, treatment_notes, and medical_history.notes "
         "are NEVER included in the response."
     ),
@@ -958,11 +1012,19 @@ async def view_health_card_by_identifier(
     identifier: str,
     request: Request,
     db: DbDep,
+    sig: str | None = Query(
+        None,
+        max_length=128,
+        description="HMAC signature from the chip's signed link (see build_nfc_view_url).",
+    ),
 ) -> HTMLResponse:
     """
     Full clinical summary page for NFC tap.
 
     Security design:
+    - Signed links: card numbers are sequential, so when signatures are
+      required the HMAC is checked BEFORE any database lookup (no oracle).
+    - Rate limited per client IP.
     - NO diagnosis, treatment_notes, or medical_history.notes (all encrypted PHI).
     - condition_name is plain-text and safe to display.
     - Audit log: PHI-VIEW written for every successful patient load.
@@ -972,6 +1034,27 @@ async def view_health_card_by_identifier(
     from urllib.parse import unquote as _unquote  # noqa: PLC0415
 
     raw_identifier = _unquote(identifier).strip()
+
+    await limiter.check_rate_limit(
+        key=f"nfc-view:{_get_client_ip(request)}",
+        max_attempts=_NFC_VIEW_RATE_LIMIT,
+        window_seconds=60,
+    )
+
+    if settings.nfc_signed_links_required and not nfc_payload_service.verify_nfc_signature(
+        raw_identifier, sig
+    ):
+        logger.warning(
+            "Rejected unsigned/invalid NFC view link",
+            extra={"identifier_prefix": raw_identifier[:8], "ip": _get_client_ip(request)},
+        )
+        return HTMLResponse(
+            content=_render_nfc_not_found_html(
+                raw_identifier,
+                "This card link is not valid. Ask the health center to rewrite this card.",
+            ),
+            status_code=403,
+        )
     scanned_at_now = datetime.now(UTC)
     scanned_at_iso = scanned_at_now.isoformat()
     scanned_at_str = scanned_at_now.strftime("%b %d, %Y %I:%M %p")
@@ -992,7 +1075,7 @@ async def view_health_card_by_identifier(
 
     # ── Not found ─────────────────────────────────────────────────────────────
     if card is None:
-        _last_scan_cache.update(
+        await _record_last_scan(
             scanned_at=scanned_at_iso,
             found=False,
             uid=raw_identifier,
@@ -1020,7 +1103,7 @@ async def view_health_card_by_identifier(
     patient: Patient | None = patient_result.scalar_one_or_none()
 
     if patient is None or not patient.is_active:
-        _last_scan_cache.update(
+        await _record_last_scan(
             scanned_at=scanned_at_iso,
             found=False,
             uid=raw_identifier,
@@ -1132,7 +1215,7 @@ async def view_health_card_by_identifier(
         is_pwd=patient.is_pwd,
         is_pregnant=patient.is_pregnant,
     )
-    _last_scan_cache.update(
+    await _record_last_scan(
         scanned_at=scanned_at_iso,
         found=True,
         uid=raw_identifier,
@@ -1821,7 +1904,7 @@ async def get_nfc_batch(
     Processing:
       1. Query health_cards joined to patients, filtered to status='active'.
       2. Optionally filter by patients.barangay (exact match).
-      3. For each card, build the NDEF URI via nfc_payload_service.build_nfc_payload()
+      3. For each card, build the signed NDEF URI via nfc_payload_service.build_nfc_view_url()
          and extract view_url as the NDEF URI record value.
       4. Write a single NFC_BATCH_EXPORT audit log entry.
 
@@ -1846,17 +1929,11 @@ async def get_nfc_batch(
     result = await db.execute(stmt)
     cards = result.scalars().all()
 
-    # Build items: derive the NFC NDEF URI from the NFC payload dict.
-    # build_nfc_payload returns {"patient_id", "card_number", "card_version", "view_url"}.
-    # The view_url is the NDEF URI record written to the physical chip.
+    # Build items: the NDEF URI written to each chip is the signed view link
+    # ({NFC_VIEW_BASE_URL}/view/{card_number}?sig=...) — card number pointer only.
     items: list[NfcBatchItem] = []
     for card in cards:
-        payload = nfc_payload_service.build_nfc_payload(
-            patient_id=str(card.patient_id),
-            card_version=card.card_version,
-            card_number=card.card_number,
-        )
-        nfc_uri: str = str(payload.get("view_url", ""))
+        nfc_uri: str = nfc_payload_service.build_nfc_view_url(card.card_number)
         items.append(
             NfcBatchItem(
                 patient_id=card.patient_id,
@@ -2674,7 +2751,7 @@ async def _scan_nfc_uid_impl(
 
     if card is None:
         # Update cache with a "not found" entry.
-        _last_scan_cache.update(
+        await _record_last_scan(
             scanned_at=scanned_at_iso,
             found=False,
             uid=uid,
@@ -2705,7 +2782,7 @@ async def _scan_nfc_uid_impl(
     patient: Patient | None = patient_result.scalar_one_or_none()
 
     if patient is None or not patient.is_active:
-        _last_scan_cache.update(
+        await _record_last_scan(
             scanned_at=scanned_at_iso,
             found=False,
             uid=uid,
@@ -2764,7 +2841,7 @@ async def _scan_nfc_uid_impl(
     )
 
     # Update the in-memory last-scan cache.
-    _last_scan_cache.update(
+    await _record_last_scan(
         scanned_at=scanned_at_iso,
         found=True,
         uid=uid,
@@ -2799,14 +2876,15 @@ async def _scan_nfc_uid_impl(
 
 async def _get_last_scan_impl() -> LastScanResponse:
     """Implementation shared by the early-registered last-scan route shim."""
-    patient_data = _last_scan_cache.get("patient")
+    data = await _read_last_scan()
+    patient_data = data.get("patient")
     patient_info: NfcScanPatientInfo | None = (
         NfcScanPatientInfo(**patient_data) if patient_data else None
     )
     return LastScanResponse(
-        scanned_at=_last_scan_cache.get("scanned_at"),
-        found=bool(_last_scan_cache.get("found")),
-        uid=_last_scan_cache.get("uid"),
+        scanned_at=data.get("scanned_at"),
+        found=bool(data.get("found")),
+        uid=data.get("uid"),
         patient=patient_info,
     )
 

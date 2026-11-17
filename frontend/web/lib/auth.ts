@@ -20,6 +20,18 @@ export interface LoginResponse {
    * Stored in sessionStorage between the two login steps.
    */
   session_hint: string;
+  /**
+   * `false` when a trusted device (matching `device_fingerprint`) let the
+   * backend skip the OTP step — tokens are then issued directly and auth
+   * cookies are already set.
+   */
+  mfa_required: boolean;
+  /** Populated only when `mfa_required` is false. */
+  access_token?: string | null;
+  /** Populated only when `mfa_required` is false. */
+  refresh_token?: string | null;
+  /** Populated only when `mfa_required` is false. */
+  token_type?: string | null;
 }
 
 export interface TokenResponse {
@@ -47,17 +59,25 @@ export interface LogoutResponse {
  * Semaphore SMS.  In Phase 1 development the OTP is logged to the server
  * console.
  *
- * @returns `LoginResponse` containing `session_hint` (user UUID).
+ * @param deviceFingerprint Optional client fingerprint; if it matches a
+ *          trusted device the backend skips the OTP step.
+ * @returns `LoginResponse` containing `session_hint` (user UUID) and
+ *          `mfa_required`.
  * @throws  `ApiError` with status 401 on invalid credentials or 403 if the
  *          account is disabled.
  */
 export async function loginStep1(
   email: string,
-  password: string
+  password: string,
+  deviceFingerprint?: string
 ): Promise<LoginResponse> {
   return apiFetch<LoginResponse>("/auth/login", {
     method: "POST",
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({
+      email,
+      password,
+      ...(deviceFingerprint ? { device_fingerprint: deviceFingerprint } : {}),
+    }),
   });
 }
 
@@ -75,16 +95,26 @@ export async function loginStep1(
  *
  * @param userId  UUID from the `session_hint` field of the step-1 response.
  * @param otpCode 6-digit code entered by the user.
+ * @param rememberDevice    If true, the backend trusts this device for 30 days.
+ * @param deviceFingerprint Same fingerprint sent to step 1; required for
+ *                          `rememberDevice` to take effect.
  * @returns `TokenResponse` on success.
  * @throws  `ApiError` with status 401 on invalid/expired OTP.
  */
 export async function loginStep2(
   userId: string,
-  otpCode: string
+  otpCode: string,
+  rememberDevice?: boolean,
+  deviceFingerprint?: string
 ): Promise<TokenResponse> {
   return apiFetch<TokenResponse>("/auth/verify-otp", {
     method: "POST",
-    body: JSON.stringify({ user_id: userId, otp_code: otpCode }),
+    body: JSON.stringify({
+      user_id: userId,
+      otp_code: otpCode,
+      ...(rememberDevice ? { remember_device: true } : {}),
+      ...(deviceFingerprint ? { device_fingerprint: deviceFingerprint } : {}),
+    }),
   });
 }
 

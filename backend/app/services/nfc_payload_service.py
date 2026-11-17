@@ -49,6 +49,58 @@ def build_nfc_payload(
     }
 
 
+# ---------------------------------------------------------------------------
+# Signed NFC view links
+# ---------------------------------------------------------------------------
+# The URL written to a chip is {NFC_VIEW_BASE_URL}/view/{card_number}?sig=...
+# Card numbers are sequential (BHC-2026-000001), so the signature is what stops
+# anyone from guessing links to other patients' clinical summaries.
+#
+# The HMAC uses QR_HMAC_SECRET with an "nfc-view:" prefix (domain separation:
+# a QR signature can never be replayed as an NFC signature or vice versa) and
+# is truncated to 128 bits so the full URL still fits on small NTAG213 chips.
+_NFC_SIG_HEX_LEN = 32
+
+
+def sign_nfc_identifier(identifier: str) -> str:
+    """Return the hex signature for a card number used in an NFC view link."""
+    import hashlib  # noqa: PLC0415
+    import hmac  # noqa: PLC0415
+
+    from app.core.config import settings  # noqa: PLC0415
+
+    message = f"nfc-view:{identifier}".encode()
+    digest = hmac.new(settings.QR_HMAC_SECRET.encode("utf-8"), message, hashlib.sha256)
+    return digest.hexdigest()[:_NFC_SIG_HEX_LEN]
+
+
+def verify_nfc_signature(identifier: str, sig: str | None) -> bool:
+    """Constant-time check of an NFC view link signature."""
+    import hmac  # noqa: PLC0415
+
+    if not sig:
+        return False
+    expected = sign_nfc_identifier(identifier)
+    try:
+        return hmac.compare_digest(expected.encode("ascii"), sig.strip().lower().encode("ascii"))
+    except (ValueError, TypeError, UnicodeEncodeError):
+        return False
+
+
+def build_nfc_view_url(card_number: str) -> str:
+    """
+    Build the signed URL written to the NFC chip's NDEF URI record.
+
+    Contains only the card number pointer and its signature — no PHI.
+    """
+    from urllib.parse import quote  # noqa: PLC0415
+
+    from app.core.config import settings  # noqa: PLC0415
+
+    base = settings.NFC_VIEW_BASE_URL.rstrip("/")
+    return f"{base}/view/{quote(card_number, safe='')}?sig={sign_nfc_identifier(card_number)}"
+
+
 async def link_nfc_uid(
     db: AsyncSession,
     patient_id: uuid.UUID,

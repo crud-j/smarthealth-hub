@@ -151,7 +151,7 @@ function FinalizeModal({
         <p className="mb-4 text-base font-semibold text-slate-900">{patientName}</p>
 
         <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          Verify the patient's identity with a valid ID before finalizing. This action cannot be undone.
+          Verify the patient&apos;s identity with a valid ID before finalizing. This action cannot be undone.
         </div>
 
         {err && (

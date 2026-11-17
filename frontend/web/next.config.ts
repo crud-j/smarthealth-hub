@@ -31,6 +31,14 @@ const nextConfig: NextConfig = {
         source: "/api/v1/:path*",
         destination: `${backend}/api/v1/:path*`,
       },
+      // Patient photos and generated PDFs are served by FastAPI's /media
+      // mount. Proxying them keeps every browser request on the Next.js
+      // origin, so production builds (NEXT_PUBLIC_API_BASE_URL=/api/v1) work
+      // over HTTPS tunnels without mixed-content or cross-origin issues.
+      {
+        source: "/media/:path*",
+        destination: `${backend}/media/:path*`,
+      },
     ];
   },
 };

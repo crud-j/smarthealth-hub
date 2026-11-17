@@ -691,13 +691,6 @@ export default function RegisterPage() {
           </div>
         )}
 
-        {/* Error banner */}
-        {submitError && (
-          <div style={{ color: "#991b1b", background: "#fee2e2", borderRadius: "0.375rem", padding: "0.75rem 1rem", marginBottom: "1rem", fontSize: "0.875rem" }}>
-            {submitError}
-          </div>
-        )}
-
         {/* Navigation buttons */}
         <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", paddingTop: "0.5rem" }}>
           <button

@@ -26,6 +26,8 @@ export interface HealthCardData {
   issued_at: string; // ISO datetime string
   expires_at: string | null;
   nfc_uid: string | null;
+  /** Signed URL to write to the NFC chip ({NFC_VIEW_BASE_URL}/view/{card_number}?sig=...). */
+  nfc_view_url?: string | null;
   /**
    * base64 PNG data URI — only present on generate/reissue responses.
    * null on GET metadata responses (frontend regenerates from patient_id + version).

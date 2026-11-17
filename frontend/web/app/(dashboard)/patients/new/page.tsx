@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Controller, useForm, type SubmitHandler } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useCreatePatient } from "@/hooks/usePatients";
@@ -197,7 +198,6 @@ export default function NewPatientPage() {
   const municipalityValue = watch("municipality") ?? pilotDefaults.municipality;
   const provinceValue = watch("province") ?? pilotDefaults.province;
   const addressValue = watch("address") ?? "";
-  const dataPrivacyConsent = watch("dataPrivacyConsent");
   const currentAge = useMemo(() => computeAge(birthDateValue), [birthDateValue]);
   const showGuardian = currentAge > 0 && (currentAge < 18 || currentAge >= 60 || isPwdValue);
   const showSeniorId = currentAge >= 60;
@@ -467,7 +467,7 @@ export default function NewPatientPage() {
                   <input id="placeOfBirth" type="text" {...register("placeOfBirth")} className={inputCls} />
                 </div>
                 <div>
-                  <label className={labelCls} htmlFor="mothersMaidenName">Mother's Maiden Name</label>
+                  <label className={labelCls} htmlFor="mothersMaidenName">Mother&apos;s Maiden Name</label>
                   <input id="mothersMaidenName" type="text" {...register("mothersMaidenName")} className={inputCls} />
                 </div>
                 <div>
@@ -777,12 +777,12 @@ export default function NewPatientPage() {
             Back
           </button>
           <div className="flex flex-wrap gap-3">
-            <a
+            <Link
               href="/patients"
               className="inline-flex items-center rounded-lg border border-[#e5d4cc] bg-white px-5 py-2.5 text-sm font-medium text-[#3d2222] hover:bg-[#fdf5f0] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e]"
             >
               Cancel
-            </a>
+            </Link>
             {currentStep < 3 && (
               <button
                 type="button"

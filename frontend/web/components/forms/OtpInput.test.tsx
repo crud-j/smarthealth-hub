@@ -1,39 +1,21 @@
 /**
- * OtpInput component tests.
+ * OtpInput component tests (Vitest + React Testing Library).
  *
- * SETUP REQUIRED — Jest and React Testing Library are not yet installed in this
- * project.  Run the following before executing these tests:
- *
- *   pnpm add -D jest jest-environment-jsdom @testing-library/react \
- *              @testing-library/user-event @testing-library/jest-dom \
- *              ts-jest @types/jest
- *
- * Then add a jest.config.ts (or jest.config.js) at frontend/web/:
- *
- *   import type { Config } from 'jest';
- *   const config: Config = {
- *     preset: 'ts-jest',
- *     testEnvironment: 'jsdom',
- *     setupFilesAfterFramework: ['@testing-library/jest-dom'],
- *     moduleNameMapper: { '^@/(.*)$': '<rootDir>/src/$1' },
- *   };
- *   export default config;
- *
- * And add to package.json scripts:
- *   "test": "jest"
+ * Run with: npm run test  (see vitest.config.ts)
  */
 
 import React from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom";
+import { describe, expect, it, vi } from "vitest";
 import OtpInput from "./OtpInput";
 
 // ---------------------------------------------------------------------------
-// Helper: render OtpInput with a jest.fn() onChange callback.
+// Helper: render OtpInput with a vi.fn() onChange callback.
 // ---------------------------------------------------------------------------
 
-function renderOtpInput(onChange = jest.fn()) {
+function renderOtpInput(onChange = vi.fn()) {
   render(<OtpInput onChange={onChange} />);
 
   // The component renders 6 inputs labelled "OTP digit N of 6".
@@ -125,7 +107,7 @@ describe("OtpInput — backspace navigation", () => {
 describe("OtpInput — onChange callback", () => {
   it("calls onChange with the 6-digit string when all inputs are filled", async () => {
     const user = userEvent.setup();
-    const handleChange = jest.fn();
+    const handleChange = vi.fn();
     const { inputs } = renderOtpInput(handleChange);
 
     const digits = ["1", "2", "3", "4", "5", "6"];
@@ -139,7 +121,7 @@ describe("OtpInput — onChange callback", () => {
 
   it("does not call onChange until all 6 digits are filled", async () => {
     const user = userEvent.setup();
-    const handleChange = jest.fn();
+    const handleChange = vi.fn();
     const { inputs } = renderOtpInput(handleChange);
 
     // Fill only 5 inputs.
@@ -159,7 +141,7 @@ describe("OtpInput — onChange callback", () => {
 describe("OtpInput — paste support", () => {
   it("fills all 6 inputs and calls onChange when a 6-digit string is pasted", async () => {
     const user = userEvent.setup();
-    const handleChange = jest.fn();
+    const handleChange = vi.fn();
     const { inputs } = renderOtpInput(handleChange);
 
     await user.click(inputs[0]);
@@ -173,7 +155,7 @@ describe("OtpInput — paste support", () => {
 
   it("ignores non-digit characters in pasted text", async () => {
     const user = userEvent.setup();
-    const handleChange = jest.fn();
+    const handleChange = vi.fn();
     const { inputs } = renderOtpInput(handleChange);
 
     await user.click(inputs[0]);
@@ -186,7 +168,7 @@ describe("OtpInput — paste support", () => {
 
   it("fills only available inputs when paste is shorter than 6 digits", async () => {
     const user = userEvent.setup();
-    const handleChange = jest.fn();
+    const handleChange = vi.fn();
     const { inputs } = renderOtpInput(handleChange);
 
     await user.click(inputs[0]);

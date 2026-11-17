@@ -116,7 +116,7 @@ export default function PatientEditPage({ params }: { params: Promise<{ patientI
       philhealthMemberType: data.philhealthMemberType ?? undefined,
       isPwd: isAdmin ? (data.isPwd ?? false) : (patient?.isPwd ?? false),
       isPregnant: isAdmin ? (data.isPregnant ?? false) : (patient?.isPregnant ?? false),
-      bloodType: data.bloodType === "" ? null : (data.bloodType ?? null),
+      bloodType: data.bloodType ?? null,
     };
     const updated = await updatePatient(payload);
     if (!updated) { toast.error(saveError?.message ?? "Failed to save patient record."); return; }
@@ -232,7 +232,11 @@ export default function PatientEditPage({ params }: { params: Promise<{ patientI
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
             <div>
               <label className={labelCls} htmlFor="bloodType">Blood Type</label>
-              <select id="bloodType" {...register("bloodType")} className={inputCls}>
+              <select
+                id="bloodType"
+                {...register("bloodType", { setValueAs: (v) => (v === "" ? null : v) })}
+                className={inputCls}
+              >
                 <option value="">— Unknown —</option>
                 {["A+","A-","B+","B-","AB+","AB-","O+","O-","Unknown"].map((bt) => <option key={bt} value={bt}>{bt}</option>)}
               </select>

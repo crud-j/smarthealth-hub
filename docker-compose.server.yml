@@ -1,0 +1,145 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# SmartHealth Hub — production backend stack for a single Linux server.
+#
+# The Next.js frontend runs on Vercel; this file runs everything else:
+#   caddy   — HTTPS reverse proxy (automatic Let's Encrypt certificate)
+#   backend — FastAPI (runs DB migrations on start)
+#   worker  — Celery worker (SMS, health-card PDFs, AI scoring)
+#   beat    — Celery beat scheduler (reminders) — exactly ONE instance
+#   db      — PostgreSQL 18
+#   redis   — Redis 7 (Celery broker, OTP/token store, NFC last-scan)
+#
+# Only Caddy publishes ports (80/443). Postgres, Redis and FastAPI are reachable
+# only on the internal Docker network.
+#
+# Usage (on the server, from the repo root):
+#   cp .env.server.example .env.server      # then fill in real values
+#   docker compose -f docker-compose.server.yml --env-file .env.server up -d --build
+#
+# See DEPLOY.md for the full walkthrough.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: smarthealth
+
+# Shared settings for the three containers that run the backend image.
+# Only `backend` builds the image; worker and beat reuse it and must never try
+# to pull an image of that name from Docker Hub.
+x-backend: &backend
+  image: smarthealth-backend:latest
+  pull_policy: never
+  restart: unless-stopped
+  env_file:
+    - .env.server
+  environment: &backend-env
+    ENVIRONMENT: production
+    DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+    REDIS_URL: redis://redis:6379/0
+    MEDIA_DIR: /app/media
+  volumes:
+    - media:/app/media
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  networks:
+    - internal
+
+services:
+
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?Set API_DOMAIN in .env.server}
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+    networks:
+      - internal
+
+  backend:
+    <<: *backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      <<: *backend-env
+      RUN_MIGRATIONS: "true"
+      # Number of uvicorn worker processes.
+      WEB_CONCURRENCY: ${API_WORKERS:-2}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  worker:
+    <<: *backend
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=${WORKER_CONCURRENCY:-2}
+    # Start after the backend has applied migrations.
+    depends_on: &after-backend
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  beat:
+    <<: *backend
+    # Single scheduler only — never scale this service.
+    command: celery -A app.workers.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+    volumes: []
+    depends_on: *after-backend
+
+  db:
+    # Same major version as the development database (PostgreSQL 18), so a
+    # pg_dump from the dev PC restores cleanly.
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env.server}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env.server}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.server}
+    volumes:
+      # postgres:18+ images keep data under /var/lib/postgresql/18/docker and
+      # expect the volume at /var/lib/postgresql (not .../data).
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - internal
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - internal
+
+volumes:
+  pgdata:
+  redisdata:
+  media:
+  caddy_data:
+  caddy_config:
+
+networks:
+  internal:
