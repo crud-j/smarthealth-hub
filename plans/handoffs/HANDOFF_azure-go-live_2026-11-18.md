@@ -1,7 +1,7 @@
 # SmartHealth Hub is LIVE (Vercel + Azure Japan East); next is Phase 7, writing signed NFC chips
 
 **Date:** 2026-11-18
-**Status:** IN PROGRESS. Production deployment done and verified (login + demo data work). Phase 7 (NFC chips) and Phase 8 (backups) not started.
+**Status:** IN PROGRESS. Production deployment done and verified (login + demo data work). Roadmap (none started): Phase 7 NFC chips → Phase 8 backups → Phase 9 System Health admin page → Phase 10 **admin role model B** (decided: admin loses access to clinical PHI). See "Post-Close Additions".
 **Bead(s):** none (`bd` CLI not installed on this PC)
 **Epic:** Deploy SmartHealth Hub to production (Vercel frontend + Linux/Docker backend)
 **Chain:** `standalone-9d299342` seq `2`
@@ -52,6 +52,7 @@ SmartHealth Hub (thesis project: Barangay Health Center records system with NFC/
 - **Stack status** (`dc ps`): backend (healthy), worker Up, beat Up, caddy Up, db postgres:18-alpine (healthy), redis:7-alpine (healthy). Volumes `smarthealth_{pgdata,redisdata,media,caddy_data,caddy_config}`.
 - **Demo data seeded** on server: `dc exec backend python scripts/seed_db.py`: 60 patients, ~80 visits, 40 appointments, ~120 immunizations, medical history, **10 health cards** (first 10 patients, card numbers like `HC-2026-XXXXXXXX`), 3 staff accounts. Unsplash photos downloaded into the media volume.
 - **Login verified by user**: admin login + Gmail OTP worked, dashboard shows data. **Not confirmed**: whether the user changed the admin password afterwards (it is public in `backend/scripts/seed_db.py`).
+- **After the first close**: the docs PR (`docs/dev-workflow`, with `DEV-WORKFLOW.md` + this handoff) was **merged** (CI green). The user then **changed the demo BHW user's email** to a real inbox via Settings → Users → Edit (as admin). Not yet confirmed: BHW login tested + BHW password changed. Physician still on `physician@bhc.local` (cannot log in in production).
 - **CI**: all jobs green on PR #16 and PR #17 (first time ever fully green). Coverage gate lowered 70 → 50 (actual 52.21%).
 - **Vercel settings**: Root Directory `frontend/web`, preset Next.js, Install Command override `npx pnpm@9.14.4 install --frozen-lockfile`, Build Command override `npx pnpm@9.14.4 run build`, env `SERVER_SIDE_API_URL=https://smarthealth-hub.japaneast.cloudapp.azure.com` and `NEXT_PUBLIC_API_BASE_URL=/api/v1` (Production and Preview).
 - **GitHub**: PR #16 (`deploy/vercel-docker-prod`) merged → `724e61f`; PR #17 (`fix/fresh-db-migration`) merged → `6595469`.
@@ -99,6 +100,8 @@ SmartHealth Hub (thesis project: Barangay Health Center records system with NFC/
 - **`typing.cast` instead of pinning `redis<7`**: type-only, works on 6.4 and 8.1, no runtime change.
 - **Manual backend deploys for now** (`git pull && dc up -d --build`). Automating `deploy.yml` was deferred: it would need a dedicated deploy key, 4 SSH secrets, and dropping/replacing its "validate secrets" step, which otherwise wants copies of all server secrets in GitHub.
 - **NFC for the cloud = NFC Tools URL records only**: no relay (`nfc_relay_server.py`), no UID reader app. The phone's browser opens the signed link directly against the API domain; `/nfc-monitor` still sees taps because the view endpoint calls `_record_last_scan`.
+
+- **Admin role = model B (user decision, after first close)**: the admin keeps system administration + non-clinical patient work but **loses access to clinical PHI** (decrypted diagnoses, treatment notes, medical-history notes) and clinical edits. Rejected: **A** (keep superuser; weak Data Privacy Act / need-to-know story, bigger blast radius if the admin account is stolen) and **C** (admin sees no patient pages at all; too disruptive for a small barangay health center where the admin helps with registrations). Possible later: a logged "emergency access" switch. Full change list in "Post-Close Additions".
 
 ## Evidence & Data
 
@@ -260,6 +263,79 @@ dc exec backend python scripts/seed_db.py
 - **UID path (not used in the cloud plan)**: `POST /api/v1/health-cards/scan-uid` (`:934`, 60/min/IP); binding via `/{patient_id}/nfc-link` (`:2238`) and `/{patient_id}/link-nfc-uid` (`:2682`); `link_nfc_uid()` (`nfc_payload_service.py:104`).
 - **In-app Web NFC**: `frontend/web/lib/nfc.ts` (`checkNfcSupport`, `readNfcTag` reads an NDEF **Text** record JSON `{patient_id, card_version}`). `frontend/web/components/cards/NfcScanButton.tsx`, used by `health-cards/verify/page.tsx`. Works only in **Chrome on Android** over HTTPS (Samsung Internet does NOT support Web NFC). NOTE: chips written by NFC Tools with a **URL** record are a different format from the app's Text-record JSON; the in-app scan button expects the Text record. Check how `readNfcTag` handles a URL record before promising in-app scanning of URL chips.
 
+## Post-Close Additions (same day, after the first "session closed")
+
+The user kept talking after the close. Two topics were analysed (read-only, no code changed) and turned into planned phases.
+
+### A. "Do BHW and Physician have their own dashboard?" (answered)
+- There is **one shared `/dashboard` page** for all roles (`frontend/web/app/(dashboard)/dashboard/page.tsx`, no role checks). Data sources: `useDashboardOverview()` → `GET /analytics/overview` (any authenticated user, `analytics.py:97`); recent patients `GET /patients?sort=created_at&page_size=5` (any authenticated user, `patients.py:150`); upcoming appointments (`_read_roles` = admin, bhw, physician, admin_staff); pending-registrations badge = `/intake/pending` (`_BHW_PLUS`) + `/intake-applications?status=pending` (**admin only**, `intake_applications.py:40`). For non-admins the second call 403s silently (`Promise.allSettled`), so the badge shows only intake drafts.
+- Roles differ in the **sidebar** (`frontend/web/components/layout/Sidebar.tsx:151-193`, `roles: []` = everyone):
+
+| Menu item | admin | bhw | physician | admin_staff |
+|---|:-:|:-:|:-:|:-:|
+| Dashboard, Patients, Appointments, Immunizations, Health Cards, Registrations, Settings, Profile, Security | ✅ | ✅ | ✅ | ✅ |
+| Analytics | ✅ | ✅ | ✅ | ❌ |
+| SMS Logs | ✅ | ✅ | ❌ | ❌ |
+| Registration QR | ✅ | ✅ | ❌ | ✅ |
+| Patient Archive | ✅ | ❌ | ✅ | ❌ |
+| Users, Audit Log, Online Registrations | ✅ | ❌ | ❌ | ❌ |
+
+- Demo `@bhc.local` users can't receive OTP in production. Fix used: admin edits their email in Settings → Users → Edit (`EditUserModal.tsx` supports changing email). Gmail `+alias` trick suggested (`name+bhw@gmail.com`).
+
+### B. System administration gaps (user asked: "what's missing … System health, database, storage, backup?")
+Existing: Settings → Users, Settings → Audit Log; Settings page shows system info (BHC name, Environment, SMS provider, reminder lead hours, NFC base URL via `GET /system-config`, admin only, `system_config.py:36`); `GET /health` + `GET /health/db` (`main.py:513/528`, public, no UI); beat jobs (`celery_app.py:93-145`, timezone Asia/Manila): appointment reminders hourly, immunization reminders 08:00, AI risk scoring 01:00, AI anomaly 01:30, `monitoring.check_sms_failure_rate` hourly :30, `audit.scan_anomalies` hourly :30, weekly report Fri 09:00, monthly report Fri 09:15 (days 22-31), mark missed appointments.
+
+| Gap | Why it matters | Priority |
+|---|---|---|
+| **No database/media backups at all** | disk loss or `dc down -v` = all data gone; `ENCRYPTION_KEY` exists only in `.env.server` | 🔴 critical |
+| Backup status (last time/size/result) | can't tell if backups work | 🔴 with backups |
+| System Health page: API, DB, Redis, Celery worker + beat liveness | a dead worker silently stops SMS + card PDFs | 🟠 high |
+| Alerts | `ADMIN_ALERT_PHONE` is **empty** in `.env.server` → SMS-failure alerts go nowhere; no external uptime monitor | 🟠 high |
+| Storage: disk free, DB size, media size | 28 GB disk; full disk crashes Postgres | 🟡 medium |
+| Deployed version/commit | confirm deploys | 🟢 low |
+| SMS provider status (TextBee device online, failures) | explains missing reminders | 🟢 low |
+| Minor: `/health/db` returns raw exception text (`detail=f"Database unavailable: {exc}"`, `main.py:~551`) publicly | info leak | 🟢 fix with Phase 9 |
+
+**Phase 8 design (proposed to user, not built)**: add a `backup` service to `docker-compose.server.yml` (postgres:18-alpine image with crond, or a small loop): daily 02:00 Asia/Manila `pg_dump -Fc`, gzip, 14-day retention in a `backups` volume, plus a media tar; writes a status JSON (time, size, ok). Mount the `backups` volume read-only into backend so Phase 9 can show backup status. Off-server copy: weekly `scp` to the user's PC (free) or automated (rclone to Google Drive free tier / Azure Blob uses credit). Also save `ENCRYPTION_KEY` + `QR_HMAC_SECRET` in a password manager. (DEPLOY.md §8 has a host-cron variant: `/etc/cron.daily/smarthealth-backup`.)
+
+**Phase 9 design (proposed, not built)**: admin-only `GET /api/v1/system/status` returning:
+- DB ok + `pg_database_size`
+- Redis ping
+- worker/beat liveness via a beat task that writes a Redis heartbeat key every minute (worker executes it, so a fresh key proves both)
+- `os.statvfs('/app/media')` disk free + media folder size
+- last backup status JSON
+- `GIT_COMMIT` build arg/env
+
+Plus a frontend page **Settings → System Health** (status cards), filling `ADMIN_ALERT_PHONE`, optional UptimeRobot (free) on `/health`, and sanitizing `/health/db` output.
+
+**Order not yet confirmed by the user**: offered (a) backups → System Health → NFC, or (b) NFC first (the original plan) → backups → System Health. I recommended backups first. **Default if not answered: (b)**, as in "Where We're Going" (the user said at handoff time they want to start with Phase 7). Ask once at the start of the next session.
+
+### C. Admin role model B: change list for Phase 10 (decided by user: "B")
+Today the admin role is in **every** `require_role(...)` in the backend (a `grep` for role lists without `"admin"` found none). Model B = remove admin from **clinical PHI reads + clinical writes**; keep admin for users, audit, system health/backups, settings, analytics aggregates, patient demographics/registration, appointments, SMS, health cards.
+
+Backend (verify each before changing):
+| File:line | Today | Model B |
+|---|---|---|
+| `backend/app/api/v1/endpoints/medical_history.py:53` `_PHI_READ = require_role("physician", "admin")` | used by `GET /visits/{visit_id}` (:133/137), `PUT /visits/{visit_id}` (:168/172), POST medical-history (:246/251) | → `require_role("physician")` |
+| `medical_history.py:51` `_CLINICAL = require_role("physician", "bhw", "admin")` | `POST /patients/{patient_id}/visits` (:90/95) | → `("physician", "bhw")` |
+| `medical_history.py:326` `include_notes = current_user.role.name in ("physician", "admin")` | single medical-history entry (:295) | → `("physician",)` |
+| `immunizations.py:54` `_PHYSICIAN_PLUS = require_role("physician", "admin")` | used at `:221` (delete/clinical edit, verify which route) | decide: physician only, or keep admin for data-entry corrections |
+| `patients.py:541` archived patients `require_role("admin", "physician")` | archive list | probably keep (administrative) |
+| `patients.py:127-129` decrypts `allergies` / `known_conditions` in the patient detail | all authenticated roles | **open question**: keep visible to all staff (safety info, also shown on the NFC view page) or physician-only |
+| `services/visit_service.py:104-105` decrypt diagnosis/treatment_notes | reached via `_PHI_READ` routes | covered by the role change |
+| `GET /patients/{id}/visits` (:61) + `GET /patients/{id}/medical-history` (:209) | any authenticated role, documented "(no PHI)" | verify the list responses really omit decrypted fields |
+
+Frontend role checks to update (hide what the backend will now 403):
+- `frontend/web/components/modals/VisitEditModal.tsx:53` `canSeePhi = role === "physician" || role === "admin"` → physician only.
+- `frontend/web/app/(dashboard)/patients/[patientId]/history/page.tsx:88` `canEdit = physician || admin` → physician only.
+- `frontend/web/app/(dashboard)/patients/[patientId]/immunizations/page.tsx:198` `canDelete = physician || admin` → match the immunizations decision.
+- `frontend/web/app/(dashboard)/patients/[patientId]/page.tsx:211` `isAdmin`: review what it gates.
+- Sidebar unchanged under B (admin keeps Patients etc.); optionally add the System Health link (Phase 9).
+
+Tests that will need updating: `backend/tests/test_medical_history.py`, `backend/tests/test_visits.py` (both use admin on clinical endpoints). Add tests asserting admin gets **403** on `GET /visits/{id}` and `notes` redacted for admin.
+Docs: update `CLAUDE.md`/thesis RBAC description; audit log already records access.
+Process: normal PR flow (DEV-WORKFLOW.md §2), then server `git pull && dc up -d --build`.
+
 ## Files Changed
 
 ### Source code (committed)
@@ -304,13 +380,19 @@ dc exec backend python scripts/seed_db.py
 - "/handoff … i want to start on the NFC cards Phase 7".
 - Cautious and explanation-hungry (carried over from the parent): explain each command before running; check prerequisites.
 - User email/identity must stay private (never in external requests or in this public repo).
+- (post-close) "I have merge it because all passed": comfortable merging green PRs on their own now.
+- (post-close) "does the BHW user and Physician have their dashboard?" → then "I changed the BHW email, what's next?"
+- (post-close) "what's missing on the System Administration? System health, database, storage, backup?": wants an admin-facing operations view.
+- (post-close) "does it really need the system admin to have an access to all of the pages of barangay health workers and physician?": privacy-minded; questioned the superuser design.
+- (post-close) **"B, and put it on the handoff"**: chose admin role model B; wants decisions recorded in the handoff for the fresh session.
 
 ## Where We're Going
 
 1. **Housekeeping (5 min, local PC)**:
    a. `git checkout main && git pull` (local main is behind; local branch `fix/fresh-db-migration` is merged and can be deleted: `git branch -d fix/fresh-db-migration`).
-   b. `DEV-WORKFLOW.md` + this handoff were committed at session close on branch **`docs/dev-workflow`** (commit `session: azure-go-live …`) and pushed by the user. **Check the PR `docs/dev-workflow → main` is merged.** If not, open/merge it (CI should pass, docs only). No server update needed for docs.
-   c. Ask the user: did they **change the admin password** (Settings → Profile)? Did they **disable the Deploy workflow**? Did they enable Azure **auto-shutdown**?
+   b. The docs PR (`docs/dev-workflow`: DEV-WORKFLOW.md + first version of this handoff) is **merged**. This updated handoff (post-close additions) was committed on a follow-up branch **`docs/handoff-update`**. Check that its PR is merged too; if not, open/merge it (docs only, no server update).
+   c. Ask the user: did they **change the admin password** (Settings → Profile)? **Test the BHW login + change the BHW password**? **Disable the Deploy workflow**? Enable Azure **auto-shutdown**?
+   d. Ask once: phase order **(a)** backups → System Health → NFC, or **(b)** NFC → backups → System Health (default (b), below).
 2. **Phase 7: NFC cards (the main task)**:
    a. Ask which chips they have (NTAG213/215/216? stickers/cards?) and how many. Confirm NFC is on (S21: Settings → Connections → NFC and contactless payments).
    b. In the live app (Chrome on S21 or PC): Health Cards → a seeded patient with a card (first 10 seeded patients) → **Print** page → copy the signed link from `NfcUrlHint`. If the page shows no link, check the API response's `nfc_view_url` (`GET /api/v1/health-cards/{patient_id}`).
@@ -319,9 +401,11 @@ dc exec backend python scripts/seed_db.py
    e. Open `/nfc-monitor` on the PC (logged in) and tap again → the last scan appears within ~2 s.
    f. Optional: lock the chip in NFC Tools (**irreversible**) only after the link is final. Never lock test chips.
    g. Optional: in-app "Scan NFC" (Chrome Android only). Check whether `readNfcTag` accepts URL records; if not, decide whether to extend it (code change → PR flow per DEV-WORKFLOW.md).
-3. **Phase 8: backups**: daily `pg_dump` cron on the server (DEPLOY.md §8: `/etc/cron.daily/smarthealth-backup`, 14-day retention, pg_dump + media tar), plus copy `ENCRYPTION_KEY` and `QR_HMAC_SECRET` to the user's password manager (they exist ONLY on the server now). Consider off-server copies (scp to PC, or Azure Blob, which costs credit).
-4. **Cleanup**: on the PC with Docker Desktop running: `docker compose -p shh-verify down -v` (only `shh-verify_*`), optionally `docker image rm smarthealth-backend:test smarthealth-backend:latest`. Don't touch `agap_*` / `deadapp-*`.
-5. **Optional later**: automate backend deploy (dedicated SSH deploy key + GitHub secrets `SSH_HOST/USER/PRIVATE_KEY/PORT`, rework the validate step); update DEPLOY.md with the Azure specifics; raise the coverage gate; legacy `infra/` files decision.
+3. **Phase 8: backups**: compose `backup` service (daily 02:00 Manila `pg_dump` + media tar, 14-day retention, status JSON; design in Post-Close Additions §B), plus copy `ENCRYPTION_KEY` and `QR_HMAC_SECRET` to the user's password manager (they exist ONLY on the server now). Off-server copy: weekly scp to the PC (free) or rclone/Azure Blob.
+4. **Phase 9: System Health admin page**: `GET /api/v1/system/status` (admin) + Settings → System Health page; Celery heartbeat; disk/DB/media sizes; backup status; deployed commit; set `ADMIN_ALERT_PHONE`; sanitize `/health/db`; optional UptimeRobot. Design in Post-Close Additions §B.
+5. **Phase 10: Admin role model B**: remove admin from clinical PHI reads/writes per the change list in Post-Close Additions §C; update frontend role checks + tests; PR → deploy. Resolve the allergies/known_conditions and immunization-delete questions first.
+6. **Cleanup**: on the PC with Docker Desktop running: `docker compose -p shh-verify down -v` (only `shh-verify_*`), optionally `docker image rm smarthealth-backend:test smarthealth-backend:latest`. Don't touch `agap_*` / `deadapp-*`.
+7. **Optional later**: automate backend deploy (dedicated SSH deploy key + GitHub secrets `SSH_HOST/USER/PRIVATE_KEY/PORT`, rework the validate step); update DEPLOY.md with the Azure specifics; raise the coverage gate; legacy `infra/` files decision.
 
 ## Risks & Blockers
 
@@ -337,7 +421,9 @@ dc exec backend python scripts/seed_db.py
 - What NFC chip type/size does the user have, and how many cards to write (10 seeded cards vs real ones)?
 - Does `readNfcTag` (`frontend/web/lib/nfc.ts`) handle NDEF URL records, or only the Text-JSON format? (Matters for the in-app "Scan NFC" button with NFC Tools–written chips.)
 - Did the user change the admin password, disable the Deploy workflow, enable auto-shutdown?
-- Should the demo BHW/physician accounts (`@bhc.local`, which can't receive OTP) be deactivated or given real emails?
+- Demo accounts: BHW now has a real email (done by user). Physician: give it a real email (Gmail `+doc` alias) or leave it unable to log in? Was the BHW password changed after its first login?
+- Phase order (a) backups-first vs (b) NFC-first? Default (b) if unanswered.
+- Model B details: should `allergies` / `known_conditions` (decrypted in `patients.py:127-129`) stay visible to all staff as safety info, or be physician-only? Should admin keep immunization delete/correct (`immunizations.py:54/:221`)? Does the admin need a logged "emergency access" override?
 - Legacy infra files (`infra/docker-compose*.yml`, `infra/nginx`, root `docker-compose.yml`, `frontend/web/Dockerfile`): delete or fix? (Unanswered since the parent.)
 
 ## Quick Start for Next Session
@@ -359,12 +445,14 @@ curl.exe -s https://smarthealth-hub.japaneast.cloudapp.azure.com/health
 # Server (user runs): ssh azureuser@smarthealth-hub.japaneast.cloudapp.azure.com ; dc ps
 
 # Next action
-# Housekeeping (git checkout main + pull; confirm docs/dev-workflow PR merged; ask the 3 status questions),
-# then Phase 7 step 2a: ask the user's chip type, then walk them
+# Housekeeping (git checkout main + pull; confirm docs/handoff-update PR merged; ask the status questions
+# + phase order (a)/(b)), then by default Phase 7 step 2a: ask the user's chip type, then walk them
 # through copying a signed link from the Print page and writing it with NFC Tools on the S21.
+# Later phases (8 backups, 9 System Health, 10 admin model B) are specified in "Post-Close Additions".
 ```
 
 ## Session Closed
 **Closed at:** 2026-11-18 (MPST, UTC+8)
 **Commit:** the `session: azure-go-live [standalone-9d299342]` commit on branch `docs/dev-workflow` that includes this note (run manually by the user from the command Claude provided)
 **Session status:** Handed off to next session
+**Re-opened and re-closed (same day):** after the first close, the docs PR was merged and the user asked about role dashboards, system-admin gaps and the admin's access. Decisions/plans were added under "Post-Close Additions" and committed as `docs: handoff update …` on branch `docs/handoff-update` (run manually by the user).
