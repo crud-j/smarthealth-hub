@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 
 # ---------------------------------------------------------------------------
@@ -44,6 +45,12 @@ depends_on: str | tuple[str, ...] | None = None
 
 
 def upgrade() -> None:
+    # 0001 (initial schema) already creates this table when applied from scratch.
+    # Guard prevents DuplicateTable on a fresh non-Docker setup.
+    bind = op.get_bind()
+    if "medical_history" in sa_inspect(bind).get_table_names():
+        return
+
     op.create_table(
         "medical_history",
         sa.Column(
