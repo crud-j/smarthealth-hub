@@ -285,7 +285,11 @@ async def _dispatch_immunization_reminders_async() -> int:
 
         for immunization, patient in rows:
             full_name = _build_full_name(patient.first_name, patient.middle_name, patient.last_name)
-            due_date_str = immunization.next_due_date.strftime("%m/%d/%Y") if immunization.next_due_date is not None else ""  # type: ignore[union-attr]
+            due_date_str = (
+                immunization.next_due_date.strftime("%m/%d/%Y")
+                if immunization.next_due_date is not None
+                else ""
+            )  # type: ignore[union-attr]
 
             lang = _resolve_lang(patient.preferred_language, "immunization_reminder")
             message = SMS_TEMPLATES["immunization_reminder"][lang].format(

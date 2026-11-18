@@ -6,7 +6,6 @@ import HealthCardPreview from "@/components/cards/HealthCardPreview";
 import { mapPatient, type PatientApiResponse } from "@/hooks/usePatients";
 import type {
   CardGenerateResponse,
-  CardGenerationAccepted,
   GenerationStatus,
   HealthCardData,
 } from "@/types/healthCard";
@@ -39,13 +38,13 @@ type PageState =
 // NFC URL hint with copy button
 // ---------------------------------------------------------------------------
 
-const NFC_BASE_URL = process.env.NEXT_PUBLIC_NFC_BASE_URL ?? "http://192.168.100.6:9000";
-
-function NfcUrlHint({ cardNumber }: { cardNumber: string }) {
-  const url = `${NFC_BASE_URL}/view/${cardNumber}`;
+// The signed link ({NFC_VIEW_BASE_URL}/view/{card_number}?sig=...) is built by
+// the backend — the signature needs the server secret, so it can't be built here.
+function NfcUrlHint({ url }: { url: string | null | undefined }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(async () => {
+    if (!url) return;
     try {
       await navigator.clipboard.writeText(url);
       setCopied(true);
@@ -54,6 +53,8 @@ function NfcUrlHint({ cardNumber }: { cardNumber: string }) {
       // Clipboard not available — silently ignore
     }
   }, [url]);
+
+  if (!url) return null;
 
   return (
     <div className="mt-3 rounded-lg bg-[#f0fdf4] border border-[#bbf7d0] px-4 py-3">
@@ -74,8 +75,8 @@ function NfcUrlHint({ cardNumber }: { cardNumber: string }) {
         </button>
       </div>
       <p className="mt-1.5 text-xs text-[#4ade80] text-[#166534]">
-        Paste this URL into NFC Tools as a Task URL. When the NFC chip is tapped it will
-        open this address and the relay server will look up the patient.
+        Write this URL to the NFC chip (e.g. as a URL record in NFC Tools). Tapping the
+        chip opens the patient&apos;s summary. The link is signed — copy it exactly.
       </p>
     </div>
   );
@@ -447,7 +448,7 @@ export default function HealthCardPrintPage({
                 <dd className="mt-1 font-semibold text-[#1a0808]">v{card.card_version}</dd>
               </div>
             </dl>
-            <NfcUrlHint cardNumber={card.card_number} />
+            <NfcUrlHint url={card.nfc_view_url} />
           </div>
         </div>
       </div>
@@ -546,7 +547,7 @@ export default function HealthCardPrintPage({
         {/* NFC Tools URL hint */}
         {isCardActive && (
           <div className="px-5 pb-5">
-            <NfcUrlHint cardNumber={card.card_number} />
+            <NfcUrlHint url={card.nfc_view_url} />
           </div>
         )}
       </div>

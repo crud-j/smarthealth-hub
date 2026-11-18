@@ -440,6 +440,7 @@ app.include_router(api_router, prefix="/api/v1")
 # ---------------------------------------------------------------------------
 
 
+from fastapi import Query as _Query  # noqa: E402
 from fastapi import Request as _Request  # noqa: E402
 
 from app.api.v1.endpoints.health_cards import (  # noqa: E402
@@ -458,21 +459,22 @@ from app.db.session import DbDep as _DbDep  # noqa: E402
     summary="NFC tap endpoint — view patient by card number or NFC UID",
     description=(
         "Public endpoint targeted by the NFC chip's NDEF URI record.  "
-        "Write 'http://192.168.100.6:9000/view/{card_number}' to the NFC chip "
-        "using NFC Tools; tapping the chip will GET this URL.  "
-        "Accepts either a health card code (BHC-2026-000001) or a raw NFC UID.  "
+        "Write the signed link from the print page / nfc-batch export "
+        "({NFC_VIEW_BASE_URL}/view/{card_number}?sig=...) to the NFC chip; "
+        "tapping the chip will GET this URL.  "
         "Returns the same safe patient info as GET /api/v1/health-cards/view/{identifier}.  "
-        "No JWT required."
+        "No JWT required; the ?sig= HMAC is required when NFC_REQUIRE_SIGNED_LINKS is on."
     ),
 )
 async def nfc_tap_view(
     identifier: str,
     request: _Request,
     db: _DbDep,
+    sig: str | None = _Query(None, max_length=128),
 ) -> _ViewByIdentifierResponse:
     """Thin shim — delegates to the health-cards view handler."""
     return await _view_health_card_by_identifier(  # type: ignore[return-value]
-        identifier=identifier, request=request, db=db
+        identifier=identifier, request=request, db=db, sig=sig
     )
 
 

@@ -32,6 +32,7 @@ Security notes:
 from __future__ import annotations
 
 import json
+import os
 import socket
 import sys
 import threading
@@ -46,9 +47,15 @@ from typing import Any
 RELAY_HOST = "0.0.0.0"
 RELAY_PORT = 9000
 
-# FastAPI backend — runs on the laptop, accessible from localhost
-FASTAPI_SCAN_UID_URL = "http://127.0.0.1:8000/api/v1/health-cards/scan-uid"
-FASTAPI_VIEW_URL = "http://127.0.0.1:8000/api/v1/health-cards/view"
+# FastAPI backend. Defaults to the backend on this laptop; for a cloud
+# deployment point the relay at the server, e.g.
+#   PowerShell:  $env:SHH_API_URL = "https://api.203-0-113-10.sslip.io"
+#   bash:        SHH_API_URL=https://api.203-0-113-10.sslip.io python ...
+# SHH_PUBLIC_API_URL is where phones are redirected for the clinical summary
+# page; it defaults to SHH_API_URL when that is set, else http://<LAN-IP>:8000.
+_API_URL = os.environ.get("SHH_API_URL", "http://127.0.0.1:8000").rstrip("/")
+FASTAPI_SCAN_UID_URL = f"{_API_URL}/api/v1/health-cards/scan-uid"
+FASTAPI_VIEW_URL = f"{_API_URL}/api/v1/health-cards/view"
 
 # When an NFC tap opens /view/{identifier} in a mobile browser, the relay
 # issues an HTTP 302 redirect to FastAPI's view endpoint so the browser
@@ -127,7 +134,11 @@ _LOCAL_IP: str = _get_local_ip()
 
 # Build the redirect base using the LAN IP so mobile browsers can reach FastAPI.
 # The relay listens on port 9000; FastAPI listens on port 8000.
-_FASTAPI_VIEW_REDIRECT_BASE = f"http://{_LOCAL_IP}:8000/api/v1/health-cards/view"
+_PUBLIC_API_URL = os.environ.get(
+    "SHH_PUBLIC_API_URL",
+    _API_URL if "SHH_API_URL" in os.environ else f"http://{_LOCAL_IP}:8000",
+).rstrip("/")
+_FASTAPI_VIEW_REDIRECT_BASE = f"{_PUBLIC_API_URL}/api/v1/health-cards/view"
 
 # ---------------------------------------------------------------------------
 # In-memory last-scan cache (mirrors the FastAPI in-memory cache)
@@ -374,7 +385,7 @@ def _do_scan(uid: str) -> dict[str, Any]:
         return {"found": False, "error": str(exc)}
 
 
-def _do_view(identifier: str) -> dict[str, Any]:
+def _do_view(identifier: str, query: str = "") -> dict[str, Any]:
     """
     Call FastAPI GET /api/v1/health-cards/view/{identifier} and update local cache.
 
@@ -389,7 +400,8 @@ def _do_view(identifier: str) -> dict[str, Any]:
         from urllib.parse import quote  # noqa: PLC0415
 
         encoded = quote(identifier, safe="")
-        url = f"{FASTAPI_VIEW_URL}/{encoded}"
+        # Forward the query string so signed links (?sig=...) still verify.
+        url = f"{FASTAPI_VIEW_URL}/{encoded}" + (f"?{query}" if query else "")
         # FastAPI view endpoint returns HTML — do NOT call resp.json().
         resp = requests.get(url, timeout=10, allow_redirects=True)
         found = resp.status_code == 200
@@ -560,10 +572,15 @@ class RelayHandler(BaseHTTPRequestHandler):
             # Also update the relay monitor cache in the background (non-blocking).
             # _do_view is called in a thread so the redirect response is sent first.
             import threading  # noqa: PLC0415
-            threading.Thread(target=_do_view, args=(identifier,), daemon=True).start()
+            threading.Thread(
+                target=_do_view, args=(identifier, parsed.query), daemon=True
+            ).start()
             # HTTP 302 redirect to FastAPI's rich HTML clinical summary endpoint.
+            # The query string (?sig=...) is kept so signed links still verify.
             encoded_id = quote(identifier, safe="")
-            redirect_url = f"{_FASTAPI_VIEW_REDIRECT_BASE}/{encoded_id}"
+            redirect_url = f"{_FASTAPI_VIEW_REDIRECT_BASE}/{encoded_id}" + (
+                f"?{parsed.query}" if parsed.query else ""
+            )
             self.send_response(302)
             self.send_header("Location", redirect_url)
             self.send_header("Content-Length", "0")

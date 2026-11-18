@@ -1239,7 +1239,7 @@ export default function IntakePage() {
                   <input id="placeOfBirth" type="text" {...register("placeOfBirth")} style={input} placeholder="City or Municipality" />
                 </div>
                 <div>
-                  <label style={label} htmlFor="mothersMaidenName">Mother's Maiden Name</label>
+                  <label style={label} htmlFor="mothersMaidenName">Mother&apos;s Maiden Name</label>
                   <input id="mothersMaidenName" type="text" {...register("mothersMaidenName")} style={input} placeholder="First Middle Last" />
                 </div>
                 <div>

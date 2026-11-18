@@ -30,6 +30,8 @@ jobs:
           ENVIRONMENT: production
           JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
           ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+          # Settings refuses to load in production with the default value.
+          QR_HMAC_SECRET: ${{ secrets.QR_HMAC_SECRET }}
           SEMAPHORE_API_KEY: ${{ secrets.SEMAPHORE_API_KEY }}
           ITEXMO_API_KEY: ${{ secrets.ITEXMO_API_KEY }}
           PHILSMS_TOKEN: ${{ secrets.PHILSMS_TOKEN }}
@@ -45,10 +47,14 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SSH_PORT }}
+          # Builds the backend image on the server and restarts the stack.
+          # Migrations run automatically when the backend container starts
+          # (RUN_MIGRATIONS=true in docker-compose.server.yml).
+          # The frontend deploys separately via Vercel's Git integration.
           script: |
+            set -e
             cd /opt/smarthealth-hub
-            git pull origin main
-            docker compose pull
-            docker compose up -d --remove-orphans
-            docker compose run --rm backend alembic upgrade head
+            git pull --ff-only origin main
+            docker compose -f docker-compose.server.yml --env-file .env.server up -d --build --remove-orphans
+            docker image prune -f
             echo "Deploy complete: $(date)"

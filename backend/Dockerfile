@@ -11,7 +11,9 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Stage 1: builder ──────────────────────────────────────────────────────────
-FROM python:3.12-slim AS builder
+# Pinned to Debian bookworm: package names below (e.g. libgdk-pixbuf2.0-0)
+# differ on newer Debian releases that the unpinned -slim tag may move to.
+FROM python:3.12-slim-bookworm AS builder
 
 # System libraries needed to *compile* some wheels (e.g. argon2-cffi) and to
 # run WeasyPrint's PDF rendering at both build and run time.
@@ -44,9 +46,11 @@ RUN uv venv /app/.venv && \
     uv pip install --python /app/.venv/bin/python --no-cache -e "."
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
-FROM python:3.12-slim AS runtime
+FROM python:3.12-slim-bookworm AS runtime
 
-# Same WeasyPrint system libraries needed at *runtime* (not just build time).
+# Same WeasyPrint system libraries needed at *runtime* (not just build time),
+# plus Tesseract with English + Filipino language data for ID-card OCR
+# (app/services/ocr_service.py uses lang="eng+fil").
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpango-1.0-0 \
     libpangoft2-1.0-0 \
@@ -55,6 +59,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgdk-pixbuf2.0-0 \
     fontconfig \
     fonts-liberation \
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    tesseract-ocr-fil \
     && rm -rf /var/lib/apt/lists/*
 
 # Non-root user — all files owned by appuser for least-privilege operation.
@@ -70,23 +77,37 @@ COPY app ./app
 COPY alembic ./alembic
 COPY alembic.ini ./
 COPY pyproject.toml ./
+COPY scripts ./scripts
 
-# Create the media directory the app writes to and make it writable.
-RUN mkdir -p /app/media/patient_photos && chown -R appuser:appuser /app
+# Media directory (patient photos + generated health-card PDFs) — mount a
+# volume here in production so files survive container rebuilds.
+# Strip Windows line endings from the entrypoint in case the repo was checked
+# out with CRLF, and make it executable — both BEFORE switching user.
+RUN mkdir -p /app/media/patient_photos /app/media/health_cards \
+    && sed -i 's/\r$//' /app/scripts/entrypoint.sh \
+    && chmod +x /app/scripts/entrypoint.sh \
+    && chown -R appuser:appuser /app
 
 # Ensure the venv's bin/ is first on PATH so `python` / `uvicorn` resolve there.
+# XDG_CACHE_HOME: appuser has no home directory, so give fontconfig (used by
+# WeasyPrint for PDFs) a writable cache location.
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    MEDIA_DIR=/app/media \
+    XDG_CACHE_HOME=/tmp/.cache
 
 USER appuser
 
 EXPOSE 8000
 
-# Copy the entrypoint script that runs migrations before starting uvicorn.
-COPY scripts/ /app/scripts/
-RUN chmod +x /app/scripts/entrypoint.sh
-
-# Run migrations then hand off to uvicorn.
-# exec in entrypoint.sh ensures SIGTERM/SIGINT reach uvicorn directly.
+# The entrypoint waits for PostgreSQL, runs migrations when RUN_MIGRATIONS=true,
+# then execs the command — so the same image serves the API (default CMD),
+# the Celery worker and Celery beat (compose overrides `command:`).
 ENTRYPOINT ["/app/scripts/entrypoint.sh"]
+
+# WEB_CONCURRENCY sets the number of uvicorn worker processes (default 1).
+# --proxy-headers + --forwarded-allow-ips: trust X-Forwarded-* from the
+# reverse proxy (Caddy) in front of the container.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", \
+     "--proxy-headers", "--forwarded-allow-ips", "*", "--no-server-header"]

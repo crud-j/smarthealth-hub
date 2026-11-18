@@ -42,10 +42,9 @@ export function usePhilHealthMask(
 ): UseFormRegisterReturn {
   const originalOnChange = registerReturn.onChange;
 
-  const maskedOnChange = async (
-    event: React.ChangeEvent<HTMLInputElement>
-  ): Promise<void> => {
-    const raw = event.target.value;
+  const maskedOnChange: UseFormRegisterReturn["onChange"] = async (event) => {
+    const target = event.target as HTMLInputElement;
+    const raw = target.value;
     // Strip everything except digits
     const digits = raw.replace(/\D/g, "");
     // Cap at 12 digits
@@ -62,7 +61,7 @@ export function usePhilHealthMask(
     }
 
     // Mutate the synthetic event value so RHF receives the formatted string
-    event.target.value = masked;
+    target.value = masked;
     return originalOnChange(event);
   };
 
@@ -94,10 +93,9 @@ export function usePhMobileMask(
 ): UseFormRegisterReturn {
   const originalOnChange = registerReturn.onChange;
 
-  const maskedOnChange = async (
-    event: React.ChangeEvent<HTMLInputElement>
-  ): Promise<void> => {
-    const raw = event.target.value;
+  const maskedOnChange: UseFormRegisterReturn["onChange"] = async (event) => {
+    const target = event.target as HTMLInputElement;
+    const raw = target.value;
 
     let cleaned: string;
     if (raw.startsWith("+")) {
@@ -110,7 +108,7 @@ export function usePhMobileMask(
       cleaned = raw.replace(/\D/g, "").slice(0, 11);
     }
 
-    event.target.value = cleaned;
+    target.value = cleaned;
     return originalOnChange(event);
   };
 

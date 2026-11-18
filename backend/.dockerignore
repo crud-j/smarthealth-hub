@@ -1,0 +1,57 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# backend/.dockerignore
+# Files/directories excluded from the Docker build context for the backend.
+# Keep this in sync with .gitignore — anything that should not be in the image.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Python artifacts
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# Environment secrets — NEVER bake .env into the image
+.env
+.env.*
+!.env.example
+
+# Test and dev tooling (not needed in the runtime image)
+tests/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+coverage.xml
+.coverage
+
+# Celery scheduler state files
+celerybeat-schedule
+celerybeat-schedule-shm
+celerybeat-schedule-wal
+celerybeat-schedule.db
+
+# Media uploads — served from a mounted volume, not baked into the image
+media/
+
+# scripts/ IS included: entrypoint.sh is required, and seed_db.py /
+# validate_secrets.py are useful inside the container on first deploy.
+
+# Git and IDE
+.git/
+.gitignore
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Documentation
+docs/
+*.md

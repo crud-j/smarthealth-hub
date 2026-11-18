@@ -21,6 +21,7 @@ the ``include`` list inside ``app.workers.celery_app`` and that the
 from __future__ import annotations
 
 import logging
+from typing import cast
 
 from app.core.config import settings
 from app.workers.celery_app import celery_app
@@ -49,7 +50,8 @@ def check_sms_failure_rate() -> dict[str, int]:
     # Read the failure counter from Redis.
     try:
         r = redis_lib.from_url(settings.REDIS_URL, decode_responses=True)
-        raw: str | None = r.get(_FAILURE_COUNT_KEY)
+        # decode_responses=True -> str, but redis-py types it as bytes | str.
+        raw = cast("str | None", r.get(_FAILURE_COUNT_KEY))
         count: int = int(raw) if raw else 0
     except Exception as exc:  # noqa: BLE001
         logger.warning(

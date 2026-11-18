@@ -263,7 +263,7 @@ function ImmunizationForm({ value, onChange, errors }: SubFormProps) {
       </div>
       {!isForSelf && (
         <div style={{ maxWidth: 220 }}>
-          <label style={label}>Child's Age (months)</label>
+          <label style={label}>Child&apos;s Age (months)</label>
           <input
             type="number"
             style={input}
@@ -693,7 +693,7 @@ function ChildHealthForm({ value, onChange, errors }: SubFormProps) {
       <p style={sectionDivider}>Child Health Details</p>
       <div style={twoCol}>
         <div>
-          <label style={label}>Child's Age (months)</label>
+          <label style={label}>Child&apos;s Age (months)</label>
           <input
             type="number"
             style={input}

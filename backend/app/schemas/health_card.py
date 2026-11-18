@@ -20,7 +20,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, computed_field, field_validator
 
 from app.schemas._base import BaseSchema
 
@@ -124,6 +124,14 @@ class HealthCardResponse(BaseSchema):
         None,
         description="data:image/png;base64,... QR code image — only present on card generation/reissue",
     )
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def nfc_view_url(self) -> str:
+        """Signed URL to write to the NFC chip (card number pointer + HMAC, no PHI)."""
+        from app.services.nfc_payload_service import build_nfc_view_url  # noqa: PLC0415
+
+        return build_nfc_view_url(self.card_number)
 
 
 class HealthCardMaybeResponse(BaseSchema):
@@ -318,8 +326,8 @@ class NfcBatchItem(BaseSchema):
     nfc_uri: str = Field(
         description=(
             "NDEF URI string to write to the physical NFC chip, e.g. "
-            "'http://192.168.100.6:9000/view/BHC-2026-000001'.  "
-            "Contains only the card_number pointer — no PHI."
+            "'https://api.example.org/view/BHC-2026-000001?sig=<hmac>'.  "
+            "Contains only the card_number pointer and its signature — no PHI."
         )
     )
 

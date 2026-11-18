@@ -33,7 +33,7 @@ import json
 import secrets
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -80,7 +80,7 @@ async def _get_redis_challenge(key: str) -> str | None:
     """Retrieve and return a stored challenge from Redis."""
     try:
         r = get_shared_redis()
-        value: str | None = await r.get(key)
+        value = cast("str | None", await r.get(key))
         return value
     except Exception as exc:  # noqa: BLE001
         logger.error("passkey: Redis read failed for key %s: %s", key, exc)

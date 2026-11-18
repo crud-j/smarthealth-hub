@@ -33,7 +33,7 @@ export function proxy(request: NextRequest): NextResponse {
     pathname.startsWith("/forgot-password") ||
     pathname.startsWith("/verify") ||        // QR code scan landing page (mobile)
     pathname.startsWith("/intake/") ||       // Public pre-visit patient intake form (token-gated, no JWT)
-    pathname.startsWith("/nfc-monitor") ||   // NFC Wi-Fi relay monitor page (mobile)
+    // /nfc-monitor is NOT public: it shows the last scanned patient's details.
     pathname.startsWith("/api/") ||
     pathname.startsWith("/_next/") ||
     pathname === "/favicon.ico" ||
