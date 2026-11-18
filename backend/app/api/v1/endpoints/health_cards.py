@@ -36,7 +36,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 from urllib.parse import parse_qs, urlparse
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
@@ -1810,7 +1810,8 @@ async def get_batch_generate_status(
     results_key = f"batch:{batch_id}:results"
 
     # Fetch meta hash — returns {} if key does not exist.
-    meta: dict[str, str] = redis_client.hgetall(meta_key)
+    # decode_responses=True -> str keys/values; redis-py types them as bytes | str.
+    meta = cast("dict[str, str]", redis_client.hgetall(meta_key))
     if not meta:
         raise HTTPException(
             status_code=404,
@@ -1820,7 +1821,7 @@ async def get_batch_generate_status(
     total = int(meta.get("total", "0"))
 
     # Fetch per-patient results.
-    raw_results: dict[str, str] = redis_client.hgetall(results_key)
+    raw_results = cast("dict[str, str]", redis_client.hgetall(results_key))
 
     results: list[BatchStatusResult] = []
     completed = 0
