@@ -30,6 +30,8 @@ jobs:
           ENVIRONMENT: production
           JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
           ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+          # Settings refuses to load in production with the default value.
+          QR_HMAC_SECRET: ${{ secrets.QR_HMAC_SECRET }}
           SEMAPHORE_API_KEY: ${{ secrets.SEMAPHORE_API_KEY }}
           ITEXMO_API_KEY: ${{ secrets.ITEXMO_API_KEY }}
           PHILSMS_TOKEN: ${{ secrets.PHILSMS_TOKEN }}

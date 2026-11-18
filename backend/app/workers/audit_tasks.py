@@ -106,7 +106,6 @@ def scan_audit_anomalies() -> dict[str, int]:
         if len(anomalies) > 3:
             summary += f" (+{len(anomalies) - 3} more)"
 
-
         message = f"[SmartHealth Alert] {len(anomalies)} audit anomal{plural} detected: {summary}"
 
         try:

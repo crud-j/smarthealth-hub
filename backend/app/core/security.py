@@ -190,8 +190,7 @@ async def revoke_all_user_tokens(user_id: str) -> None:
         await r.setex(f"revoked:user:{user_id}", 7 * 24 * 3600, "1")
     except (Exception, asyncio.CancelledError) as exc:  # noqa: BLE001
         _logger.warning(
-            "revoke_all_user_tokens: Redis unavailable — tokens for user %s not revoked. "
-            "Error: %s",
+            "revoke_all_user_tokens: Redis unavailable — tokens for user %s not revoked. Error: %s",
             user_id,
             exc,
         )

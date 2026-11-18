@@ -2313,7 +2313,9 @@ async def public_verify_health_card(
     db: DbDep,
 ) -> PublicVerifyResponse:
     """Public endpoint consumed by the /verify Next.js page on mobile phones."""
-    _invalid = PublicVerifyResponse(valid=False, full_name=None, patient_code=None, card_status=None)
+    _invalid = PublicVerifyResponse(
+        valid=False, full_name=None, patient_code=None, card_status=None
+    )
 
     try:
         if not qr_service.verify_qr_payload(pid, v, sig):

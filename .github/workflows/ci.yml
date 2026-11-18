@@ -80,11 +80,13 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_DB: smarthealth_test
+          # Must be "smarthealthhub_test": tests/conftest.py always swaps the
+          # database name in DATABASE_URL to smarthealthhub_test.
+          POSTGRES_DB: smarthealthhub_test
           POSTGRES_USER: smarthealth
           POSTGRES_PASSWORD: ci-test-password
         options: >-
-          --health-cmd "pg_isready -U smarthealth -d smarthealth_test"
+          --health-cmd "pg_isready -U smarthealth -d smarthealthhub_test"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -110,7 +112,7 @@ jobs:
       - run: pytest --cov=app --cov-fail-under=70 --tb=short
         working-directory: backend
         env:
-          DATABASE_URL: postgresql+asyncpg://smarthealth:ci-test-password@localhost:5432/smarthealth_test
+          DATABASE_URL: postgresql+asyncpg://smarthealth:ci-test-password@localhost:5432/smarthealthhub_test
           REDIS_URL: redis://localhost:6379/0
           ENVIRONMENT: test
           JWT_SECRET_KEY: ci-test-secret-key-minimum-32-chars-long

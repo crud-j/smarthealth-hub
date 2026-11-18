@@ -216,7 +216,7 @@ dc up -d --build          # migrations run automatically on backend start
 Automatic: `.github/workflows/deploy.yml` runs the same commands over SSH
 after CI passes on `main`. Add these repository secrets: `SSH_HOST`,
 `SSH_USER`, `SSH_PRIVATE_KEY`, `SSH_PORT`, plus the secrets its validation
-step reads (`JWT_SECRET_KEY`, `ENCRYPTION_KEY`, SMS/email keys). Vercel
+step reads (`JWT_SECRET_KEY`, `ENCRYPTION_KEY`, `QR_HMAC_SECRET`, SMS/email keys). Vercel
 redeploys the frontend on every push by itself.
 
 ---
