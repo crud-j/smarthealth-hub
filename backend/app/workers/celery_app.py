@@ -84,29 +84,46 @@ celery_app.config_from_object(
 )
 
 # ---------------------------------------------------------------------------
-# Celery Beat schedule — periodic reminders
+# Celery Beat schedule
+#
+# All times are Asia/Manila (``timezone`` above). The production VM is switched
+# OFF at 23:00 by Azure auto-shutdown and started by hand in the morning, and
+# Celery Beat never re-runs a job whose time passed while it was down. So every
+# daily job must fire between ~10:00 and 22:59, or it silently never runs.
+# (The backup at 22:30 is a separate container with its own catch-up.)
 # ---------------------------------------------------------------------------
 celery_app.conf.beat_schedule = {
+    # Every minute — liveness signal for the System Health page. `expires`
+    # drops heartbeats that sat in the queue (worker down), so a worker coming
+    # back does not replay a backlog of stale ones.
+    "system-heartbeat": {
+        "task": "monitoring.heartbeat",
+        "schedule": crontab(),
+        "options": {"expires": 50},
+    },
     # Run at the top of every hour — finds appointments due for a reminder.
     # Task registered in reminder_scheduler.py with @celery_app.task(name=...).
     "dispatch-appointment-reminders": {
         "task": "reminders.dispatch_appointment_reminders",
         "schedule": crontab(minute=0),
     },
-    # Run once per day at 8 AM (Asia/Manila) — finds immunizations due.
+    # Daily 10:00 — immunization reminders. The task only picks doses due in
+    # exactly SMS_IMMUNIZATION_LEAD_DAYS, so a skipped day means those patients
+    # never get a reminder: keep this at a time the VM is surely running.
     "dispatch-immunization-reminders": {
         "task": "reminders.dispatch_immunization_reminders",
-        "schedule": crontab(hour=8, minute=0),
+        "schedule": crontab(hour=10, minute=0),
     },
-    # Nightly 01:00 Asia/Manila — scores upcoming appointments for no-show risk.
+    # Daily 21:00 — scores upcoming appointments for no-show risk. Runs after
+    # mark-missed-appointments (18:00) so today's no-shows are in the data.
     "run-ai-risk-scoring": {
         "task": "ai_tasks.run_risk_scoring",
-        "schedule": crontab(hour=1, minute=0),
+        "schedule": crontab(hour=21, minute=0),
     },
-    # Nightly 01:30 Asia/Manila — detects illness trend anomalies.
+    # Daily 21:30 — detects illness trend anomalies.
     "run-ai-anomaly-detection": {
         "task": "ai_tasks.run_anomaly_detection",
-        "schedule": crontab(hour=1, minute=30),
+        "schedule": crontab(hour=21, minute=30),
     },
     # Hourly at :30 — check SMS task failure rate and alert admin if threshold hit.
     "check-sms-failure-rate": {
@@ -120,29 +137,32 @@ celery_app.conf.beat_schedule = {
         "task": "audit.scan_anomalies",
         "schedule": crontab(minute=30),
     },
-    # Weekly report: every Friday at 09:00 UTC = 17:00 PHT.
-    # Emails aggregate counts (patients, appointments, SMS stats) to all active
-    # admin users.  Controlled by REPORT_EMAIL_ENABLED in .env.
+    # Weekly report: every Friday at 17:00 Manila (end of the work week; the
+    # email text says 17:00 PHT). Emails aggregate counts (patients,
+    # appointments, SMS stats) to all active admin users. Controlled by
+    # REPORT_EMAIL_ENABLED in .env.
     "send-weekly-report": {
         "task": "reports.send_weekly",
-        "schedule": crontab(hour=9, minute=0, day_of_week="friday"),
+        "schedule": crontab(hour=17, minute=0, day_of_week="friday"),
     },
-    # Monthly report: last Friday of the month at 09:15 UTC = 17:15 PHT.
+    # Monthly report: last Friday of the month at 17:15 Manila.
     # "Last Friday" is approximated by day_of_month=22-31 AND day_of_week=friday
     # (any month's last Friday always falls on day 22–31 because no month has
     # more than 31 days).  The 15-minute offset avoids DB contention with the
-    # weekly report which fires at 09:00 on the same Friday.
+    # weekly report which fires at 17:00 on the same Friday.
     "send-monthly-report": {
         "task": "reports.send_monthly",
-        "schedule": crontab(hour=9, minute=15, day_of_week="friday", day_of_month="22-31"),
+        "schedule": crontab(hour=17, minute=15, day_of_week="friday", day_of_month="22-31"),
     },
-    # Nightly 23:00 Asia/Manila — mark past-due appointments as 'missed'.
-    # nowfun pins the crontab evaluation to Asia/Manila so the task fires at
-    # exactly 23:00 PHT regardless of the Celery worker's system timezone.
+    # Daily 18:00 Manila (after clinic hours) — mark past-due appointments as
+    # 'missed' and text those patients. Not later: the follow-up SMS should not
+    # arrive at night. Not more often: the SMS step has no "already sent" check.
+    # nowfun pins the crontab evaluation to Asia/Manila regardless of the
+    # Celery worker's system timezone.
     "mark-missed-appointments-daily": {
         "task": "workers.mark_missed_appointments",
         "schedule": crontab(
-            hour=23,
+            hour=18,
             minute=0,
             nowfun=manila_now,
         ),

@@ -548,7 +548,9 @@ async def health_db() -> dict[str, str]:
             "Database health check failed",
             extra={"error": str(exc)},
         )
+        # Public endpoint: never echo the exception (it can contain the DB
+        # host, user name or driver details). The full error is in the log.
         raise HTTPException(
             status_code=503,
-            detail=f"Database unavailable: {exc}",
-        )
+            detail="Database unavailable",
+        ) from None

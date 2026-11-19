@@ -258,6 +258,19 @@ export default function SettingsPage() {
           </div>
           <IconChevronRight className="ml-auto shrink-0 text-[#c08080]" />
         </a>
+
+        <a
+          href="/settings/system-health"
+          className="flex items-center gap-3 rounded-xl border border-[#e5d4cc] bg-white px-5 py-4 text-sm font-medium text-[#1a0808] transition-colors hover:border-[#c08080] hover:bg-[#fdf0eb] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b5343e] focus-visible:ring-offset-2"
+          style={{ boxShadow: "0 1px 6px rgba(160,80,80,0.06)" }}
+        >
+          <IconActivity />
+          <div>
+            <p className="font-semibold">System Health</p>
+            <p className="text-xs text-[#9b6e6e]">Database, background jobs, disk, backups and version</p>
+          </div>
+          <IconChevronRight className="ml-auto shrink-0 text-[#c08080]" />
+        </a>
       </div>
     </div>
   );
@@ -308,6 +321,25 @@ function IconAudit() {
       <line x1="16" y1="13" x2="8" y2="13" />
       <line x1="16" y1="17" x2="8" y2="17" />
       <polyline points="10 9 9 9 8 9" />
+    </svg>
+  );
+}
+
+function IconActivity() {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0 text-[#b5343e]"
+      aria-hidden="true"
+    >
+      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
     </svg>
   );
 }

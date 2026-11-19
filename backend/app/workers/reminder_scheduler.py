@@ -9,7 +9,7 @@ Tasks:
     status in ('pending', 'confirmed'), and no existing sms_log for this appointment.
     Creates sms_logs row (status='queued'), enqueues send_reminder_task.
 
-  dispatch_immunization_reminders — runs daily at 08:00 Asia/Manila
+  dispatch_immunization_reminders — runs daily at 10:00 Asia/Manila
     Finds immunizations with next_due_date == today + lead_days,
     status != 'completed', patient has mobile_number, no sms_log already
     created today for that patient with an immunization message.
@@ -360,7 +360,7 @@ def dispatch_appointment_reminders() -> dict:  # type: ignore[type-arg]
 @celery_app.task(name="reminders.dispatch_immunization_reminders")
 def dispatch_immunization_reminders() -> dict:  # type: ignore[type-arg]
     """
-    Daily periodic task (Celery Beat, runs at 08:00 Asia/Manila).
+    Daily periodic task (Celery Beat, runs at 10:00 Asia/Manila).
 
     Finds immunizations with next_due_date == today + SMS_IMMUNIZATION_LEAD_DAYS,
     creates sms_logs rows, and enqueues send_reminder_task for each.
@@ -515,7 +515,7 @@ async def _mark_missed_appointments_async() -> int:
 @celery_app.task(name="workers.mark_missed_appointments", bind=True, max_retries=3)
 def mark_missed_appointments(self: Any) -> dict:  # type: ignore[misc]
     """
-    Nightly periodic task (Celery Beat, runs at 23:00 Asia/Manila).
+    Daily periodic task (Celery Beat, runs at 18:00 Asia/Manila).
 
     Sets status='missed' on all appointments that are still 'pending' or
     'confirmed' but whose scheduled_at has already passed.  This keeps the

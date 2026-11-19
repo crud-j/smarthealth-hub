@@ -2,7 +2,10 @@
 System configuration endpoint — Admin only (read-only).
 
 Routes:
-  GET /system/info — Returns a safe, non-sensitive subset of runtime settings.
+  GET /system/info             — Safe, non-sensitive subset of runtime settings.
+  GET /system/status           — System Health page: DB, Redis, worker/beat,
+                                 disk, media, backups, alerts, deployed commit.
+  GET /system/registration-url — Public registration URL (all staff).
 
 Auth: require_role("admin") — only admins can inspect system configuration.
 
@@ -21,8 +24,14 @@ from fastapi import APIRouter
 
 from app.core.config import settings
 from app.core.security import CurrentUser, require_role
+from app.db.session import DbDep
 from app.models.user import User
-from app.schemas.system_config import RegistrationUrlResponse, SystemInfoResponse
+from app.schemas.system_config import (
+    RegistrationUrlResponse,
+    SystemInfoResponse,
+    SystemStatusResponse,
+)
+from app.services.system_status_service import collect_system_status
 
 router = APIRouter(prefix="/system", tags=["System"])
 
@@ -59,6 +68,27 @@ async def get_system_info(
         nfc_view_base_url=settings.NFC_VIEW_BASE_URL,
         registration_url=_registration_url(),
     )
+
+
+@router.get(
+    "/status",
+    response_model=SystemStatusResponse,
+    summary="System health status (Admin only)",
+)
+async def get_system_status(
+    current_user: Annotated[User, AdminOnly],
+    db: DbDep,
+) -> SystemStatusResponse:
+    """
+    One-call answer to "is everything working?" for the System Health page.
+
+    Each section has a status (ok / warning / error / unknown) and a short
+    message. A broken dependency is reported in its own section; the endpoint
+    itself still returns 200.
+
+    Auth: Admin only. No audit log (no PHI, read-only).
+    """
+    return await collect_system_status(db)
 
 
 @router.get(

@@ -159,24 +159,30 @@ After the PR is merged, from your PC:
 ssh azureuser@smarthealth-hub.japaneast.cloudapp.azure.com
 ```
 
-On the **server**:
+On the **server** (prompt `azureuser@smarthealth-server:~$`):
 
 ```bash
-cd /opt/smarthealth-hub && git pull && dc up -d --build
+bash /opt/smarthealth-hub/scripts/deploy.sh
 ```
 
-- `git pull` fetches the merged code.
-- `dc up -d --build` rebuilds the backend image and restarts only what changed.
-  Usually 1–3 minutes. Migrations run automatically on start.
-- `dc` is a shortcut (set up in `~/.bashrc`) for
-  `docker compose -f /opt/smarthealth-hub/docker-compose.server.yml --env-file /opt/smarthealth-hub/.env.server`.
+The script (`scripts/deploy.sh`) does the whole update:
+- `git pull` fetches the merged code (it asks first if the server is not on `main`).
+- Rebuilds the backend image with the commit recorded in it, and restarts
+  only what changed. Usually 1–3 minutes. Migrations run automatically on start.
+- Waits until every service is up / healthy, then prints **`OK: commit abc1234
+  is running`** or **`FAILED`** with the log command to run.
+
+Always deploy with the script. Plain `git pull && dc up -d` (without
+`--build`) keeps running the **old** backend code, and a build without the
+script shows the version as `unknown` on the System Health page.
+
+`dc` is a shortcut (set up in `~/.bashrc`) for
+`docker compose -f /opt/smarthealth-hub/docker-compose.server.yml --env-file /opt/smarthealth-hub/.env.server`.
 
 **Check it worked:**
-```bash
-dc ps                                   # 6 services Up, backend (healthy)
-curl -s https://smarthealth-hub.japaneast.cloudapp.azure.com/health; echo
-```
-Then open https://smarthealth-hub-two.vercel.app and try the feature you changed.
+- Website → **Settings → System Health**: the banner is green and **Version**
+  shows the commit the script printed.
+- Then try the feature you changed on https://smarthealth-hub-two.vercel.app.
 
 **When a change touches both frontend and backend:** run the server update
 right after merging. Vercel takes ~2–3 minutes to publish, so the backend is
@@ -265,6 +271,22 @@ stop. The website on Vercel stays up, but logins fail while the server is stoppe
 **Auto-shutdown is ON at 11:00 PM (Manila)**: VM → Operations → Auto-shutdown.
 It only stops the VM, so **Start** it each morning / before a demo.
 
+**Scheduled jobs (Asia/Manila)** are timed for a VM that is on from ~10:00 to
+23:00. A job whose time passes while the VM is off is **skipped**, not run
+later (except the backup, which catches up). Start the VM **before 10:00** on
+clinic days. Defined in `backend/app/workers/celery_app.py`.
+
+| Time | Job |
+|---|---|
+| every minute | heartbeat for the System Health page |
+| every hour :00 | appointment reminder SMS |
+| every hour :30 | SMS failure-rate check, audit-log anomaly scan |
+| 10:00 | immunization reminder SMS (only doses due in exactly N days, so a skipped day is never sent) |
+| 18:00 | mark past appointments as missed + "you missed your appointment" SMS |
+| 21:00 / 21:30 | AI no-show risk scoring / illness anomaly detection |
+| 22:30 | database + media backup (separate `backup` container, §10) |
+| Fri 17:00 / 17:15 | weekly report email / monthly report email (last Friday) |
+
 ---
 
 ## 10. Backups and restore
@@ -345,11 +367,14 @@ docker run --rm -v smarthealth_media:/media -v /var/backups/smarthealth:/b:ro al
 | Vercel build fails at install | Vercel build logs | Install/Build command overrides missing (§8) |
 | NFC link shows "This card link is not valid" | Which URL is on the chip | Chip written with an old/unsigned link. Rewrite it from the card's Print page |
 | Server feels slow / random crashes | `free -h`, `dc ps` | Out of memory. Consider resizing the VM (Stop → Size → Start) |
+| System Health: **Background jobs** red | `dc ps`, `dc logs --tail 40 worker` (or `beat`) | Worker or beat stopped: `dc up -d`. Right after a VM start, wait a minute first |
+| System Health: **Backups** red/amber | `dc logs --tail 20 backup` | See §10. After the VM was off for days, a catch-up runs ~2 min after start |
 
 **Rolling back a bad release:**
 - **Frontend:** Vercel → Deployments → pick the last good one → ⋯ → **Promote to Production** (instant).
 - **Backend:** on the server, `git log --oneline -5`, then
-  `git checkout <good-commit> && dc up -d --build`. Afterwards return with
+  `git checkout <good-commit> && GIT_COMMIT=$(git rev-parse --short HEAD) dc up -d --build`
+  (not the deploy script: it would pull the bad code again). Afterwards return with
   `git checkout main`. ⚠️ This does **not** undo database migrations that
   already ran. If the bad release included a migration, fix forward with a new
   migration instead.

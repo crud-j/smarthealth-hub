@@ -181,6 +181,15 @@ class Settings(BaseSettings):
     # the last 24 hours.  Leave blank to disable admin alert SMS.
     ADMIN_ALERT_PHONE: str = ""
 
+    # ── System Health page (GET /api/v1/system/status) ────────────────────────
+    # Short git commit of the running code. Baked into the image at build time
+    # (backend/Dockerfile ARG GIT_COMMIT, set by scripts/deploy.sh). "unknown"
+    # means the image was built without it.
+    GIT_COMMIT: str = "unknown"
+    # status.json written by the `backup` service (infra/backup/backup.sh).
+    # docker-compose.server.yml mounts the host backup folder read-only here.
+    BACKUP_STATUS_FILE: pathlib.Path = pathlib.Path("/backups/status.json")
+
     # ── Email / Gmail SMTP ───────────────────────────────────────────────────
     EMAIL_HOST: str = "smtp.gmail.com"
     EMAIL_PORT: int = 587

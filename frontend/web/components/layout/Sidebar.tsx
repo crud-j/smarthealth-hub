@@ -121,6 +121,13 @@ function IconImmunization() {
     </svg>
   );
 }
+function IconActivity() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+    </svg>
+  );
+}
 function IconSettings() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -181,6 +188,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/settings/users",               label: "Users",                icon: <IconUsers />,   roles: ["admin"] },
       { href: "/settings/audit-log",           label: "Audit Log",            icon: <IconAudit />,   roles: ["admin"] },
+      { href: "/settings/system-health",       label: "System Health",        icon: <IconActivity />, roles: ["admin"] },
       { href: "/settings/intake-applications", label: "Online Registrations", icon: <IconPatients />, roles: ["admin"] },
       { href: "/settings/registration-qr",     label: "Registration QR",      icon: <IconQrCode />,  roles: ["admin", "bhw", "admin_staff"] },
       { href: "/patients/archived",            label: "Patient Archive",      icon: <IconPatients />, roles: ["admin", "physician"] },
