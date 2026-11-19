@@ -8,8 +8,8 @@ IMPORTANT — PHI encryption:
   but MUST be encrypted with AES-256-GCM at the application layer before
   INSERT/UPDATE and decrypted after SELECT.
   See ``app/utils/encryption.py`` for the encryption helper.
-  Access to these fields must be restricted to Physician/Nurse/Midwife and
-  Admin roles.  Every SELECT that reads these fields must emit an audit_log
+  Access to these fields must be restricted to the Physician/Nurse/Midwife
+  role (admin role model B: Admin never reads them).  Every SELECT that reads these fields must emit an audit_log
   entry with action="VIEW_PHI".
 """
 
@@ -100,7 +100,7 @@ class Visit(Base):
 
     # ---- Encrypted PHI fields ------------------------------------------------
     # Both fields are AES-256-GCM encrypted at the application layer before INSERT.
-    # See app/utils/encryption.py.  Access restricted to Physician/Admin roles.
+    # See app/utils/encryption.py.  Access restricted to the Physician role.
     diagnosis: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     treatment_notes: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
 

@@ -8,7 +8,7 @@ Responsibilities
 - add_medical_history    Insert a new entry: encrypt notes with AES-256-GCM,
                          write CREATE audit log, return MedicalHistoryResponse
                          with decrypted notes (caller already has write access
-                         and is implicitly Physician/Admin).
+                         and is implicitly Physician).
 - get_medical_history_entry
                          Fetch a single entry and decrypt notes; write VIEW_PHI
                          audit log.  The endpoint layer decides whether to
@@ -172,7 +172,7 @@ async def add_medical_history(
     3. Write a CREATE audit log entry.
     4. Commit and refresh.
     5. Return MedicalHistoryResponse with decrypted notes (the caller already
-       holds Physician/Admin role to reach this function).
+       holds the Physician role to reach this function).
 
     Args:
         db:             Active async database session.
@@ -227,7 +227,7 @@ async def add_medical_history(
         },
     )
 
-    # Return with notes decrypted — the caller has Physician/Admin role
+    # Return with notes decrypted — the caller has the Physician role
     return _build_response(entry, include_notes=True)
 
 
@@ -241,8 +241,8 @@ async def get_medical_history_entry(
     """
     Fetch a single medical history entry by its ID.
 
-    When ``include_notes`` is True (Physician/Admin caller) the notes column is
-    decrypted and included in the response.  When False (BHW/admin_staff) notes
+    When ``include_notes`` is True (Physician caller) the notes column is
+    decrypted and included in the response.  When False (Admin/BHW/admin_staff) notes
     are withheld and ``redacted`` is set to True if notes exist.
 
     A VIEW_PHI audit log is written regardless of whether notes are actually

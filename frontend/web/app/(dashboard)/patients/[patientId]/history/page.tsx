@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePatientVisits } from "@/hooks/usePatients";
 import { useCurrentUser } from "@/hooks/useAuth";
 import { apiFetch, ApiError } from "@/lib/api-client";
+import { canAccessClinicalPhi, canLogVisit } from "@/lib/permissions";
 import type { VisitSummary, Visit } from "@/types/patient";
 import VisitEditModal from "@/components/modals/VisitEditModal";
 
@@ -85,7 +86,8 @@ export default function PatientHistoryPage({ params }: { params: Promise<{ patie
   const { user: currentUser } = useCurrentUser();
   const { data: visits, loading, error, refetch } = usePatientVisits(patientId);
 
-  const canEdit = currentUser?.role === "physician" || currentUser?.role === "admin";
+  const canEdit = canAccessClinicalPhi(currentUser?.role);
+  const canAdd = canLogVisit(currentUser?.role);
 
   const [editingVisit, setEditingVisit] = useState<Visit | null>(null);
   const [editFetchLoading, setEditFetchLoading] = useState(false);
@@ -125,13 +127,15 @@ export default function PatientHistoryPage({ params }: { params: Promise<{ patie
           </Link>
           <h1 className="mt-1 text-3xl leading-tight text-[#1a0808] font-display">Visit History</h1>
         </div>
-        <Link
-          href={`/patients/${patientId}/visits/new`}
-          className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-bold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e]"
-          style={{ background: "linear-gradient(135deg, #b5343e, #c94060)" }}
-        >
-          + Add Visit
-        </Link>
+        {canAdd && (
+          <Link
+            href={`/patients/${patientId}/visits/new`}
+            className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-bold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e]"
+            style={{ background: "linear-gradient(135deg, #b5343e, #c94060)" }}
+          >
+            + Add Visit
+          </Link>
+        )}
       </div>
 
       {/* Edit fetch error */}

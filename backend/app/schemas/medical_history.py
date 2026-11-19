@@ -10,8 +10,8 @@ MedicalHistoryCreate
 
 MedicalHistoryResponse
     Full single-entry response (GET /patients/{id}/medical-history/{entry_id}).
-    ``notes`` is the *decrypted* value for Physician/Admin callers; the
-    service layer sets it to ``None`` for BHW/admin_staff to enforce role-
+    ``notes`` is the *decrypted* value for Physician callers; the
+    service layer sets it to ``None`` for Admin/BHW/admin_staff to enforce role-
     based PHI access.
 
 MedicalHistoryListItem
@@ -94,7 +94,7 @@ class MedicalHistoryCreate(BaseSchema):
         description=(
             "Clinical notes about this condition (plaintext). "
             "The service layer encrypts this with AES-256-GCM before storage. "
-            "Only Physician/Admin roles can retrieve the decrypted value later."
+            "Only the Physician role can retrieve the decrypted value later."
         ),
     )
 
@@ -112,9 +112,9 @@ class MedicalHistoryResponse(BaseSchema):
     strings for consistent JSON representation across environments.
 
     ``notes`` behaviour:
-    - For Physician/Admin callers: decrypted plaintext value (or None if no
+    - For Physician callers: decrypted plaintext value (or None if no
       notes were stored).
-    - For BHW/admin_staff callers: always None (PHI access is denied at the
+    - For Admin/BHW/admin_staff callers: always None (PHI access is denied at the
       service layer; the caller should inspect ``redacted`` instead).
 
     ``redacted``:
@@ -137,7 +137,7 @@ class MedicalHistoryResponse(BaseSchema):
     notes: str | None = Field(
         None,
         description=(
-            "Decrypted clinical notes (Physician/Admin only). "
+            "Decrypted clinical notes (Physician only). "
             "None if the caller's role does not have PHI access, or if no notes "
             "were recorded."
         ),
@@ -184,7 +184,7 @@ class MedicalHistoryListItem(BaseSchema):
             "True if clinical notes exist for this entry (but are never returned "
             "in the list view for any role). "
             "Use GET /patients/{id}/medical-history/{entry_id} to retrieve the "
-            "decrypted notes if you have Physician/Admin role."
+            "decrypted notes if you have Physician role."
         ),
     )
 

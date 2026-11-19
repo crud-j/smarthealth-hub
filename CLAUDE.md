@@ -34,7 +34,8 @@ Claude Code also uses this agent **proactively** for any SmartHealth Hub task in
 - **Audit every write** — every CREATE/UPDATE/DELETE/PHI-VIEW on patient records writes an `audit_logs` row.
 - **Pydantic v2** on all FastAPI request/response schemas; **TypeScript `strict: true`** on the frontend — no `any` without justification.
 - **New DB changes ship as Alembic migrations** — never manual schema edits.
-- **AES-256-GCM** application-layer encryption on `medical_history.notes`, `visits.diagnosis`, `visits.treatment_notes` before persisting.
+- **AES-256-GCM** application-layer encryption on `medical_history.notes`, `visits.diagnosis`, `visits.treatment_notes` (and `patients.allergies` / `known_conditions`) before persisting. Always decrypt with `decrypt_text` before display; never render the raw column.
+- **Admin role model B** — Admin runs the system (users, audit log, settings, System Health, backups, patient demographics, appointments, SMS, health cards) but **never reads decrypted clinical PHI and never makes clinical edits**. Only `physician` reads/edits visit diagnosis + treatment notes, adds medical history, sees medical-history notes, and deletes immunization records; `physician` + `bhw` log new visits. Frontend mirrors these rules in `frontend/web/lib/permissions.ts`; the backend `require_role(...)` guards are authoritative.
 - All endpoints (except `/auth/login`, `/auth/verify-otp`, `/auth/resend-otp`, `/auth/forgot-password`, `/sms/webhook/delivery-status`) require JWT auth + role check.
 - Module boundaries: `app/services/` for business logic, `app/api/v1/endpoints/` for routes, `apps/web/app/(dashboard)/` for frontend pages — do not invent new top-level structure.
 

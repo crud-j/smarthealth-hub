@@ -167,7 +167,7 @@ class VisitUpdate(BaseSchema):
     service layer re-encrypts them with AES-256-GCM before persisting.
     Passing ``None`` explicitly clears the encrypted field (stores NULL).
 
-    Only Physician/Nurse/Midwife and Admin roles may supply these PHI fields;
+    Only the Physician/Nurse/Midwife role may supply these PHI fields;
     the endpoint enforces the role check before calling the service.
     """
 
@@ -198,7 +198,7 @@ class VisitResponse(BaseSchema):
 
     ``diagnosis`` and ``treatment_notes`` are returned as decrypted plaintext
     (decryption performed in the service layer before building this response).
-    Only Physician/Nurse/Midwife and Admin roles should receive these fields;
+    Only the Physician/Nurse/Midwife role should receive these fields;
     the endpoint enforces role checks before returning them.
     """
 

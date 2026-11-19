@@ -5,7 +5,7 @@ Covers:
   GET    /patients/{patient_id}/immunizations                        — list records
   POST   /patients/{patient_id}/immunizations                        — create record
   PATCH  /patients/{patient_id}/immunizations/{immunization_id}      — partial update
-  DELETE /patients/{patient_id}/immunizations/{immunization_id}      — hard delete (physician/admin)
+  DELETE /patients/{patient_id}/immunizations/{immunization_id}      — hard delete (physician only)
   GET    /immunizations/due                                           — due/overdue list
   GET    /immunizations/due-summary                                   — due count summary
   GET    /immunizations                                               — cross-patient paginated list
@@ -14,7 +14,7 @@ Covers:
 RBAC:
   GET endpoints         — any authenticated staff role
   POST / PATCH          — BHW, physician, admin, admin_staff
-  DELETE                — physician, admin only  (BHW → 403)
+  DELETE                — physician only  (BHW, admin → 403; admin role model B)
 
 Async mode: ``asyncio_mode = "auto"`` — no @pytest.mark.asyncio needed.
 DB isolation: SAVEPOINT pattern from conftest.py — nothing persists between tests.
@@ -615,13 +615,13 @@ async def test_delete_immunization_physician_can_delete(
     assert resp.status_code == 204
 
 
-async def test_delete_immunization_admin_can_delete(
+async def test_delete_immunization_admin_returns_403(
     client: AsyncClient,
     sample_patient: Patient,
     bhw_user: tuple[User, str],
     admin_user: tuple[User, str],
 ) -> None:
-    """Admin role can DELETE an immunization record → 204 No Content."""
+    """Admin role model B: deleting a dose record is clinical → 403, record still listed."""
     _, bhw_token = bhw_user
     _, admin_token = admin_user
 
@@ -632,7 +632,33 @@ async def test_delete_immunization_admin_can_delete(
         immunization_url(sample_patient.id, imm_id),  # type: ignore[arg-type]
         headers={"Authorization": f"Bearer {admin_token}"},
     )
-    assert resp.status_code == 204
+    assert resp.status_code == 403
+
+    list_resp = await client.get(
+        patient_immunizations_url(sample_patient.id),
+        headers={"Authorization": f"Bearer {bhw_token}"},
+    )
+    assert imm_id in [item["id"] for item in list_resp.json()["items"]]
+
+
+async def test_update_immunization_admin_can_correct_entry(
+    client: AsyncClient,
+    sample_patient: Patient,
+    bhw_user: tuple[User, str],
+    admin_user: tuple[User, str],
+) -> None:
+    """Admin keeps data-entry corrections via PATCH (only DELETE is physician-only)."""
+    _, bhw_token = bhw_user
+    _, admin_token = admin_user
+
+    created = await _create_immunization(client, sample_patient.id, bhw_token)
+
+    resp = await client.patch(
+        immunization_url(sample_patient.id, created["id"]),  # type: ignore[arg-type]
+        json={"batch_number": "LOT-2026-01"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200, resp.text
 
 
 async def test_delete_immunization_bhw_role_returns_403(
@@ -657,18 +683,18 @@ async def test_delete_immunization_writes_audit_log(
     db_session: AsyncSession,
     sample_patient: Patient,
     bhw_user: tuple[User, str],
-    admin_user: tuple[User, str],
+    physician_user: tuple[User, str],
 ) -> None:
     """DELETE must write a DELETE audit log entry for the immunization."""
     _, bhw_token = bhw_user
-    _, adm_token = admin_user
+    _, phys_token = physician_user
 
     created = await _create_immunization(client, sample_patient.id, bhw_token, vaccine_name="IPV")
     imm_id = uuid.UUID(created["id"])  # type: ignore[arg-type]
 
     resp = await client.delete(
         immunization_url(sample_patient.id, imm_id),
-        headers={"Authorization": f"Bearer {adm_token}"},
+        headers={"Authorization": f"Bearer {phys_token}"},
     )
     assert resp.status_code == 204
 
@@ -702,10 +728,10 @@ async def test_delete_immunization_unauthenticated_returns_401(
 async def test_delete_immunization_not_found_returns_404(
     client: AsyncClient,
     sample_patient: Patient,
-    admin_user: tuple[User, str],
+    physician_user: tuple[User, str],
 ) -> None:
     """DELETE on a non-existent immunization_id → 404."""
-    _, token = admin_user
+    _, token = physician_user
     resp = await client.delete(
         immunization_url(sample_patient.id, uuid.uuid4()),
         headers={"Authorization": f"Bearer {token}"},
@@ -717,11 +743,11 @@ async def test_delete_immunization_then_not_visible_in_list(
     client: AsyncClient,
     sample_patient: Patient,
     bhw_user: tuple[User, str],
-    admin_user: tuple[User, str],
+    physician_user: tuple[User, str],
 ) -> None:
     """After deletion, the record no longer appears in the list for the patient."""
     _, bhw_token = bhw_user
-    _, adm_token = admin_user
+    _, phys_token = physician_user
 
     created = await _create_immunization(
         client, sample_patient.id, bhw_token, vaccine_name="Varicella"
@@ -731,7 +757,7 @@ async def test_delete_immunization_then_not_visible_in_list(
     # Delete it.
     del_resp = await client.delete(
         immunization_url(sample_patient.id, imm_id),  # type: ignore[arg-type]
-        headers={"Authorization": f"Bearer {adm_token}"},
+        headers={"Authorization": f"Bearer {phys_token}"},
     )
     assert del_resp.status_code == 204
 
