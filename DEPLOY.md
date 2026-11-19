@@ -223,27 +223,20 @@ redeploys the frontend on every push by itself.
 
 ## 8. Backups (do this on day one)
 
-Nightly database dump + media archive, keeping 14 days:
+Nothing to install: the `backup` service in `docker-compose.server.yml`
+starts with the stack and writes a database dump + media archive every day
+(22:30 Asia/Manila by default, keeping 14 days) to `/var/backups/smarthealth`
+on the host. Check that it works on day one:
 
 ```bash
-mkdir -p /opt/backups
-cat > /etc/cron.daily/smarthealth-backup <<'EOF'
-#!/bin/sh
-set -e
-cd /opt/smarthealth-hub
-STAMP=$(date +%F)
-docker compose -f docker-compose.server.yml --env-file .env.server exec -T db \
-  sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -F c' > /opt/backups/db-$STAMP.dump
-docker run --rm -v smarthealth_media:/media -v /opt/backups:/out alpine \
-  tar czf /out/media-$STAMP.tar.gz -C /media .
-find /opt/backups -type f -mtime +14 -delete
-EOF
-chmod +x /etc/cron.daily/smarthealth-backup
+dc exec backup sh /scripts/backup.sh now            # one backup right away
+dc exec backup sh /scripts/verify-restore.sh        # restore test into a temp DB
 ```
 
-Copy `/opt/backups` off the server regularly (your provider's snapshots or
-`scp`). Keep a copy of `.env.server` somewhere safe — without
-`ENCRYPTION_KEY` the backups' encrypted fields can't be read.
+Copy the backups off the server regularly (`scp`) and keep a copy of
+`.env.server` in a password manager — without `ENCRYPTION_KEY` the backups'
+encrypted fields can't be read. Day-to-day commands, the download command
+and the full restore procedure are in `DEV-WORKFLOW.md` §10.
 
 ---
 

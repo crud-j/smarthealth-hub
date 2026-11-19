@@ -19,7 +19,7 @@ How to make changes on your PC and get them live on **Vercel** (frontend) and
 | Login to server | `ssh azureuser@smarthealth-hub.japaneast.cloudapp.azure.com` (key: `~/.ssh/id_ed25519`) |
 | Code on server | `/opt/smarthealth-hub` (a `git clone` of this repo, branch `main`) |
 | Server settings + secrets | `/opt/smarthealth-hub/.env.server` (**not** in git, `chmod 600`) |
-| Services on server | `docker-compose.server.yml`: caddy (HTTPS), backend, worker, beat, db (Postgres 18), redis |
+| Services on server | `docker-compose.server.yml`: caddy (HTTPS), backend, worker, beat, db (Postgres 18), redis, backup (daily, see [§10](#10-backups-and-restore)) |
 | Firewall | Azure Network Security Group: inbound 22, 80, 443 only |
 | SMS / Email | TextBee / Gmail SMTP (same accounts as development) |
 
@@ -262,10 +262,78 @@ All on the server, in `/opt/smarthealth-hub`:
 Virtual machines → `smarthealth-server` → **Stop** when nobody needs it, and
 **Start** before use (~1 minute). The DNS name, data and settings survive a
 stop. The website on Vercel stays up, but logins fail while the server is stopped.
+**Auto-shutdown is ON at 11:00 PM (Manila)**: VM → Operations → Auto-shutdown.
+It only stops the VM, so **Start** it each morning / before a demo.
 
 ---
 
-## 10. Troubleshooting
+## 10. Backups and restore
+
+| What | Detail |
+|---|---|
+| Schedule | Every day at **22:30 Manila**, before the 23:00 auto-shutdown. If the VM was off at 22:30, a catch-up backup runs ~2 minutes after the next start |
+| Where | Server folder `/var/backups/smarthealth` (outside Docker volumes, so `dc down -v` can't delete it) |
+| Files | `db-YYYYMMDD-HHMMSS.dump` (database), `media-YYYYMMDD-HHMMSS.tar.gz` (photos, PDFs), `status.json` (last result) |
+| Kept | 14 days. Older files are deleted automatically, but only after a successful backup |
+| Code | `infra/backup/backup.sh`, service `backup` in `docker-compose.server.yml` |
+
+The files contain patient data (only `azureuser` can read them). Encrypted
+fields stay encrypted, so a backup is only fully usable together with
+`ENCRYPTION_KEY`. Keep `.env.server` in a password manager, **never** in the
+same folder as the backup files.
+
+**On the server:**
+
+| Task | Command |
+|---|---|
+| Did the last backup work? | `cat /var/backups/smarthealth/status.json` (`"status": "ok"`) |
+| List backups | `ls -lh /var/backups/smarthealth` |
+| Backup log | `dc logs --tail 20 backup` |
+| Back up right now | `dc exec backup sh /scripts/backup.sh now` |
+| **Restore test** (safe: temporary DB, live DB untouched). Monthly + after big changes | `dc exec backup sh /scripts/verify-restore.sh` |
+
+**Weekly: copy the newest backup to your PC** (PowerShell, repo root):
+```powershell
+.\scripts\download-backup.ps1
+```
+It saves to `C:\Users\<you>\SmartHealthBackups` (outside OneDrive on purpose,
+since it is patient data). If PowerShell blocks the script:
+`powershell -ExecutionPolicy Bypass -File .\scripts\download-backup.ps1`.
+
+**Restore A: data got damaged, the server is fine.** Replace the live
+database with a backup (everything after that backup is lost):
+```bash
+dc stop backend worker beat
+dc exec db sh -c 'dropdb -U "$POSTGRES_USER" "$POSTGRES_DB" && createdb -U "$POSTGRES_USER" "$POSTGRES_DB"'
+dc exec backup sh -c 'pg_restore --no-owner --no-acl --exit-on-error -d "$PGDATABASE" /backups/db-YYYYMMDD-HHMMSS.dump'
+dc up -d
+```
+Media (only if photos/PDFs were lost):
+```bash
+docker run --rm -v smarthealth_media:/media -v /var/backups/smarthealth:/b:ro alpine \
+  tar -xzf /b/media-YYYYMMDD-HHMMSS.tar.gz -C /media
+```
+
+**Restore B: the server is gone.**
+1. New VM + Docker + clone, as in `DEPLOY.md` §1–2.
+2. Put back `.env.server` from the password manager (same `ENCRYPTION_KEY`,
+   `QR_HMAC_SECRET`, `POSTGRES_PASSWORD`), `chmod 600`.
+3. `sudo mkdir -p /var/backups/smarthealth && sudo chown azureuser: /var/backups/smarthealth`,
+   then from the PC `scp` the `.dump` and `.tar.gz` into it.
+4. Start **only** the database, restore, then everything:
+   ```bash
+   dc up -d db
+   dc run --rm backup sh -c 'pg_restore --no-owner --no-acl --exit-on-error -d "$PGDATABASE" /backups/db-YYYYMMDD-HHMMSS.dump'
+   docker run --rm -v smarthealth_media:/media -v /var/backups/smarthealth:/b:ro alpine \
+     tar -xzf /b/media-YYYYMMDD-HHMMSS.tar.gz -C /media
+   dc up -d --build
+   ```
+   (Restore before the backend's first start, or its migrations create an
+   empty schema that the restore then collides with.)
+
+---
+
+## 11. Troubleshooting
 
 | Symptom | Look at | Usual cause / fix |
 |---|---|---|
@@ -288,9 +356,10 @@ stop. The website on Vercel stays up, but logins fail while the server is stoppe
 
 ---
 
-## 11. Don'ts
+## 12. Don'ts
 
 - ❌ `dc down -v` or `docker volume rm …`: **deletes the database and photos.** (`dc down` without `-v` is safe.)
+- ❌ Deleting files in `/var/backups/smarthealth` by hand. Old ones are removed automatically.
 - ❌ `do-release-upgrade` on the server. Stay on Ubuntu 24.04 LTS.
 - ❌ Editing a migration that already ran (§7).
 - ❌ Committing any `.env*` file except `*.example`.
@@ -300,7 +369,7 @@ stop. The website on Vercel stays up, but logins fail while the server is stoppe
 
 ---
 
-## 12. Working with Claude (agreements)
+## 13. Working with Claude (agreements)
 
 - Claude explains a command before you run it. You run git **commit/push**
   yourself. Claude prepares the commit message as a file for `git commit -F`.
