@@ -28,6 +28,7 @@ fi
 
 echo "Restoring $(basename "$file") into temporary database '$CHECK_DB'..."
 psql -X -q -v ON_ERROR_STOP=1 -d postgres \
+    -c "SET client_min_messages = warning" \
     -c "DROP DATABASE IF EXISTS $CHECK_DB" \
     -c "CREATE DATABASE $CHECK_DB" || exit 1
 
