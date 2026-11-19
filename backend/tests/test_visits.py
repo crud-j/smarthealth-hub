@@ -5,11 +5,14 @@ Covers:
   GET /patients/{patient_id}/visits         — list visit summaries (no PHI)
   POST /patients/{patient_id}/visits        — log a new visit
   GET /visits/{visit_id}                    — full visit with decrypted PHI
+  PUT /visits/{visit_id}                    — update a visit (re-encrypts PHI)
 
-RBAC findings (confirmed from endpoint source):
-  POST /patients/{id}/visits  — _CLINICAL = require_role("physician", "bhw", "admin")
-  GET  /visits/{visit_id}     — _PHI_READ = require_role("physician", "admin")
+RBAC findings (confirmed from endpoint source; admin role model B):
+  POST /patients/{id}/visits  — _CLINICAL = require_role("physician", "bhw")
+  GET  /visits/{visit_id}     — _PHI_READ = require_role("physician")
+  PUT  /visits/{visit_id}     — _PHI_READ = require_role("physician")
   GET  list                   — any authenticated role
+  Admin keeps system administration but has no access to clinical PHI.
 
 Encryption findings:
   ``diagnosis`` and ``treatment_notes`` on the visits table are AES-256-GCM
@@ -384,13 +387,28 @@ async def test_create_visit_admin_staff_forbidden(
     sample_patient: Patient,
     admin_staff_user: tuple[User, str],
 ) -> None:
-    """Admin Staff is NOT in _CLINICAL = require_role('physician', 'bhw', 'admin') → 403.
+    """Admin Staff is NOT in _CLINICAL = require_role('physician', 'bhw') → 403.
     Confirmed from endpoint: _CLINICAL guards the POST route.
     """
     _, token = admin_staff_user
     resp = await client.post(
         patient_visits_url(sample_patient.id),
         json=_visit_payload(),
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 403
+
+
+async def test_create_visit_admin_forbidden(
+    client: AsyncClient,
+    sample_patient: Patient,
+    admin_user: tuple[User, str],
+) -> None:
+    """Admin role model B: admin may not log clinical visits → 403."""
+    _, token = admin_user
+    resp = await client.post(
+        patient_visits_url(sample_patient.id),
+        json=_visit_payload(diagnosis="Should never be stored"),
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 403
@@ -639,7 +657,7 @@ async def test_get_full_visit_bhw_forbidden(
     physician_user: tuple[User, str],
     bhw_user: tuple[User, str],
 ) -> None:
-    """BHW is NOT in _PHI_READ = require_role('physician', 'admin') → 403 on GET /visits/{id}.
+    """BHW is NOT in _PHI_READ = require_role('physician') → 403 on GET /visits/{id}.
     Confirmed from endpoint: _PHI_READ guards the get_visit route.
     """
     _, phys_token = physician_user
@@ -694,13 +712,13 @@ async def test_get_full_visit_writes_view_phi_audit(
     assert len(logs) >= 1, "Expected a VIEW_PHI audit log entry for visit"
 
 
-async def test_get_full_visit_admin_can_access(
+async def test_get_full_visit_admin_forbidden(
     client: AsyncClient,
     sample_patient: Patient,
     physician_user: tuple[User, str],
     admin_user: tuple[User, str],
 ) -> None:
-    """Admin role is in _PHI_READ and can access GET /visits/{visit_id} → 200."""
+    """Admin role model B: admin is NOT in _PHI_READ → 403, and no PHI in the body."""
     _, phys_token = physician_user
     _, admin_token = admin_user
 
@@ -709,6 +727,7 @@ async def test_get_full_visit_admin_can_access(
         sample_patient.id,
         phys_token,
         diagnosis="Acute gastroenteritis",
+        treatment_notes="ORS, zinc for 10 days",
     )
     visit_id = created["id"]
 
@@ -716,9 +735,77 @@ async def test_get_full_visit_admin_can_access(
         visit_url(visit_id),
         headers={"Authorization": f"Bearer {admin_token}"},
     )
+    assert resp.status_code == 403
+    assert "Acute gastroenteritis" not in resp.text
+    assert "ORS, zinc" not in resp.text
+
+
+# ---------------------------------------------------------------------------
+# PUT /visits/{visit_id} — update (physician only)
+# ---------------------------------------------------------------------------
+
+
+async def test_update_visit_physician_can_update(
+    client: AsyncClient,
+    sample_patient: Patient,
+    physician_user: tuple[User, str],
+) -> None:
+    """Physician can update a visit; the new diagnosis comes back decrypted."""
+    _, token = physician_user
+    created = await _create_visit(client, sample_patient.id, token, diagnosis="Viral URTI")
+
+    resp = await client.put(
+        visit_url(created["id"]),
+        json={"diagnosis": "Community-acquired pneumonia"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
     assert resp.status_code == 200, resp.text
-    data = resp.json()
-    assert data["diagnosis"] == "Acute gastroenteritis"
+    assert resp.json()["diagnosis"] == "Community-acquired pneumonia"
+
+
+async def test_update_visit_admin_forbidden(
+    client: AsyncClient,
+    sample_patient: Patient,
+    physician_user: tuple[User, str],
+    admin_user: tuple[User, str],
+) -> None:
+    """Admin role model B: admin may not edit clinical visit data → 403, record unchanged."""
+    _, phys_token = physician_user
+    _, admin_token = admin_user
+    created = await _create_visit(client, sample_patient.id, phys_token, diagnosis="Viral URTI")
+
+    resp = await client.put(
+        visit_url(created["id"]),
+        json={"diagnosis": "Tampered"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 403
+
+    check = await client.get(
+        visit_url(created["id"]),
+        headers={"Authorization": f"Bearer {phys_token}"},
+    )
+    assert check.status_code == 200, check.text
+    assert check.json()["diagnosis"] == "Viral URTI"
+
+
+async def test_update_visit_bhw_forbidden(
+    client: AsyncClient,
+    sample_patient: Patient,
+    physician_user: tuple[User, str],
+    bhw_user: tuple[User, str],
+) -> None:
+    """BHW may log visits but not edit them afterwards → 403."""
+    _, phys_token = physician_user
+    _, bhw_token = bhw_user
+    created = await _create_visit(client, sample_patient.id, phys_token)
+
+    resp = await client.put(
+        visit_url(created["id"]),
+        json={"chief_complaint": "Changed"},
+        headers={"Authorization": f"Bearer {bhw_token}"},
+    )
+    assert resp.status_code == 403
 
 
 async def test_get_full_visit_not_found_returns_404(

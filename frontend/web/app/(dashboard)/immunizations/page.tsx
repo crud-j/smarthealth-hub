@@ -10,6 +10,7 @@ import {
 } from "@/hooks/useImmunizations";
 import { usePatientList } from "@/hooks/usePatients";
 import { useCurrentUser } from "@/hooks/useAuth";
+import { canDeleteImmunization } from "@/lib/permissions";
 import { toast } from "@/lib/toast";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 
@@ -459,7 +460,7 @@ function TableSkeleton({ cols }: { cols: number }) {
 export default function ImmunizationsPage() {
   const { user: currentUser } = useCurrentUser();
   const canWrite  = ["admin", "bhw", "physician"].includes(currentUser?.role ?? "");
-  const canDelete = ["admin", "physician"].includes(currentUser?.role ?? "");
+  const canDelete = canDeleteImmunization(currentUser?.role);
 
   const [vaccineName, setVaccineName] = useState<string>("");
   const [dueFilter, setDueFilter]     = useState<DueFilter>("");

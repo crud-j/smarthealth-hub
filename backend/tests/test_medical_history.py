@@ -6,10 +6,12 @@ Covers:
   POST /patients/{patient_id}/medical-history                          — add entry
   GET  /patients/{patient_id}/medical-history/{entry_id}              — single entry
 
-RBAC findings (confirmed from endpoint + service):
-  POST (add entry)       — Physician and Admin only (_PHI_READ guard)
+RBAC findings (confirmed from endpoint + service; admin role model B):
+  POST (add entry)       — Physician only (_PHI_READ guard)
   GET list               — Any authenticated role (no VIEW_PHI audit written)
-  GET single entry       — Any authenticated role; VIEW_PHI audit always written
+  GET single entry       — Any authenticated role; VIEW_PHI audit always written;
+                           notes decrypted for Physician only (Admin/BHW/Admin Staff
+                           get notes=None, redacted=True)
 
 Encryption findings:
   ``notes`` column in MedicalHistory stores AES-256-GCM ciphertext (base64).
@@ -317,20 +319,19 @@ async def test_create_medical_history_all_severity_values(
         assert resp.json()["severity"] == severity
 
 
-async def test_create_medical_history_admin_can_create(
+async def test_create_medical_history_admin_forbidden(
     client: AsyncClient,
     sample_patient: Patient,
     admin_user: tuple[User, str],
 ) -> None:
-    """Admin role can also POST medical history entries → 201."""
+    """Admin role model B: admin may not add clinical history entries → 403."""
     _, token = admin_user
     resp = await client.post(
         medical_history_url(sample_patient.id),
         json=_mh_payload(condition_name="Asthma", severity="mild"),
         headers={"Authorization": f"Bearer {token}"},
     )
-    assert resp.status_code == 201, resp.text
-    assert resp.json()["condition_name"] == "Asthma"
+    assert resp.status_code == 403
 
 
 async def test_create_medical_history_bhw_forbidden(
@@ -339,7 +340,7 @@ async def test_create_medical_history_bhw_forbidden(
     bhw_user: tuple[User, str],
 ) -> None:
     """BHW role is NOT allowed to POST medical history entries → 403 Forbidden.
-    Confirmed from endpoint: _PHI_READ = require_role("physician", "admin") only.
+    Confirmed from endpoint: _PHI_READ = require_role("physician") only.
     """
     _, token = bhw_user
     resp = await client.post(
@@ -356,7 +357,7 @@ async def test_create_medical_history_admin_staff_forbidden(
     admin_staff_user: tuple[User, str],
 ) -> None:
     """Admin Staff role is NOT allowed to POST medical history entries → 403 Forbidden.
-    Confirmed from endpoint: _PHI_READ = require_role("physician", "admin") only.
+    Confirmed from endpoint: _PHI_READ = require_role("physician") only.
     """
     _, token = admin_staff_user
     resp = await client.post(
@@ -585,6 +586,37 @@ async def test_get_medical_history_entry_bhw_sees_redacted_notes(
     assert data["notes"] is None
     assert data["redacted"] is True
     assert data["condition_name"] == "Asthma"
+
+
+async def test_get_medical_history_entry_admin_sees_redacted_notes(
+    client: AsyncClient,
+    sample_patient: Patient,
+    physician_user: tuple[User, str],
+    admin_user: tuple[User, str],
+) -> None:
+    """Admin role model B: admin gets the entry but notes are withheld (None, redacted=True)."""
+    _, phys_token = physician_user
+    _, admin_token = admin_user
+    plaintext_notes = "Metformin 500mg BID. HbA1c 8.1%."
+
+    created = await _create_mh(
+        client,
+        sample_patient.id,
+        phys_token,
+        condition_name="Type 2 Diabetes Mellitus",
+        notes=plaintext_notes,
+    )
+
+    resp = await client.get(
+        medical_history_entry_url(sample_patient.id, created["id"]),
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["notes"] is None
+    assert data["redacted"] is True
+    assert data["condition_name"] == "Type 2 Diabetes Mellitus"
+    assert "Metformin" not in resp.text
 
 
 async def test_get_medical_history_entry_writes_view_phi_audit(

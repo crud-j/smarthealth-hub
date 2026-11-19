@@ -81,6 +81,7 @@ from app.services import card_generation_service, nfc_payload_service, qr_servic
 from app.services.audit_service import write_audit_log
 from app.services.card_generation_service import get_bulk_card_status
 from app.services.patient_service import get_patient
+from app.utils.encryption import decrypt_text
 
 logger = get_logger(__name__)
 
@@ -206,6 +207,19 @@ def _esc(value: object) -> str:
     import html as _html  # noqa: PLC0415
 
     return _html.escape(str(value)) if value is not None else ""
+
+
+def _patient_allergies(patient: Patient) -> str | None:
+    """
+    Return the patient's allergies as readable text, or ``None`` if not recorded.
+
+    ``patients.allergies`` is stored AES-256-GCM encrypted (patient_service
+    encrypts it on every write), so it must be decrypted before display.
+    ``decrypt_text`` returns legacy plaintext values unchanged.
+    """
+    if not patient.allergies:
+        return None
+    return decrypt_text(patient.allergies) or None
 
 
 def _render_nfc_view_html(  # noqa: PLR0912, PLR0915
@@ -336,7 +350,8 @@ def _render_nfc_view_html(  # noqa: PLR0912, PLR0915
         imm_html = '<p class="empty-note">No immunization records.</p>'
 
     # ── Allergies section ─────────────────────────────────────────────────────
-    allergy_text = _esc(patient.allergies) if patient.allergies else None
+    allergies = _patient_allergies(patient)
+    allergy_text = _esc(allergies) if allergies else None
     if allergy_text:
         allergy_html = f'<p class="allergy-text">{allergy_text}</p>'
     else:
@@ -1199,7 +1214,7 @@ async def view_health_card_by_identifier(
     last_immunization: Immunization | None = imm_result.scalar_one_or_none()
 
     # ── Build relay monitor cache entry (mirrors _scan_nfc_uid_impl) ──────────
-    allergies_str = patient.allergies or "None on record"
+    allergies_str = _patient_allergies(patient) or "None on record"
     patient_info = NfcScanPatientInfo(
         patient_id=str(patient.id),
         patient_code=patient.patient_code,

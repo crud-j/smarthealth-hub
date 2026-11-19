@@ -1,11 +1,11 @@
 "use client";
 
 /**
- * VisitEditModal — Physician/Admin modal for editing an existing visit record.
+ * VisitEditModal — Physician modal for editing an existing visit record.
  *
  * PHI fields (diagnosis, treatment_notes) are shown only when the current
- * user's role is "physician" or "admin".  The modal pre-fills all form fields
- * from the supplied visit prop.
+ * user's role is "physician" (admin role model B, see lib/permissions.ts).
+ * The modal pre-fills all form fields from the supplied visit prop.
  *
  * Props:
  *   visit   — the Visit record to edit (pre-populates all fields)
@@ -16,6 +16,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useUpdateVisit } from "@/hooks/usePatients";
 import { useCurrentUser } from "@/hooks/useAuth";
+import { canAccessClinicalPhi } from "@/lib/permissions";
 import { toast } from "@/lib/toast";
 import type { Visit } from "@/types/patient";
 import type { VisitUpdatePayload } from "@/types/patient";
@@ -50,7 +51,7 @@ export default function VisitEditModal({ visit, onClose, onSaved }: VisitEditMod
   const { updateVisit, loading } = useUpdateVisit();
 
   // Determine whether PHI fields are visible for this user
-  const canSeePhi = currentUser?.role === "physician" || currentUser?.role === "admin";
+  const canSeePhi = canAccessClinicalPhi(currentUser?.role);
 
   // ---------------------------------------------------------------------------
   // Form state — scalars

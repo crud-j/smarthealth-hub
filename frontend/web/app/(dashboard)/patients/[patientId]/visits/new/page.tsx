@@ -3,7 +3,9 @@
 import { use, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useCurrentUser } from "@/hooks/useAuth";
 import { useCreateVisit, usePatient } from "@/hooks/usePatients";
+import { canLogVisit } from "@/lib/permissions";
 import { toast } from "@/lib/toast";
 import type { VisitCreatePayload } from "@/types/patient";
 
@@ -24,6 +26,7 @@ export default function NewVisitPage({
 }) {
   const { patientId } = use(params);
   const router = useRouter();
+  const { user: currentUser } = useCurrentUser();
   const { data: patient, loading: patientLoading, error: patientError } = usePatient(patientId);
   const { createVisit, loading: saving, error: saveError } = useCreateVisit(patientId);
   const [visitType, setVisitType] = useState("consultation");
@@ -89,6 +92,24 @@ export default function NewVisitPage({
         <p className="font-bold text-[#b91c1c]">Patient not found</p>
         <Link href="/patients" className="mt-3 inline-block text-sm font-medium text-[#b5343e] hover:underline">
           Back to patients
+        </Link>
+      </div>
+    );
+  }
+
+  // Wait for the user to load so the form doesn't flash away for allowed roles.
+  if (currentUser && !canLogVisit(currentUser.role)) {
+    return (
+      <div className="mx-auto max-w-3xl rounded-xl border border-[#fcc] bg-[#fef2f2] p-6">
+        <p className="font-bold text-[#b91c1c]">Only physicians and BHWs can record visits</p>
+        <p className="mt-1 text-sm text-[#7a5252]">
+          Visits contain clinical information, so your role can view the visit list but not add to it.
+        </p>
+        <Link
+          href={`/patients/${patientId}`}
+          className="mt-3 inline-block text-sm font-medium text-[#b5343e] hover:underline"
+        >
+          Back to patient profile
         </Link>
       </div>
     );

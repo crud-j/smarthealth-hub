@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { useCurrentUser } from "@/hooks/useAuth";
+import { canDeleteImmunization } from "@/lib/permissions";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -195,7 +196,7 @@ export default function PatientImmunizationsPage({ params }: { params: Promise<{
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
 
-  const canDelete = currentUser?.role === "physician" || currentUser?.role === "admin";
+  const canDelete = canDeleteImmunization(currentUser?.role);
   const canWrite = !!currentUser;
 
   const load = useCallback(async (p: number) => {

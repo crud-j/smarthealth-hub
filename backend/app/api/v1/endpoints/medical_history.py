@@ -5,23 +5,28 @@ Visit endpoints (aligned with RHU Patient Record form visit log):
   GET  /patients/{patient_id}/visits        — list visit summaries (no PHI)
   POST /patients/{patient_id}/visits        — log a new visit (with vital signs)
   GET  /visits/{visit_id}                   — get full visit with decrypted PHI
+  PUT  /visits/{visit_id}                   — update a visit (Physician only)
 
 Medical history endpoints (fully implemented):
   GET  /patients/{patient_id}/medical-history              — list all condition
        entries (notes always omitted; ``redacted`` flag per item)
   POST /patients/{patient_id}/medical-history              — add a new condition
-       entry (Physician/Admin only; notes AES-256-GCM encrypted before storage)
+       entry (Physician only; notes AES-256-GCM encrypted before storage)
   GET  /patients/{patient_id}/medical-history/{entry_id}  — get a single entry;
-       notes decrypted for Physician/Admin, withheld for BHW/admin_staff
+       notes decrypted for Physician, withheld for Admin/BHW/admin_staff
 
-SECURITY:
+SECURITY (admin role model B):
+  - The Admin role runs the system (users, audit, settings, backups, patient
+    demographics) but never sees decrypted clinical PHI and never makes
+    clinical edits.  Only Physician/Nurse/Midwife reads diagnosis, treatment
+    notes and medical-history notes.
   - ``diagnosis`` and ``treatment_notes`` on visits are AES-256-GCM encrypted
     before storage.  Decryption occurs in memory in the service layer for
     authorized roles only.
-  - GET /visits/{visit_id} is restricted to clinical roles (physician, admin)
-    and always writes a VIEW_PHI audit log.
+  - GET /visits/{visit_id} is restricted to Physician and always writes a
+    VIEW_PHI audit log.
   - ``medical_history.notes`` is AES-256-GCM encrypted before storage.
-    It is decrypted only for Physician/Admin callers on the single-entry
+    It is decrypted only for Physician callers on the single-entry
     endpoint.  All list views redact notes for every role.
   - Every write to medical_history writes a CREATE audit log row.
   - Every access to a single medical_history entry writes a VIEW_PHI audit row.
@@ -47,10 +52,14 @@ from app.services import medical_history_service, patient_service, visit_service
 
 router = APIRouter(tags=["medical-history"])
 
-# Clinical roles that may create visits or access decrypted PHI
-_CLINICAL = require_role("physician", "bhw", "admin")
-# Roles that may read decrypted PHI on individual visit records or add medical history
-_PHI_READ = require_role("physician", "admin")
+# Clinical roles that may log a new visit (BHW records vitals in the field).
+# Admin is deliberately excluded (admin role model B: no clinical writes).
+_CLINICAL = require_role("physician", "bhw")
+# Roles that may read decrypted PHI on visits, edit visits, or add medical history.
+# Admin is deliberately excluded (admin role model B: no clinical PHI access).
+_PHI_READ = require_role("physician")
+# Roles whose single-entry medical-history response includes decrypted notes.
+_NOTES_ROLES: frozenset[str] = frozenset({"physician"})
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +119,7 @@ async def create_visit(
 
     Writes a CREATE audit log entry.
 
-    Auth: BHW, Physician/Nurse/Midwife, Admin.
+    Auth: BHW, Physician/Nurse/Midwife.
     """
     # Validate patient exists
     await patient_service.get_patient(db, patient_id)
@@ -149,7 +158,7 @@ async def get_visit(
     Always writes a VIEW_PHI audit log entry — every access to the raw
     diagnosis and treatment notes is logged (who, when, IP).
 
-    Auth: Physician/Nurse/Midwife, Admin only.
+    Auth: Physician/Nurse/Midwife only.
     """
     ip = _get_client_ip(request)
     return await visit_service.get_visit(
@@ -161,14 +170,14 @@ async def get_visit(
 
 
 # ---------------------------------------------------------------------------
-# Visit: update (Physician / Admin only)
+# Visit: update (Physician only)
 # ---------------------------------------------------------------------------
 
 
 @router.put(
     "/visits/{visit_id}",
     response_model=VisitResponse,
-    summary="Update an existing visit record (Physician/Admin only)",
+    summary="Update an existing visit record (Physician only)",
     dependencies=[_PHI_READ],
 )
 async def update_visit(
@@ -187,7 +196,7 @@ async def update_visit(
 
     Writes an UPDATE audit log entry.
 
-    Auth: Physician/Nurse/Midwife or Admin only.
+    Auth: Physician/Nurse/Midwife only.
     """
     ip = _get_client_ip(request)
     result = await visit_service.update_visit(
@@ -239,7 +248,7 @@ async def list_medical_history(
 
 
 # ---------------------------------------------------------------------------
-# Medical history: add entry (Physician / Admin only)
+# Medical history: add entry (Physician only)
 # ---------------------------------------------------------------------------
 
 
@@ -247,7 +256,7 @@ async def list_medical_history(
     "/patients/{patient_id}/medical-history",
     response_model=MedicalHistoryResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Add a new medical history entry (Physician/Admin only)",
+    summary="Add a new medical history entry (Physician only)",
     dependencies=[_PHI_READ],
 )
 async def add_medical_history(
@@ -268,11 +277,12 @@ async def add_medical_history(
     - The service layer encrypts it with AES-256-GCM (AES-256 key, random
       12-byte nonce per call) before inserting into the database.
     - The response returns ``notes`` as **decrypted plaintext** — callers at
-      this endpoint already hold Physician/Admin role, so decryption is safe.
+      this endpoint already hold the Physician role, so decryption is safe.
 
     Writes a CREATE audit log row (action="CREATE", entity_type="medical_history").
 
-    Auth: Physician/Nurse/Midwife or Admin only (per SDP Section 10.3 RBAC matrix).
+    Auth: Physician/Nurse/Midwife only (SDP Section 10.3 RBAC matrix, admin
+    role model B).
     """
     # Validate patient exists — raises NotFoundError (HTTP 404) if not found
     await patient_service.get_patient(db, patient_id)
@@ -295,7 +305,7 @@ async def add_medical_history(
 @router.get(
     "/patients/{patient_id}/medical-history/{entry_id}",
     response_model=MedicalHistoryResponse,
-    summary="Get a single medical history entry (notes for Physician/Admin only)",
+    summary="Get a single medical history entry (notes for Physician only)",
 )
 async def get_medical_history_entry(
     request: Request,
@@ -308,9 +318,9 @@ async def get_medical_history_entry(
     Returns a single medical history entry.
 
     ``notes`` access is role-gated:
-    - **Physician / Admin**: ``notes`` is returned as decrypted plaintext.
-    - **BHW / Admin Staff**: ``notes`` is ``None`` and ``redacted=True``
-      indicates that notes exist but were withheld.
+    - **Physician**: ``notes`` is returned as decrypted plaintext.
+    - **Admin / BHW / Admin Staff**: ``notes`` is ``None`` and
+      ``redacted=True`` indicates that notes exist but were withheld.
 
     A VIEW_PHI audit log row is written on every call (regardless of whether
     notes are actually decrypted) — accessing an individual record's identity
@@ -323,7 +333,7 @@ async def get_medical_history_entry(
     await patient_service.get_patient(db, patient_id)
 
     # Determine whether the caller's role permits decrypted notes
-    include_notes: bool = current_user.role.name in ("physician", "admin")
+    include_notes: bool = current_user.role.name in _NOTES_ROLES
 
     ip = _get_client_ip(request)
     return await medical_history_service.get_medical_history_entry(

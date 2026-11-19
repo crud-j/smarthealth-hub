@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { usePatient, usePatientVisits, useDeactivatePatient, useArchivePatient } from "@/hooks/usePatients";
 import { useCurrentUser } from "@/hooks/useAuth";
+import { canLogVisit } from "@/lib/permissions";
 import type { VisitSummary } from "@/types/patient";
 import React, { useEffect, useState } from "react";
 import ProfilePhotoUploader from "@/app/(dashboard)/patients/_components/ProfilePhotoUploader";
@@ -209,6 +210,7 @@ export default function PatientProfilePage({ params }: { params: Promise<{ patie
   const [showArchiveModal, setShowArchiveModal] = useState(false);
 
   const isAdmin = currentUser?.role === "admin";
+  const canAddVisit = canLogVisit(currentUser?.role);
 
   async function handleDeactivate() {
     if (!confirm("This will mark the patient as inactive. They will no longer appear in search results. Continue?")) return;
@@ -432,13 +434,15 @@ export default function PatientProfilePage({ params }: { params: Promise<{ patie
         <PanelHeader
           title="Visit History"
           action={
-            <Link
-              href={`/patients/${patientId}/visits/new`}
-              className="rounded-lg px-3 py-1.5 text-xs font-bold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e]"
-              style={{ background: "linear-gradient(135deg, #b5343e, #c94060)" }}
-            >
-              + Add Visit
-            </Link>
+            canAddVisit ? (
+              <Link
+                href={`/patients/${patientId}/visits/new`}
+                className="rounded-lg px-3 py-1.5 text-xs font-bold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e]"
+                style={{ background: "linear-gradient(135deg, #b5343e, #c94060)" }}
+              >
+                + Add Visit
+              </Link>
+            ) : undefined
           }
         />
 

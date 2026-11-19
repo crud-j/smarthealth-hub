@@ -14,7 +14,7 @@ RBAC (RBAC matrix §11):
   GET endpoints    — any authenticated staff role
   POST             — Physician, Nurse/Midwife (physician role), BHW, Admin
   PATCH            — Physician, Nurse/Midwife (physician role), BHW, Admin
-  DELETE           — Physician (physician role), Admin
+  DELETE           — Physician (physician role) only (admin role model B)
 
 Audit: every CREATE / UPDATE / DELETE writes an audit_logs row (inside the
 service layer).
@@ -50,8 +50,10 @@ router = APIRouter(tags=["immunizations"])
 # BHW, Physician/Nurse/Midwife, Admin — may record and update doses
 _BHW_PLUS = require_role("bhw", "physician", "admin", "admin_staff")
 
-# Physician/Nurse/Midwife and Admin — may delete records
-_PHYSICIAN_PLUS = require_role("physician", "admin")
+# Physician/Nurse/Midwife only — may hard-delete a dose record.  Removing a
+# dose changes what the patient is reminded about, so it is a clinical act;
+# admin is excluded (admin role model B) and corrects entries via PATCH instead.
+_PHYSICIAN_ONLY = require_role("physician")
 
 
 # ---------------------------------------------------------------------------
@@ -217,8 +219,8 @@ async def update_immunization(
     "/patients/{patient_id}/immunizations/{immunization_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
-    summary="Delete an immunization record (Physician / Admin only)",
-    dependencies=[_PHYSICIAN_PLUS],
+    summary="Delete an immunization record (Physician only)",
+    dependencies=[_PHYSICIAN_ONLY],
 )
 async def delete_immunization(
     patient_id: uuid.UUID,
@@ -232,7 +234,7 @@ async def delete_immunization(
 
     Writes a DELETE audit log entry.
 
-    Auth: Physician/Nurse/Midwife, Admin.
+    Auth: Physician/Nurse/Midwife only.
     """
     ip = _get_client_ip(request)
     await immunization_service.delete_immunization(
