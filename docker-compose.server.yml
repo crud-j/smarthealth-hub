@@ -8,6 +8,7 @@
 #   beat    — Celery beat scheduler (reminders) — exactly ONE instance
 #   db      — PostgreSQL 18
 #   redis   — Redis 7 (Celery broker, OTP/token store, NFC last-scan)
+#   backup  — daily database + media backups into /var/backups/smarthealth
 #
 # Only Caddy publishes ports (80/443). Postgres, Redis and FastAPI are reachable
 # only on the internal Docker network.
@@ -131,6 +132,37 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+    networks:
+      - internal
+
+  backup:
+    # Daily pg_dump + media archive (infra/backup/backup.sh). Same image as
+    # `db`, so pg_dump always matches the server version. If the VM was off at
+    # BACKUP_TIME (Azure auto-shutdown), a catch-up backup runs after start-up.
+    image: postgres:18-alpine
+    restart: unless-stopped
+    command: ["sh", "/scripts/backup.sh", "loop"]
+    environment:
+      TZ: Asia/Manila
+      PGHOST: db
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+      # Keep BACKUP_TIME before the VM's auto-shutdown (11:00 PM).
+      BACKUP_TIME: ${BACKUP_TIME:-22:30}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+      # uid:gid that owns the backup files on the host (azureuser = 1000:1000),
+      # so they can be downloaded with scp without sudo.
+      BACKUP_OWNER: ${BACKUP_OWNER:-1000:1000}
+    volumes:
+      - ./infra/backup:/scripts:ro
+      - media:/media:ro
+      # A host folder (outside the repo and outside Docker volumes) so
+      # `dc down -v` can never delete the backups.
+      - ${BACKUP_HOST_DIR:-/var/backups/smarthealth}:/backups
+    depends_on:
+      db:
+        condition: service_healthy
     networks:
       - internal
 
