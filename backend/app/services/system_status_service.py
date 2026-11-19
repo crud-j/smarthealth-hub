@@ -24,7 +24,7 @@ import os
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -202,7 +202,9 @@ async def check_redis_and_workers(now: datetime) -> tuple[RedisCheck, WorkerChec
     try:
         r = get_shared_redis()
         await r.ping()
-        raw = await r.get(HEARTBEAT_KEY)
+        # The shared pool uses decode_responses=True -> str, but newer
+        # redis-py types get() as bytes | str | None.
+        raw = cast("str | None", await r.get(HEARTBEAT_KEY))
     except Exception:
         logger.exception("system status: Redis check failed")
         return (
