@@ -71,11 +71,20 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        # Set by scripts/deploy.sh; shown on the System Health page.
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
     environment:
       <<: *backend-env
       RUN_MIGRATIONS: "true"
       # Number of uvicorn worker processes.
       WEB_CONCURRENCY: ${API_WORKERS:-2}
+    volumes:
+      - media:/app/media
+      # Read-only view of the backup folder so the System Health page can show
+      # status.json. The folder is 711 and the dumps 600, so the backend user
+      # can open status.json by name but cannot list or read the dumps.
+      - ${BACKUP_HOST_DIR:-/var/backups/smarthealth}:/backups:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4)"]
       interval: 15s

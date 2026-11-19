@@ -99,6 +99,12 @@ ENV PATH="/app/.venv/bin:$PATH" \
 
 USER appuser
 
+# Short git commit of the source, shown on the System Health page. Passed by
+# scripts/deploy.sh (via docker-compose.server.yml build args). Declared this
+# late so a new commit only invalidates this last layer, not the cached ones.
+ARG GIT_COMMIT=unknown
+ENV GIT_COMMIT=${GIT_COMMIT}
+
 EXPOSE 8000
 
 # The entrypoint waits for PostgreSQL, runs migrations when RUN_MIGRATIONS=true,

@@ -2,13 +2,13 @@
 Celery Beat report tasks for SmartHealth Hub.
 
 Tasks:
-  send_weekly_report  — runs every Friday at 09:00 UTC (17:00 PHT).
+  send_weekly_report  — runs every Friday at 17:00 Asia/Manila (PHT).
     Queries aggregate counts for the last 7 days: new patient registrations,
     appointments created, and SMS reminder delivery vs. failure counts.
     Emails a plain-text summary to all active admin users via Gmail SMTP.
 
-  send_monthly_report — runs on the last Friday of each month at 09:15 UTC
-    (17:15 PHT, offset from weekly to avoid DB contention).
+  send_monthly_report — runs on the last Friday of each month at 17:15
+    Asia/Manila (offset from weekly to avoid DB contention).
     Same metrics as the weekly report but covering the full calendar month,
     plus immunization completion rate for the month.
 
@@ -154,7 +154,7 @@ async def _get_admin_emails(db: AsyncSession) -> list[str]:
 def send_weekly_report() -> dict[str, object]:
     """Send weekly summary report to all active admin users.
 
-    Runs every Friday at 09:00 UTC (17:00 PHT) via Celery Beat.
+    Runs every Friday at 17:00 Asia/Manila via Celery Beat.
 
     Metrics included:
       - New patient registrations in the last 7 days.
@@ -278,7 +278,7 @@ def send_monthly_report() -> dict[str, object]:
     """Send monthly summary report to all active admin users.
 
     Approximates "last Friday of the month" via Celery Beat schedule
-    (day_of_month=22-31 AND day_of_week=friday, 09:15 UTC = 17:15 PHT).
+    (day_of_month=22-31 AND day_of_week=friday, 17:15 Asia/Manila).
 
     Metrics included:
       - New patient registrations in the current calendar month.

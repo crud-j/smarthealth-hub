@@ -13,6 +13,12 @@ The Redis key ``sms:failed_tasks:count`` has a 24-hour TTL that is refreshed
 on every increment; it therefore represents a rolling 24-hour window of task
 failures and resets automatically when no failures occur for 24 hours.
 
+  heartbeat — runs every minute (Celery Beat).
+    Writes the current UTC time to the Redis key ``system:heartbeat`` with a
+    3-minute TTL. Beat enqueues it and the worker executes it, so a fresh key
+    proves that BOTH are alive. Read by the System Health page
+    (``GET /api/v1/system/status``).
+
 To register this task, ensure ``app.workers.monitoring_tasks`` is listed in
 the ``include`` list inside ``app.workers.celery_app`` and that the
 ``check-sms-failure-rate`` entry exists in ``celery_app.conf.beat_schedule``.
@@ -21,6 +27,7 @@ the ``include`` list inside ``app.workers.celery_app`` and that the
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from typing import cast
 
 from app.core.config import settings
@@ -30,6 +37,20 @@ logger = logging.getLogger(__name__)
 
 _FAILURE_COUNT_KEY: str = "sms:failed_tasks:count"
 _FAILURE_THRESHOLD: int = 5  # alert when this many failures accumulate in 24 h
+
+HEARTBEAT_KEY: str = "system:heartbeat"
+# Written every 60 s; the key disappears 3 minutes after the last write, so a
+# missing key means beat or the worker has been down for at least that long.
+HEARTBEAT_TTL_SECONDS: int = 180
+
+
+@celery_app.task(name="monitoring.heartbeat", ignore_result=True)
+def heartbeat() -> None:
+    """Record that Celery beat + worker are alive (runs every minute)."""
+    import redis as redis_lib
+
+    with redis_lib.from_url(settings.REDIS_URL, decode_responses=True) as r:
+        r.set(HEARTBEAT_KEY, datetime.now(tz=UTC).isoformat(), ex=HEARTBEAT_TTL_SECONDS)
 
 
 @celery_app.task(name="monitoring.check_sms_failure_rate", bind=False)

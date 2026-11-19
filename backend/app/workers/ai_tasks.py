@@ -2,13 +2,13 @@
 AI analytics Celery tasks.
 
 Tasks:
-  run_risk_scoring_task     — nightly 01:00 Asia/Manila
+  run_risk_scoring_task     — daily 21:00 Asia/Manila
     Scores all upcoming appointments (next 7 days) using ai_service.
     Upserts into ai_risk_scores (unique on appointment_id).
     Deletes scores where expires_at < now().
     Returns {"scored": int, "skipped": int, "errors": int}
 
-  run_anomaly_detection_task — nightly 01:30 Asia/Manila
+  run_anomaly_detection_task — daily 21:30 Asia/Manila
     Detects illness trend anomalies using risk_scoring_service.
     Deactivates previous week's alerts (is_active=False).
     Inserts new active alerts for current week.
@@ -148,7 +148,7 @@ async def _run_risk_scoring_async() -> dict:  # type: ignore[type-arg]
 @celery_app.task(name="ai_tasks.run_risk_scoring", bind=True, max_retries=2)
 def run_risk_scoring_task(self: Any) -> dict:  # type: ignore[misc]
     """
-    Nightly Celery Beat task (01:00 Asia/Manila).
+    Daily Celery Beat task (21:00 Asia/Manila).
     Scores upcoming appointments and writes results to ai_risk_scores.
     """
     logger.info("run_risk_scoring_task: starting")
@@ -267,7 +267,7 @@ async def _run_anomaly_detection_async() -> dict:  # type: ignore[type-arg]
 @celery_app.task(name="ai_tasks.run_anomaly_detection", bind=True, max_retries=2)
 def run_anomaly_detection_task(self: Any) -> dict:  # type: ignore[misc]
     """
-    Nightly Celery Beat task (01:30 Asia/Manila).
+    Daily Celery Beat task (21:30 Asia/Manila).
     Detects illness trend anomalies and writes results to ai_anomaly_alerts.
     """
     logger.info("run_anomaly_detection_task: starting")
