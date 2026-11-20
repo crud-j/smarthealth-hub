@@ -90,7 +90,56 @@ describe("patientUpdateSchema (Edit Patient form)", () => {
   });
 });
 
-describe("effectiveAddress (mirrors backend patient_service._compose_address)", () => {
+describe("patientUpdateSchema house/street", () => {
+  it("accepts a house/street up to 255 characters", () => {
+    const result = patientUpdateSchema.safeParse({ ...registeredPatient, houseStreet: "x".repeat(255) });
+    expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+  });
+
+  it("rejects a house/street over 255 characters (the column size)", () => {
+    const result = patientUpdateSchema.safeParse({ ...registeredPatient, houseStreet: "x".repeat(256) });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map((i) => i.path.join("."))).toContain("houseStreet");
+  });
+});
+
+// Same cases as backend tests/test_patient_address.py (compose_address).
+describe("effectiveAddress (mirrors backend patient_service.compose_address)", () => {
+  it("puts the house/street first, before the structured parts", () => {
+    expect(
+      effectiveAddress({
+        address: "ignored free text",
+        houseStreet: "Blk 4 Lot 2 Rosal St., near the chapel",
+        sitioPurok: "Purok 3",
+        barangay: "Patubig",
+        municipality: "Marilao",
+        province: "Bulacan",
+      }),
+    ).toBe("Blk 4 Lot 2 Rosal St., near the chapel, Purok 3, Patubig, Marilao, Bulacan");
+  });
+
+  it("skips blank parts and trims each part", () => {
+    expect(
+      effectiveAddress({
+        houseStreet: "  123 Rizal St.  ",
+        sitioPurok: " ",
+        barangay: "Turo",
+        municipality: "",
+        province: " Bulacan ",
+      }),
+    ).toBe("123 Rizal St., Turo, Bulacan");
+  });
+
+  it("keeps the free-text address when no location part is filled, even with a house/street", () => {
+    expect(effectiveAddress({ address: " 123 Rizal St., Marilao ", houseStreet: "Lot 5" })).toBe(
+      "123 Rizal St., Marilao",
+    );
+  });
+
+  it("falls back to the house/street when nothing else is filled", () => {
+    expect(effectiveAddress({ houseStreet: " Lot 5 " })).toBe("Lot 5");
+  });
+
   it("uses the structured parts when any is filled", () => {
     expect(
       effectiveAddress({

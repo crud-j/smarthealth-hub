@@ -10,7 +10,7 @@ import { useCurrentUser } from "@/hooks/useAuth";
 import ProfilePhotoUploader from "@/app/(dashboard)/patients/_components/ProfilePhotoUploader";
 import { toast } from "@/lib/toast";
 import { AlertDialog } from "@/components/ui/alert-dialog";
-import { patientCreateSchema } from "@/lib/schemas/patient";
+import { effectiveAddress, patientCreateSchema } from "@/lib/schemas/patient";
 import type { PatientCreatePayload } from "@/types/patient";
 import { usePhilHealthMask, usePhMobileMask } from "@/hooks/useInputMasks";
 import IdScanCard from "@/components/forms/IdScanCard";
@@ -197,6 +197,10 @@ export default function NewPatientPage() {
   const barangayValue = watch("barangay") ?? pilotDefaults.barangay;
   const municipalityValue = watch("municipality") ?? pilotDefaults.municipality;
   const provinceValue = watch("province") ?? pilotDefaults.province;
+  const sitioPurokValue = watch("sitioPurok") ?? "";
+  // The "Home Address / Landmark" textarea keeps the form field name `address`
+  // (shared schema + ID-scan autofill), but its text is the house no. / street /
+  // landmark: it is sent as houseStreet and stored in patients.house_street.
   const addressValue = watch("address") ?? "";
   const currentAge = useMemo(() => computeAge(birthDateValue), [birthDateValue]);
   const showGuardian = currentAge > 0 && (currentAge < 18 || currentAge >= 60 || isPwdValue);
@@ -204,10 +208,18 @@ export default function NewPatientPage() {
   const showPwdId = isPwdValue;
   const showPregnancyFields = isPregnantValue;
 
-  const composedAddress = useMemo(() => {
-    const parts = [addressValue, barangayValue, municipalityValue, provinceValue].map((p) => p.trim()).filter(Boolean);
-    return parts.join(", ");
-  }, [addressValue, barangayValue, municipalityValue, provinceValue]);
+  // Exactly what the backend will store (same rule as patient_service.compose_address).
+  const composedAddress = useMemo(
+    () =>
+      effectiveAddress({
+        houseStreet: addressValue,
+        sitioPurok: sitioPurokValue,
+        barangay: barangayValue,
+        municipality: municipalityValue,
+        province: provinceValue,
+      }),
+    [addressValue, sitioPurokValue, barangayValue, municipalityValue, provinceValue],
+  );
 
   function handleOcrAutofill(fields: OcrAutofillFields, lowConfidence: Set<string>) {
     const filledNames: Array<keyof PatientCreateFormValues> = [];
@@ -268,7 +280,8 @@ export default function NewPatientPage() {
       householdNumber: data.householdNumber?.trim() || undefined, sitioPurok: data.sitioPurok?.trim() || undefined,
       barangay: data.barangay?.trim() || undefined, municipality: data.municipality?.trim() || undefined,
       province: data.province?.trim() || undefined, occupation: data.occupation?.trim() || undefined,
-      mobileNumber: data.mobileNumber?.trim() || undefined, address: composedAddress.trim(),
+      mobileNumber: data.mobileNumber?.trim() || undefined,
+      houseStreet: data.address?.trim() || undefined, address: composedAddress,
       guardianName: data.guardianName?.trim() || undefined, guardianContact: data.guardianContact?.trim() || undefined,
       emergencyContactName: data.emergencyContactName?.trim() || "",
       emergencyContactNumber: data.emergencyContactNumber?.trim() || "",
@@ -531,11 +544,11 @@ export default function NewPatientPage() {
                 </div>
                 <div>
                   <label className={labelCls} htmlFor="address">Home Address / Landmark *</label>
-                  <textarea id="address" rows={4} {...register("address")}
+                  <textarea id="address" rows={4} maxLength={255} {...register("address")}
                     className={`${inputCls} resize-y ${errors.address ? "border-[#fca5a5]" : ""}`}
                     placeholder="House no., street, landmark or nearby reference" />
                   <FieldError message={errors.address?.message} />
-                  <p className="mt-1 text-xs text-[#9b6e6e]">Combined address: {composedAddress || "—"}</p>
+                  <p className="mt-1 text-xs text-[#9b6e6e]">Address saved and printed on the health card: {composedAddress || "—"}</p>
                 </div>
               </div>
               {showGuardian ? (

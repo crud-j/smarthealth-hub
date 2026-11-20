@@ -83,6 +83,9 @@ class Patient(Base):
     sex: Mapped[str] = mapped_column(sa.String(10), nullable=False)
     civil_status: Mapped[str | None] = mapped_column(sa.String(20), nullable=True)
     household_number: Mapped[str | None] = mapped_column(sa.String(50), nullable=True)
+    # House no. / street / landmark (registration "Home Address / Landmark").
+    # Comes first in the composed ``address``; see patient_service.compose_address.
+    house_street: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
     sitio_purok: Mapped[str | None] = mapped_column(sa.String(150), nullable=True)
     barangay: Mapped[str | None] = mapped_column(sa.String(150), nullable=True)
     municipality: Mapped[str | None] = mapped_column(sa.String(150), nullable=True)

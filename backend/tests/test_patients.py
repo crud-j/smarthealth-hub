@@ -771,6 +771,116 @@ async def test_update_patient_free_text_address_used_without_structured_parts(
     assert data["address"] == "123 Rizal St., Marilao"
 
 
+# ── House no. / street / landmark (patients.house_street) ───────────────────
+
+
+async def test_create_patient_keeps_house_street(
+    client: AsyncClient,
+    bhw_user: tuple[User, str],
+) -> None:
+    """Registration's "Home Address / Landmark" text used to be dropped."""
+    _, token = bhw_user
+    resp = await client.post(
+        PATIENTS_URL,
+        json=_patient_payload(house_street="Blk 4 Lot 2 Rosal St., near the chapel"),
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert resp.status_code == 201, resp.text
+    patient = resp.json()["patient"]
+    assert patient["house_street"] == "Blk 4 Lot 2 Rosal St., near the chapel"
+    assert (
+        patient["address"]
+        == "Blk 4 Lot 2 Rosal St., near the chapel, Purok 3, Patubig, Marilao, Bulacan"
+    )
+
+
+async def test_create_patient_house_street_too_long_returns_422(
+    client: AsyncClient,
+    bhw_user: tuple[User, str],
+) -> None:
+    _, token = bhw_user
+    resp = await client.post(
+        PATIENTS_URL,
+        json=_patient_payload(house_street="x" * 256),
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert resp.status_code == 422
+
+
+async def test_update_patient_house_street_recomposes_address(
+    client: AsyncClient,
+    sample_patient: Patient,
+    bhw_user: tuple[User, str],
+) -> None:
+    _, token = bhw_user
+    await _put(
+        client,
+        sample_patient.id,
+        token,
+        {"barangay": "Turo", "municipality": "Bocaue", "province": "Bulacan"},
+    )
+
+    data = await _put(client, sample_patient.id, token, {"house_street": "123 Rizal St."})
+
+    assert data["house_street"] == "123 Rizal St."
+    assert data["address"] == "123 Rizal St., Turo, Bocaue, Bulacan"
+
+
+@pytest.mark.parametrize("cleared", [None, "", "   "])
+async def test_update_patient_clear_house_street(
+    client: AsyncClient,
+    sample_patient: Patient,
+    bhw_user: tuple[User, str],
+    cleared: str | None,
+) -> None:
+    _, token = bhw_user
+    await _put(
+        client,
+        sample_patient.id,
+        token,
+        {"house_street": "123 Rizal St.", "barangay": "Turo", "municipality": "Bocaue"},
+    )
+
+    data = await _put(client, sample_patient.id, token, {"house_street": cleared})
+
+    assert data["house_street"] is None
+    assert data["address"] == "Turo, Bocaue"
+
+
+async def test_update_patient_house_street_omitted_keeps_it(
+    client: AsyncClient,
+    sample_patient: Patient,
+    bhw_user: tuple[User, str],
+) -> None:
+    _, token = bhw_user
+    await _put(
+        client,
+        sample_patient.id,
+        token,
+        {"house_street": "123 Rizal St.", "barangay": "Turo", "municipality": "Bocaue"},
+    )
+
+    data = await _put(client, sample_patient.id, token, {"province": "Bulacan"})
+
+    assert data["house_street"] == "123 Rizal St."
+    assert data["address"] == "123 Rizal St., Turo, Bocaue, Bulacan"
+
+
+async def test_update_patient_house_street_on_free_text_patient_keeps_address(
+    client: AsyncClient,
+    sample_patient: Patient,
+    bhw_user: tuple[User, str],
+) -> None:
+    """Without barangay/municipality/province the free-text address stays the address."""
+    _, token = bhw_user
+    data = await _put(client, sample_patient.id, token, {"house_street": "Lot 5"})
+
+    assert data["house_street"] == "Lot 5"
+    assert data["address"] == "123 Test Street, Manila"
+
+
 async def test_update_patient_emergency_contact(
     client: AsyncClient,
     sample_patient: Patient,

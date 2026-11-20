@@ -16,6 +16,7 @@ import { useEffect, useState } from "react";
 import type { HealthCardData } from "@/types/healthCard";
 import type { Patient } from "@/types/patient";
 import { generateQrDataUri } from "@/lib/qr";
+import { effectiveAddress } from "@/lib/schemas/patient";
 
 // ---------------------------------------------------------------------------
 // Layout constants — CR80 (85.6 × 54 mm) at display scale
@@ -41,7 +42,7 @@ interface HealthCardPreviewProps {
     Patient,
     | "id" | "patientCode" | "firstName" | "middleName" | "lastName"
     | "sex" | "birthDate" | "age"
-    | "address" | "barangay" | "municipality" | "province" | "sitioPurok"
+    | "address" | "houseStreet" | "barangay" | "municipality" | "province" | "sitioPurok"
     | "bloodType" | "allergies" | "heightCm" | "weightKg"
     | "guardianName" | "guardianContact"
     | "emergencyContactName" | "emergencyContactNumber"
@@ -87,10 +88,8 @@ export default function HealthCardPreview({ patient, card }: HealthCardPreviewPr
     ? new Date(card.issued_at).toLocaleDateString("en-PH", { year: "numeric", month: "short", day: "numeric" })
     : "";
 
-  const addressDisplay = (() => {
-    const p = [patient.sitioPurok, patient.barangay, patient.municipality, patient.province].filter(Boolean);
-    return p.length ? p.join(", ") : (patient.address || "—");
-  })();
+  // Same rule as the printed card back (backend patient_service.patient_address).
+  const addressDisplay = effectiveAddress(patient) || "—";
 
   const hasAllergies = !!patient.allergies &&
     !["None on record", "None", "—"].includes(patient.allergies ?? "");
@@ -318,9 +317,10 @@ export default function HealthCardPreview({ patient, card }: HealthCardPreviewPr
               {/* Address */}
               <div style={backRow}>
                 <span style={backLabel}>Address</span>
+                {/* Up to 2 lines, like .bp-address .bp-value in card_styles.css. */}
                 <span style={{
-                  ...backValue, fontSize: pt(4.3),
-                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  ...backValue, fontSize: pt(4.3), minWidth: 0, overflowWrap: "anywhere",
+                  overflow: "hidden", display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2,
                 }}>
                   {addressDisplay}
                 </span>
