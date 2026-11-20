@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { apiFetch, ApiError } from "@/lib/api-client";
 import { toast } from "@/lib/toast";
+import { downloadHealthCardPdf } from "@/lib/health-card-pdf";
 import { usePatientList } from "@/hooks/usePatients";
 import type {
   CardGenerationAccepted,
@@ -260,16 +261,21 @@ function ActionCell({
       );
     }
 
-    if (genStatus.status === "ready" && genStatus.pdf_url) {
+    if (genStatus.status === "ready") {
+      // Authenticated, on-demand /pdf endpoint (the stored /media file was public).
       return (
-        <a
-          href={`${process.env.NEXT_PUBLIC_API_BASE_URL?.replace("/api/v1", "") ?? "http://localhost:8000"}/media/${genStatus.pdf_url}`}
-          download
+        <button
+          type="button"
+          onClick={() => {
+            downloadHealthCardPdf(patientId, `health_card_${patientId}.pdf`).catch((err: unknown) =>
+              toast.error(err instanceof Error ? err.message : "Failed to download PDF."),
+            );
+          }}
           className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600 transition-all active:scale-[0.96]"
         >
           <PrintIcon />
           Download PDF
-        </a>
+        </button>
       );
     }
 

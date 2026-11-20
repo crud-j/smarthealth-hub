@@ -402,8 +402,9 @@ export default function PatientProfilePage({ params }: { params: Promise<{ patie
         patientId={patientId}
         currentPhotoUrl={null}
         onPhotoSaved={(url) => {
-          const base = (process.env.NEXT_PUBLIC_API_BASE_URL?.replace("/api/v1", "") ?? "http://localhost:8000") + url;
-          setCurrentPhotoUrl(`${base}?t=${Date.now()}`);
+          // url is the authenticated photo endpoint with ?v=<mtime>, which
+          // already changes on every upload (no extra cache-buster needed).
+          setCurrentPhotoUrl((process.env.NEXT_PUBLIC_API_BASE_URL?.replace("/api/v1", "") ?? "http://localhost:8000") + url);
         }}
       />
 

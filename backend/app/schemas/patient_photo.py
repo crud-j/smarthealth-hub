@@ -14,7 +14,7 @@ class PhotoUploadResponse(BaseModel):
     """
     Response returned after a successful photo upload.
 
-    ``photo_url`` is a root-relative URL path (e.g. ``/media/patient_photos/<uuid>.jpg``)
+    ``photo_url`` is a root-relative URL path (e.g. ``/api/v1/patients/<id>/photo?v=<n>``)
     that the frontend can append to the API base URL to display or download
     the uploaded photo.
     """
@@ -23,7 +23,7 @@ class PhotoUploadResponse(BaseModel):
     photo_url: str = Field(
         description=(
             "Root-relative URL path to the stored photo, "
-            "e.g. '/media/patient_photos/3fa8...-6afa6.jpg'."
+            "e.g. '/api/v1/patients/3fa8...-6afa6/photo?v=1732060800'."
         )
     )
     message: str = Field(description="Human-readable confirmation message.")

@@ -124,7 +124,7 @@ export interface PatientVerifySummary {
  * PatientVerifySummary.  A PHI_VIEW audit log entry is written server-side
  * when this response is issued.
  *
- * photo_url is a relative path ("/media/patient_photos/<uuid>.jpg") that
+ * photo_url is a relative path ("/api/v1/patients/<id>/photo?v=<n>", login required) that
  * must be prefixed with the API base host to form an absolute URL.
  */
 export interface PatientVerifySummaryFull extends PatientVerifySummary {
@@ -134,7 +134,7 @@ export interface PatientVerifySummaryFull extends PatientVerifySummary {
   birth_date: string;
   mobile_number: string | null;
   /**
-   * Relative path "/media/patient_photos/<uuid>.jpg" or null.
+   * Authenticated URL "/api/v1/patients/<id>/photo?v=<n>" or null.
    * Prefix with API host (e.g. http://192.168.100.6:8000) to form absolute URL.
    */
   photo_url: string | null;

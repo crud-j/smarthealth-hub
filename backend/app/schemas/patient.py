@@ -490,13 +490,13 @@ class PatientResponse(BaseSchema):
     updated_at: datetime
 
     # Profile photo — root-relative URL path to the stored photo JPEG,
-    # e.g. "/media/patient_photos/<uuid>.jpg".  None means no photo uploaded.
+    # e.g. "/api/v1/patients/<id>/photo?v=<n>" (login required).  None = no photo.
     # The frontend should resolve this against the API host base URL.
     photo_path: str | None = Field(
         None,
         description=(
             "Root-relative URL path to the patient's profile photo JPEG, "
-            "e.g. '/media/patient_photos/<uuid>.jpg'. "
+            "e.g. '/api/v1/patients/<id>/photo?v=<n>' (login required). "
             "None if no photo has been uploaded yet."
         ),
     )

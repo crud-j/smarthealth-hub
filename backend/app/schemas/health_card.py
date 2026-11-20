@@ -222,7 +222,7 @@ class PatientVerifySummaryFull(PatientVerifySummary):
                        full patient record, new visit, and appointment booking.
       - birth_date:    ISO date string "YYYY-MM-DD" — for formatted display.
       - mobile_number: Contact number (may be null).
-      - photo_url:     Relative URL "/media/patient_photos/<uuid>.jpg" or None.
+      - photo_url:     Authenticated URL "/api/v1/patients/<id>/photo?v=<n>" or None.
                        Frontend constructs the absolute URL by prepending the
                        API base host.  Never contains a full backend URL so
                        the value remains environment-agnostic.
@@ -237,7 +237,7 @@ class PatientVerifySummaryFull(PatientVerifySummary):
     mobile_number: str | None = Field(None, description="Patient contact number")
     photo_url: str | None = Field(
         None,
-        description="Relative URL path '/media/patient_photos/<uuid>.jpg' or None",
+        description="Authenticated photo URL '/api/v1/patients/<id>/photo?v=<n>' or None",
     )
 
 
