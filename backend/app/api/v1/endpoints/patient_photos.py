@@ -181,4 +181,7 @@ async def get_patient_photo(
         path=str(photo_path),
         media_type="image/jpeg",
         filename=f"patient_{patient_id}.jpg",
+        # Browser cache only (never proxies/CDNs). photo_api_url adds ?v=<mtime>,
+        # so a re-uploaded photo gets a new URL.
+        headers={"Cache-Control": "private, max-age=86400"},
     )

@@ -23,9 +23,11 @@ Responsibilities
 
 Security notes
 --------------
-- The media directory is served by FastAPI's StaticFiles only when accessed
-  through an authenticated endpoint.  Raw filesystem paths are never surfaced
-  to the client in the photo_path column — the API returns a URL instead.
+- MEDIA_DIR is NOT served as static files.  Photos are named after the
+  patient id, which is part of every QR / NFC card link, so a public /media
+  mount let anyone who scanned a card fetch the photo.  The only way to read a
+  photo is ``GET /api/v1/patients/{id}/photo`` (JWT header or httpOnly cookie);
+  ``photo_api_url`` builds that URL for every API response.
 - Pillow's Image.open() is called with a BytesIO buffer (not with the raw
   path) to prevent path traversal through crafted filenames.
 - File content is validated via Pillow verify() before conversion — this
@@ -122,6 +124,24 @@ def _relative_photo_path(patient_id: uuid.UUID) -> str:
     return f"{_PHOTO_SUBDIR}/{patient_id}.jpg"
 
 
+def photo_api_url(patient_id: uuid.UUID | str, photo_path: str | None) -> str | None:
+    """
+    Root-relative URL of the authenticated photo endpoint, or None if no photo.
+
+    ``?v=`` is the file's modification time, so a re-uploaded photo gets a new
+    URL (the endpoint sends ``Cache-Control: private``; browsers may cache it).
+    A missing file still returns the URL (``v=0``); the endpoint then 404s and
+    the frontend shows its placeholder.
+    """
+    if not photo_path:
+        return None
+    try:
+        version = int((settings.MEDIA_DIR / photo_path).stat().st_mtime)
+    except OSError:
+        version = 0
+    return f"/api/v1/patients/{patient_id}/photo?v={version}"
+
+
 def _convert_to_jpeg(raw_bytes: bytes) -> bytes:
     """
     Open the uploaded image with Pillow and re-save it as JPEG.
@@ -192,8 +212,8 @@ async def validate_and_save_photo(
         ip_address:      Client IP for the audit log.
 
     Returns:
-        A URL-relative path string usable by the frontend to construct the
-        photo URL, e.g. "/media/patient_photos/<uuid>.jpg".
+        The authenticated photo URL (see ``photo_api_url``), e.g.
+        "/api/v1/patients/<uuid>/photo?v=<mtime>".
 
     Raises:
         NotFoundError:  Patient does not exist.
@@ -257,7 +277,7 @@ async def validate_and_save_photo(
 
     await db.commit()
 
-    url_path = f"/media/{relative_path}"
+    url_path = photo_api_url(patient_id, relative_path) or ""
     logger.info(
         "Patient photo saved",
         extra={

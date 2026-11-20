@@ -72,7 +72,7 @@ export interface Patient {
   updatedAt: string; // ISO datetime string
   /**
    * Root-relative URL path to the patient's profile photo JPEG,
-   * e.g. "/media/patient_photos/<uuid>.jpg".
+   * e.g. "/api/v1/patients/<id>/photo?v=<n>" (login required).
    * Null/undefined if no photo has been uploaded yet.
    */
   photoPath?: string | null;

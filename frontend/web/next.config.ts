@@ -27,17 +27,13 @@ const nextConfig: NextConfig = {
     const backend =
       process.env.SERVER_SIDE_API_URL ?? "http://localhost:8000";
     return [
+      // Also carries patient photos (/api/v1/patients/{id}/photo) and card
+      // PDFs (/api/v1/health-cards/{id}/pdf): same origin, so the httpOnly
+      // login cookie goes with a plain <img>. There is no /media route any
+      // more; the backend no longer serves those files without login.
       {
         source: "/api/v1/:path*",
         destination: `${backend}/api/v1/:path*`,
-      },
-      // Patient photos and generated PDFs are served by FastAPI's /media
-      // mount. Proxying them keeps every browser request on the Next.js
-      // origin, so production builds (NEXT_PUBLIC_API_BASE_URL=/api/v1) work
-      // over HTTPS tunnels without mixed-content or cross-origin issues.
-      {
-        source: "/media/:path*",
-        destination: `${backend}/media/:path*`,
       },
     ];
   },

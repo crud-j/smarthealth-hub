@@ -31,7 +31,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from app.api.v1.router import api_router
@@ -479,30 +478,14 @@ async def nfc_tap_view(
 
 
 # ---------------------------------------------------------------------------
-# Static files — /media
+# No static /media mount (on purpose)
 # ---------------------------------------------------------------------------
-# Serves uploaded patient photos at /media/patient_photos/<uuid>.jpg.
-#
-# IMPORTANT: The /media mount is intentionally placed AFTER the API router.
-# FastAPI checks routes in registration order; the API routes will match
-# /api/v1/... paths before StaticFiles ever sees them.
-#
-# Access control note: StaticFiles does NOT enforce JWT auth — files under
-# /media are publicly URL-addressable if the path is guessed.  This is
-# acceptable for an internal BHC LAN deployment where the /media directory
-# is not externally routable.  For production internet deployments, consider
-# serving media files through the authenticated GET /patients/{id}/photo
-# endpoint (which enforces JWT) and removing this static mount, or placing
-# Nginx in front with its own auth check.
-#
-# The MEDIA_DIR is created on startup by the lifespan handler above.
-# ``html=False`` disables directory listings for security.
-settings.MEDIA_DIR.mkdir(parents=True, exist_ok=True)  # guard against startup race
-app.mount(
-    "/media",
-    StaticFiles(directory=str(settings.MEDIA_DIR), html=False),
-    name="media",
-)
+# MEDIA_DIR holds patient photos (patient_photos/<patient_id>.jpg) and stored
+# card PDFs (health_cards/<card_id>.pdf).  A public StaticFiles mount served
+# them without login, and the patient id is part of every QR / NFC card link.
+# Photos are served only by GET /api/v1/patients/{id}/photo (JWT header or the
+# httpOnly cookie), card PDFs only by GET /api/v1/health-cards/{id}/pdf.
+# Do not re-add a static mount for MEDIA_DIR (tests/test_media_access.py).
 
 
 # ---------------------------------------------------------------------------

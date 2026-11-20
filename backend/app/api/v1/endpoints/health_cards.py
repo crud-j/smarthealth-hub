@@ -2614,8 +2614,10 @@ async def verify_health_card(
             return PatientVerifySummary.model_validate(base_summary).model_dump(mode="json")
 
         # Extended response: include patient_id, birth_date, mobile, photo.
-        # photo_url is the relative path the frontend can prefix with the API host.
-        photo_url: str | None = f"/media/{patient.photo_path}" if patient.photo_path else None
+        # Authenticated photo endpoint URL (no public /media mount any more).
+        from app.services.patient_photo_service import photo_api_url  # noqa: PLC0415
+
+        photo_url: str | None = photo_api_url(patient_id, patient.photo_path)
 
         full_data: dict[str, object] = {
             **base_summary,

@@ -47,6 +47,7 @@ from app.schemas.patient import (
 )
 from app.services import patient_service
 from app.services.audit_service import write_audit_log
+from app.services.patient_photo_service import photo_api_url
 from app.utils.encryption import decrypt_text
 
 router = APIRouter(prefix="/patients", tags=["patients"])
@@ -81,9 +82,9 @@ def _build_patient_response(patient: Patient) -> PatientResponse:
     (create, get, update) emit consistent fields — including ``photo_path``
     which was added in Phase 3 (migration 0004).
     """
-    # Build the root-relative photo URL from the stored relative path.
-    # e.g. "patient_photos/<uuid>.jpg" → "/media/patient_photos/<uuid>.jpg"
-    photo_path_url: str | None = f"/media/{patient.photo_path}" if patient.photo_path else None
+    # Authenticated photo URL ("/api/v1/patients/<id>/photo?v=<mtime>"), never a
+    # public /media path: the patient id is on every card, so /media was open.
+    photo_path_url: str | None = photo_api_url(patient.id, patient.photo_path)
     return PatientResponse(
         id=str(patient.id),
         patient_code=patient.patient_code,
