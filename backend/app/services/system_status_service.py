@@ -2,7 +2,9 @@
 System Health checks for ``GET /api/v1/system/status`` (Admin only).
 
 Answers "is everything working?" in one call: database, Redis, Celery
-worker + beat, disk, media folder, last backup, alert phone, deployed commit.
+worker + beat, disk, media folder, last backup, alert phone, deployed commit,
+and reliability metrics (SDP §11.7): SMS delivery and sign-in/OTP failures
+over the last 24 h / 7 days, and the last run of each reminder job.
 
 Design rules:
   - Every check is independent. A broken dependency (e.g. Redis down) is
@@ -12,7 +14,8 @@ Design rules:
     hostnames, usernames or file paths).
   - No PHI is read. The backup check opens only ``status.json`` (written by
     infra/backup/backup.sh), never the dump files. The alert phone number is
-    reported as configured yes/no, never the number itself.
+    reported as configured yes/no, never the number itself. Reliability
+    metrics are counts only (no phone numbers, message text or user names).
 """
 
 from __future__ import annotations
@@ -22,15 +25,17 @@ import json
 import logging
 import os
 import shutil
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
-from sqlalchemy import text
+from sqlalchemy import and_, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.security import get_shared_redis
+from app.models.audit_log import AuditLog
+from app.models.sms_log import SmsLog
 from app.schemas.system_config import (
     AlertsCheck,
     BackupCheck,
@@ -39,11 +44,23 @@ from app.schemas.system_config import (
     DiskCheck,
     MediaCheck,
     RedisCheck,
+    ReliabilityChecks,
+    ReminderRun,
+    ReminderRuns,
+    SignInReliability,
+    SignInWindow,
+    SmsReliability,
+    SmsWindow,
     SystemStatusResponse,
     VersionInfo,
     WorkerCheck,
 )
-from app.workers.monitoring_tasks import HEARTBEAT_KEY, HEARTBEAT_TTL_SECONDS
+from app.workers.monitoring_tasks import (
+    HEARTBEAT_KEY,
+    HEARTBEAT_TTL_SECONDS,
+    REMINDER_JOBS,
+    REMINDER_RUN_KEY_PREFIX,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +76,27 @@ DISK_ERROR_PERCENT = 90.0
 # couple of minutes after start-up and the status turns green again.)
 BACKUP_WARN_HOURS = 26.0
 BACKUP_ERROR_HOURS = 50.0
+
+# SMS (last 24 h). 5 failures = the level of the existing hourly admin alert
+# (monitoring_tasks.check_sms_failure_rate). Red needs a few messages so one
+# failed SMS out of one does not look like an outage.
+SMS_WARN_FAILED = 5
+SMS_WARN_PERCENT = 10.0
+SMS_ERROR_PERCENT = 25.0
+SMS_ERROR_MIN_FINISHED = 4
+# A reminder is queued and normally sent within seconds; still queued after
+# this long means the worker or the SMS gateway is stuck.
+SMS_STUCK_MINUTES = 60
+
+# Sign-in failures (wrong password + wrong OTP) in the last 24 h. A small
+# health center has a handful of staff; this many failures means someone is
+# probably guessing passwords.
+SIGNIN_WARN_FAILURES = 20
+SIGNIN_ERROR_FAILURES = 50
+
+_SMS_SENT_STATUSES = ("sent", "delivered", "replied")
+_SIGNIN_SUCCESS_ACTIONS = ("LOGIN", "LOGIN_TRUSTED_DEVICE", "PASSKEY_LOGIN")
+_SIGNIN_ACTIONS = (*_SIGNIN_SUCCESS_ACTIONS, "LOGIN_FAILED", "OTP_FAILED", "OTP_SENT")
 
 _MAX_MESSAGE_CHARS = 300
 _SEVERITY: dict[CheckStatus, int] = {"unknown": 0, "ok": 0, "warning": 1, "error": 2}
@@ -178,6 +216,55 @@ def classify_backup(data: dict[str, Any], now: datetime) -> BackupCheck:
     )
 
 
+def _percent(part: int, whole: int) -> float | None:
+    return round(min(part / whole, 1.0) * 100, 1) if whole else None
+
+
+def classify_sms(day: SmsWindow, week: SmsWindow) -> SmsReliability:
+    """Rules for the SMS card (thresholds at the top of this module)."""
+    finished = day.sent + day.failed
+    pct = day.failure_percent or 0.0
+    status: CheckStatus = "ok"
+    message = "SMS are going out normally."
+    if week.sent + week.failed + week.stuck == 0:
+        status, message = "unknown", "No SMS in the last 7 days."
+    elif finished >= SMS_ERROR_MIN_FINISHED and pct >= SMS_ERROR_PERCENT:
+        status = "error"
+        message = (
+            f"{pct}% of SMS failed in the last 24 hours. Check the SMS gateway "
+            "(phone on, load, signal) and the SMS Logs page."
+        )
+    elif day.failed >= SMS_WARN_FAILED or (day.failed and pct >= SMS_WARN_PERCENT):
+        status = "warning"
+        message = f"{day.failed} SMS failed in the last 24 hours ({pct}%). Check the SMS Logs."
+    elif day.stuck:
+        status = "warning"
+        message = (
+            f"{day.stuck} SMS still waiting after more than an hour: the background "
+            "jobs or the SMS gateway may be stuck."
+        )
+    elif finished == 0:
+        message = "No SMS in the last 24 hours."
+    return SmsReliability(status=status, message=message, last_24h=day, last_7d=week)
+
+
+def classify_sign_in(day: SignInWindow, week: SignInWindow) -> SignInReliability:
+    """Rules for the Sign-in card (thresholds at the top of this module)."""
+    failures = day.failed_password + day.failed_otp
+    activity = week.successful + week.failed_password + week.failed_otp + week.otp_sent
+    status: CheckStatus = "ok"
+    message = "Sign-ins are working normally."
+    if activity == 0:
+        status, message = "unknown", "No sign-ins in the last 7 days."
+    elif failures >= SIGNIN_WARN_FAILURES:
+        status = "error" if failures >= SIGNIN_ERROR_FAILURES else "warning"
+        message = (
+            f"{failures} failed sign-ins in the last 24 hours. Someone may be guessing "
+            "passwords: check the Audit Log (LOGIN_FAILED, OTP_FAILED)."
+        )
+    return SignInReliability(status=status, message=message, last_24h=day, last_7d=week)
+
+
 def overall_status(checks: list[CheckStatus]) -> CheckStatus:
     worst = max((_SEVERITY[c] for c in checks), default=0)
     return "error" if worst == 2 else "warning" if worst == 1 else "ok"
@@ -215,6 +302,113 @@ async def check_redis_and_workers(now: datetime) -> tuple[RedisCheck, WorkerChec
             WorkerCheck(status="unknown", message="Cannot check while Redis is down."),
         )
     return RedisCheck(status="ok", message="Connected."), classify_heartbeat(raw, now)
+
+
+async def count_sms(db: AsyncSession, *, since: datetime, now: datetime) -> SmsWindow:
+    """Count SMS created since ``since`` by outcome (no message content is read)."""
+    stuck_before = now - timedelta(minutes=SMS_STUCK_MINUTES)
+    result = await db.execute(
+        select(
+            func.count().filter(SmsLog.status.in_(_SMS_SENT_STATUSES)),
+            func.count().filter(SmsLog.status == "failed"),
+            func.count().filter(and_(SmsLog.status == "queued", SmsLog.created_at < stuck_before)),
+        ).where(SmsLog.created_at >= since)
+    )
+    sent, failed, stuck = result.one()
+    return SmsWindow(
+        sent=sent,
+        failed=failed,
+        stuck=stuck,
+        failure_percent=_percent(failed, sent + failed),
+    )
+
+
+async def count_sign_ins(db: AsyncSession, *, since: datetime) -> SignInWindow:
+    """Count sign-in audit events since ``since``."""
+    result = await db.execute(
+        select(AuditLog.action, func.count())
+        .where(AuditLog.created_at >= since, AuditLog.action.in_(_SIGNIN_ACTIONS))
+        .group_by(AuditLog.action)
+    )
+    counts: dict[str, int] = {action: n for action, n in result.all()}
+    # LOGIN is written only after a correct OTP (passkey and trusted-device
+    # sign-ins have their own actions), so it counts verified OTPs.
+    verified = counts.get("LOGIN", 0)
+    sent = counts.get("OTP_SENT", 0)
+    return SignInWindow(
+        successful=sum(counts.get(a, 0) for a in _SIGNIN_SUCCESS_ACTIONS),
+        failed_password=counts.get("LOGIN_FAILED", 0),
+        failed_otp=counts.get("OTP_FAILED", 0),
+        otp_sent=sent,
+        otp_verified=verified,
+        otp_success_percent=_percent(verified, sent),
+    )
+
+
+async def check_sms(db: AsyncSession, now: datetime) -> SmsReliability:
+    try:
+        day = await count_sms(db, since=now - timedelta(hours=24), now=now)
+        week = await count_sms(db, since=now - timedelta(days=7), now=now)
+    except Exception:
+        logger.exception("system status: SMS metrics failed")
+        empty = SmsWindow(sent=0, failed=0, stuck=0)
+        return SmsReliability(
+            status="error", message="Cannot read the SMS log.", last_24h=empty, last_7d=empty
+        )
+    return classify_sms(day, week)
+
+
+async def check_sign_in(db: AsyncSession, now: datetime) -> SignInReliability:
+    try:
+        day = await count_sign_ins(db, since=now - timedelta(hours=24))
+        week = await count_sign_ins(db, since=now - timedelta(days=7))
+    except Exception:
+        logger.exception("system status: sign-in metrics failed")
+        empty = SignInWindow(
+            successful=0, failed_password=0, failed_otp=0, otp_sent=0, otp_verified=0
+        )
+        return SignInReliability(
+            status="error", message="Cannot read the audit log.", last_24h=empty, last_7d=empty
+        )
+    return classify_sign_in(day, week)
+
+
+def _parse_reminder_run(job: str, raw: str | None) -> ReminderRun:
+    try:
+        data = json.loads(raw) if raw else None
+    except ValueError:
+        data = None
+    if not isinstance(data, dict):
+        return ReminderRun(job=job)  # type: ignore[arg-type]
+    return ReminderRun(
+        job=job,  # type: ignore[arg-type]
+        last_run_at=_parse_time(data.get("at")),
+        queued=_as_int(data.get("queued")),
+    )
+
+
+async def check_reminder_runs() -> ReminderRuns:
+    """Last run of each reminder job (information only, never yellow/red).
+
+    A stopped scheduler already turns the Background jobs card red, and the VM
+    is off at night, so "last run long ago" would warn every morning.
+    """
+    try:
+        r = get_shared_redis()
+        raws = [
+            cast("str | None", await r.get(REMINDER_RUN_KEY_PREFIX + job)) for job in REMINDER_JOBS
+        ]
+    except Exception:
+        logger.exception("system status: cannot read reminder runs")
+        raws = [None] * len(REMINDER_JOBS)
+    runs = [_parse_reminder_run(job, raw) for job, raw in zip(REMINDER_JOBS, raws, strict=True)]
+    if any(run.last_run_at for run in runs):
+        return ReminderRuns(status="ok", message="Last runs of the automatic reminders.", runs=runs)
+    return ReminderRuns(
+        status="unknown",
+        message="No reminder run recorded yet. Appointment reminders run every hour.",
+        runs=runs,
+    )
 
 
 def check_disk(path: Path) -> DiskCheck:
@@ -296,6 +490,10 @@ async def collect_system_status(db: AsyncSession) -> SystemStatusResponse:
     )
     database = await check_database(db)
     alerts = check_alerts()
+    # One session: these queries run one after another, never in gather().
+    sms = await check_sms(db, now)
+    sign_in = await check_sign_in(db, now)
+    reminders = await check_reminder_runs()
 
     return SystemStatusResponse(
         overall=overall_status(
@@ -307,6 +505,9 @@ async def collect_system_status(db: AsyncSession) -> SystemStatusResponse:
                 media.status,
                 backup.status,
                 alerts.status,
+                sms.status,
+                sign_in.status,
+                # reminders: information only, never part of the overall status
             ]
         ),
         checked_at=now,
@@ -318,4 +519,5 @@ async def collect_system_status(db: AsyncSession) -> SystemStatusResponse:
         media=media,
         backup=backup,
         alerts=alerts,
+        reliability=ReliabilityChecks(sms=sms, sign_in=sign_in, reminders=reminders),
     )

@@ -26,6 +26,7 @@ the ``include`` list inside ``app.workers.celery_app`` and that the
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import UTC, datetime
 from typing import cast
@@ -42,6 +43,24 @@ HEARTBEAT_KEY: str = "system:heartbeat"
 # Written every 60 s; the key disappears 3 minutes after the last write, so a
 # missing key means beat or the worker has been down for at least that long.
 HEARTBEAT_TTL_SECONDS: int = 180
+
+# Last run of each reminder job, shown on the System Health page:
+# reminders:last_run:<job> = {"at": ISO time, "queued": SMS queued by that run}
+REMINDER_RUN_KEY_PREFIX: str = "reminders:last_run:"
+REMINDER_JOBS: tuple[str, ...] = ("appointment", "immunization")
+REMINDER_RUN_TTL_SECONDS: int = 30 * 24 * 3600
+
+
+def record_reminder_run(job: str, queued: int) -> None:
+    """Remember when a reminder job last ran. Never raises (monitoring only)."""
+    import redis as redis_lib
+
+    value = json.dumps({"at": datetime.now(tz=UTC).isoformat(), "queued": queued})
+    try:
+        with redis_lib.from_url(settings.REDIS_URL, decode_responses=True) as r:
+            r.set(REMINDER_RUN_KEY_PREFIX + job, value, ex=REMINDER_RUN_TTL_SECONDS)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("record_reminder_run(%s): Redis write failed: %s", job, exc)
 
 
 @celery_app.task(name="monitoring.heartbeat", ignore_result=True)
