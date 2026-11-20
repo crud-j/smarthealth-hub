@@ -1328,15 +1328,12 @@ async def get_bulk_health_card_status(
     response_model=CardGenerateResponse,
     summary="Generate health card (QR + NFC payload) for a patient",
     description=(
-        "Issues a new active health card row synchronously (idempotent — returns "
-        "the existing active card if one already exists, replacing any PENDING- "
-        "placeholder with a real BHC-YEAR-XXXXXX number immediately).  "
-        "After the card row is committed, WeasyPrint PDF rendering is dispatched "
-        "to a Celery background task asynchronously — the endpoint does NOT wait "
-        "for the PDF.  "
-        "The response includes the real card_number, qr_data_uri, and nfc_payload "
-        "immediately so the frontend can display the card and offer a Download PDF "
-        "button that polls GET /health-cards/generation-status/{card_id}.  "
+        "Issues a new active health card row (idempotent — returns the existing "
+        "active card if one already exists, replacing any PENDING- placeholder "
+        "with a real BHC-YEAR-XXXXXX number immediately).  "
+        "No PDF is rendered or stored: GET /health-cards/{patient_id}/pdf renders "
+        "it on demand (login required), so the card is 'ready' at once.  "
+        "The response includes the real card_number, qr_data_uri, and nfc_payload.  "
         "Requires BHW role or above."
     ),
     dependencies=[_BHW_PLUS],
@@ -1359,49 +1356,18 @@ async def generate_health_card(
     card_dict = result["card"]
     card_id: str = card_dict["id"]  # type: ignore[assignment]
 
-    # 2. Reset generation_status to "pending" on the card row so the status
-    #    endpoint reflects the async PDF-dispatch state correctly.
+    # 2. The PDF is rendered on demand by GET /health-cards/{patient_id}/pdf, so
+    #    the card can be downloaded right away.  Nothing is written to disk: a
+    #    Celery task used to store media/health_cards/<card_id>.pdf (patient data
+    #    on disk and in every backup, served by nothing).
     card_result = await db.execute(select(HealthCard).where(HealthCard.id == uuid.UUID(card_id)))
     card: HealthCard | None = card_result.scalar_one_or_none()
-    if card is not None:
-        card.generation_status = "pending"
+    if card is not None and (card.generation_status != "ready" or card.pdf_url is not None):
+        card.generation_status = "ready"
         card.pdf_url = None
         await db.commit()
 
-    # 3. Dispatch the PDF generation task to Celery (fire-and-forget).
-    #    If Celery is unavailable the task dispatch raises; we catch and log
-    #    but still return 200 with the card data — PDF can be generated later
-    #    via GET /health-cards/{patient_id}/pdf which renders synchronously.
-    try:
-        from app.workers.health_card_tasks import generate_health_card_pdf_task  # noqa: PLC0415
-
-        task = generate_health_card_pdf_task.delay(str(patient_id), card_id)
-        logger.info(
-            "Health card PDF generation dispatched to Celery",
-            extra={"patient_id": str(patient_id), "card_id": card_id, "task_id": task.id},
-        )
-    except Exception as celery_exc:  # noqa: BLE001
-        # Celery is likely not running — log a warning but do NOT fail the request.
-        # The card row is committed with a real card_number; PDF can be generated
-        # on-demand via GET /health-cards/{patient_id}/pdf.
-        logger.warning(
-            "Health card PDF task could not be dispatched to Celery — Celery may not be running. "
-            "PDF will be generated on-demand via the /pdf endpoint.",
-            extra={
-                "patient_id": str(patient_id),
-                "card_id": card_id,
-                "error": str(celery_exc),
-            },
-        )
-        # Mark generation_status as failed so the UI can fall back to /pdf.
-        if card is not None:
-            try:
-                card.generation_status = "failed"
-                await db.commit()
-            except Exception:  # noqa: BLE001
-                pass
-
-    # 4. Return the card data with real card_number immediately (HTTP 200).
+    # 3. Return the card data with real card_number immediately.
     return CardGenerateResponse(
         card=HealthCardResponse(**card_dict, qr_data_uri=result["qr_data_uri"]),
         signed_url=result["signed_url"],
@@ -1423,11 +1389,12 @@ async def generate_health_card(
 @router.get(
     "/health-cards/generation-status/{card_id}",
     response_model=CardGenerationStatus,
-    summary="Poll async health card PDF generation status",
+    summary="Health card PDF status (always 'ready' for new cards)",
     description=(
-        "Returns the current generation_status for a health card: "
-        "'pending' (queued/rendering), 'ready' (PDF on disk — pdf_url is set), "
-        "or 'failed' (error — retry by calling POST .../generate again).  "
+        "Returns the generation_status of a health card.  Card PDFs are rendered "
+        "on demand by GET /health-cards/{patient_id}/pdf, so cards are 'ready' "
+        "as soon as POST .../generate returns and pdf_url is always null.  "
+        "Kept for API compatibility with clients that poll after generating.  "
         "No audit log written — this is a non-PHI status check."
     ),
 )

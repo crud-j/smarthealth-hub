@@ -241,41 +241,21 @@ class PatientVerifySummaryFull(PatientVerifySummary):
     )
 
 
-class CardGenerationAccepted(BaseSchema):
-    """
-    Returned by POST /health-cards/{patient_id}/generate when the PDF
-    generation task is dispatched to Celery (HTTP 202 Accepted).
-
-    The caller should poll GET /health-cards/generation-status/{card_id}
-    until status transitions to "ready" or "failed".
-    """
-
-    card_id: str = Field(description="UUID of the newly created or existing HealthCard row.")
-    task_id: str = Field(
-        description="Celery task ID — for monitoring via Flower or the status endpoint."
-    )
-    status: str = Field(default="pending", description="Always 'pending' at dispatch time.")
-
-
 class CardGenerationStatus(BaseSchema):
     """
     Returned by GET /health-cards/generation-status/{card_id}.
 
-    status values:
-      "pending" — task queued or in progress.
-      "ready"   — PDF is on disk; pdf_url points to the relative file path.
-      "failed"  — PDF generation failed; retry by calling generate again.
+    Card PDFs are rendered on demand by GET /health-cards/{patient_id}/pdf
+    (login required) and never stored, so ``status`` is "ready" and
+    ``pdf_url`` is null.  The shape is kept for clients that poll after
+    generating.
     """
 
     card_id: str = Field(description="UUID of the HealthCard row.")
-    status: str = Field(description="'pending' | 'ready' | 'failed'")
+    status: str = Field(description="'ready' (legacy rows may say 'pending' or 'failed')")
     pdf_url: str | None = Field(
         None,
-        description=(
-            "Relative path to the rendered PDF (e.g. 'health_cards/<card_id>.pdf'). "
-            "Populated only when status='ready'.  Prefix with the API host to "
-            "form an absolute download URL."
-        ),
+        description="Always null: PDFs are not stored. Download via GET .../pdf.",
     )
 
 

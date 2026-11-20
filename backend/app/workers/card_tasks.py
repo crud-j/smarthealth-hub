@@ -24,7 +24,8 @@ Security note:
   Task arguments contain ONLY UUIDs — no PHI is placed in Celery task args.
   Redis values are short status strings — no PHI is stored in Redis.
 
-Pattern mirrors health_card_tasks.py:
+Creates card rows only; no PDF is rendered or stored (GET .../pdf renders
+on demand).  Pattern mirrors registration_tasks.py:
   - CelerySessionLocal for a fresh async session per task invocation.
   - asyncio.run() for the event-loop-per-task model required by Celery.
   - Late-ack (acks_late=True) so a worker crash re-queues the task.
