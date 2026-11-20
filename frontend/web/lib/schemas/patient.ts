@@ -151,13 +151,75 @@ export const patientCreateSchema = z.object({
 export type PatientCreateFormValues = z.infer<typeof patientCreateSchema>;
 
 /**
- * Edit form schema — same constraints but all fields optional except the
- * core required ones (first_name, last_name, birth_date, sex, address).
- * We reuse patientCreateSchema for the edit form via reset() since the edit
- * form enforces the same required fields.
+ * The address the backend will store, mirroring
+ * `patient_service._compose_address`: the structured parts joined with ", "
+ * when any of them is filled, otherwise the free-text address.
  */
-export const patientUpdateSchema = patientCreateSchema;
-export type PatientUpdateFormValues = PatientCreateFormValues;
+export function effectiveAddress(parts: {
+  address?: string | null;
+  sitioPurok?: string | null;
+  barangay?: string | null;
+  municipality?: string | null;
+  province?: string | null;
+}): string {
+  const structured = [parts.sitioPurok, parts.barangay, parts.municipality, parts.province]
+    .map((p) => p?.trim() ?? "")
+    .filter(Boolean);
+  if (structured.length > 0) return structured.join(", ");
+  return parts.address?.trim() ?? "";
+}
+
+/**
+ * Edit Patient form schema: only the fields the edit page shows.
+ *
+ * It must NOT be patientCreateSchema: registration requires fields the edit
+ * page does not have (data privacy consent, ...), and older patients have no
+ * structured address or emergency contact. Validation then failed on hidden
+ * fields and "Save Changes" silently did nothing.
+ */
+export const patientUpdateSchema = patientCreateSchema
+  .pick({
+    firstName: true,
+    middleName: true,
+    lastName: true,
+    birthDate: true,
+    sex: true,
+    civilStatus: true,
+    bloodType: true,
+    philhealthNo: true,
+    philhealthMemberType: true,
+    mobileNumber: true,
+    sitioPurok: true,
+    guardianName: true,
+    guardianContact: true,
+    isPwd: true,
+    isPregnant: true,
+    allergies: true,
+    knownConditions: true,
+  })
+  .extend({
+    // Optional on edit: older patients only have the free-text address.
+    barangay: z.string().max(150).optional().nullable(),
+    municipality: z.string().max(150).optional().nullable(),
+    province: z.string().max(150).optional().nullable(),
+    address: z.string().max(500).optional().nullable(),
+    // Optional on edit: older patients have no emergency contact on record.
+    emergencyContactName: z.string().max(150).optional().nullable(),
+    emergencyContactNumber: z
+      .union([phMobileValidator("Emergency contact number"), z.literal("")])
+      .optional()
+      .nullable(),
+  })
+  .superRefine((data, ctx) => {
+    if (!effectiveAddress(data)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["address"],
+        message: "Enter the barangay, municipality and province, or a complete address.",
+      });
+    }
+  });
+export type PatientUpdateFormValues = z.infer<typeof patientUpdateSchema>;
 
 /**
  * Intake schema — used by the patient self-entry pre-visit form.

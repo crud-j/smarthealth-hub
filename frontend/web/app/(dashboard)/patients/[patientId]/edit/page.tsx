@@ -3,12 +3,12 @@
 import { use, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { useForm, Controller } from "react-hook-form";
+import { useForm, Controller, type FieldErrors } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { usePatient, useUpdatePatient } from "@/hooks/usePatients";
 import { useCurrentUser } from "@/hooks/useAuth";
 import { toast } from "@/lib/toast";
-import { patientUpdateSchema, type PatientUpdateFormValues } from "@/lib/schemas/patient";
+import { effectiveAddress, patientUpdateSchema, type PatientUpdateFormValues } from "@/lib/schemas/patient";
 import { textFieldChange } from "@/lib/text-field-change";
 
 // ---------------------------------------------------------------------------
@@ -24,6 +24,15 @@ function computeAge(birthDateStr: string): number {
   if (m < 0 || (m === 0 && today.getDate() < bd.getDate())) age--;
   return Math.max(0, age);
 }
+
+// Labels for the "please check" message when validation blocks saving.
+const FIELD_LABELS: Partial<Record<keyof PatientUpdateFormValues, string>> = {
+  firstName: "First Name", lastName: "Last Name", birthDate: "Birthday", sex: "Sex",
+  mobileNumber: "Contact No.", address: "Address", barangay: "Barangay",
+  municipality: "Municipality", province: "Province",
+  emergencyContactName: "Emergency Contact Name", emergencyContactNumber: "Emergency Contact No.",
+  guardianContact: "Guardian Contact No.", allergies: "Allergies", knownConditions: "Known Conditions",
+};
 
 // Shared classes
 const inputCls = "w-full rounded-lg border border-[#e5d4cc] bg-white px-3 py-2 text-sm text-[#1a0808] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e]";
@@ -84,7 +93,7 @@ export default function PatientEditPage({ params }: { params: Promise<{ patientI
   const { register, handleSubmit, control, watch, reset, formState: { errors } } = useForm<PatientUpdateFormValues>({
     resolver: zodResolver(patientUpdateSchema),
     mode: "onBlur",
-    defaultValues: { isPwd: false, isPregnant: false, confirmDuplicate: false, sex: undefined, philhealthMemberType: null, bloodType: null },
+    defaultValues: { isPwd: false, isPregnant: false, sex: undefined, philhealthMemberType: null, bloodType: null },
   });
 
   useEffect(() => {
@@ -93,12 +102,16 @@ export default function PatientEditPage({ params }: { params: Promise<{ patientI
         firstName: patient.firstName, middleName: patient.middleName ?? null,
         lastName: patient.lastName, birthDate: patient.birthDate, sex: patient.sex,
         civilStatus: patient.civilStatus ?? null, mobileNumber: patient.mobileNumber ?? null,
-        address: patient.address, guardianName: patient.guardianName ?? null,
+        address: patient.address,
+        sitioPurok: patient.sitioPurok ?? "", barangay: patient.barangay ?? "",
+        municipality: patient.municipality ?? "", province: patient.province ?? "",
+        emergencyContactName: patient.emergencyContactName ?? "",
+        emergencyContactNumber: patient.emergencyContactNumber ?? "",
+        guardianName: patient.guardianName ?? null,
         guardianContact: patient.guardianContact ?? null, philhealthNo: patient.philhealthNo ?? null,
         philhealthMemberType: patient.philhealthMemberType ?? null, isPwd: patient.isPwd,
         isPregnant: patient.isPregnant, bloodType: (patient.bloodType as PatientUpdateFormValues["bloodType"]) ?? null,
         allergies: patient.allergies ?? "", knownConditions: patient.knownConditions ?? "",
-        confirmDuplicate: false,
       });
     }
   }, [patient, reset]);
@@ -106,13 +119,31 @@ export default function PatientEditPage({ params }: { params: Promise<{ patientI
   const birthDateValue = watch("birthDate") ?? "";
   const philhealthMemberTypeValue = watch("philhealthMemberType");
   const age = computeAge(birthDateValue);
+  // What the backend will store as the address (structured parts win over free text).
+  const addressPreview = effectiveAddress({
+    address: watch("address"), sitioPurok: watch("sitioPurok"), barangay: watch("barangay"),
+    municipality: watch("municipality"), province: watch("province"),
+  });
+
+  // Never fail silently again: name the fields that block saving.
+  const onInvalid = (formErrors: FieldErrors<PatientUpdateFormValues>) => {
+    const fields = Object.keys(formErrors).map(
+      (key) => FIELD_LABELS[key as keyof PatientUpdateFormValues] ?? key,
+    );
+    toast.error(`Please check: ${fields.join(", ")}.`);
+  };
 
   const onSubmit = async (data: PatientUpdateFormValues) => {
     const payload = {
       firstName: data.firstName.trim(), middleName: data.middleName?.trim() || undefined,
       lastName: data.lastName.trim(), birthDate: data.birthDate, sex: data.sex,
       civilStatus: data.civilStatus?.trim() || undefined, mobileNumber: data.mobileNumber?.trim() || undefined,
-      address: data.address.trim(), guardianName: data.guardianName?.trim() || undefined,
+      address: data.address?.trim() || undefined,
+      sitioPurok: data.sitioPurok?.trim() || undefined, barangay: data.barangay?.trim() || undefined,
+      municipality: data.municipality?.trim() || undefined, province: data.province?.trim() || undefined,
+      emergencyContactName: data.emergencyContactName?.trim() || undefined,
+      emergencyContactNumber: data.emergencyContactNumber?.trim() || undefined,
+      guardianName: data.guardianName?.trim() || undefined,
       guardianContact: data.guardianContact?.trim() || undefined,
       philhealthNo: data.philhealthNo?.trim() || undefined,
       philhealthMemberType: data.philhealthMemberType ?? undefined,
@@ -165,7 +196,7 @@ export default function PatientEditPage({ params }: { params: Promise<{ patientI
         <p className="mt-1 font-mono text-sm text-[#9b6e6e]">{patient.patientCode}</p>
       </div>
 
-      <form onSubmit={(e) => void handleSubmit(onSubmit)(e)} noValidate>
+      <form onSubmit={(e) => void handleSubmit(onSubmit, onInvalid)(e)} noValidate>
 
         {/* Name */}
         <SectionPanel title="Patient's Full Name">
@@ -310,24 +341,67 @@ export default function PatientEditPage({ params }: { params: Promise<{ patientI
             {errors.mobileNumber && <p className={errorCls}>{errors.mobileNumber.message}</p>}
             <p className="mt-1 text-xs text-[#9b6e6e]">Used for appointment reminders and SMS notifications</p>
           </div>
+          <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-4">
+            <div>
+              <label className={labelCls} htmlFor="sitioPurok">Sitio / Purok</label>
+              <input id="sitioPurok" type="text" {...register("sitioPurok")} className={inputCls} placeholder="Optional" />
+            </div>
+            <div>
+              <label className={labelCls} htmlFor="barangay">Barangay</label>
+              <input id="barangay" type="text" {...register("barangay")}
+                className={`${inputCls} ${errors.barangay ? "border-[#fca5a5]" : ""}`} />
+            </div>
+            <div>
+              <label className={labelCls} htmlFor="municipality">Municipality</label>
+              <input id="municipality" type="text" {...register("municipality")}
+                className={`${inputCls} ${errors.municipality ? "border-[#fca5a5]" : ""}`} />
+            </div>
+            <div>
+              <label className={labelCls} htmlFor="province">Province</label>
+              <input id="province" type="text" {...register("province")}
+                className={`${inputCls} ${errors.province ? "border-[#fca5a5]" : ""}`} />
+            </div>
+          </div>
           <div>
-            <label className={labelCls} htmlFor="address">Complete Address <span className="text-[#dc2626]">*</span></label>
-            <textarea id="address" rows={3} {...register("address")}
+            <label className={labelCls} htmlFor="address">Complete Address</label>
+            <textarea id="address" rows={2} {...register("address")}
               className={`${inputCls} resize-y ${errors.address ? "border-[#fca5a5]" : ""}`}
-              placeholder="House No., Street, Barangay, Municipality, Province" />
+              placeholder="Only used when Sitio / Barangay / Municipality / Province are all empty" />
             {errors.address && <p className={errorCls}>{errors.address.message}</p>}
+            <p className="mt-1 text-xs text-[#9b6e6e]">
+              Address after saving (printed on the health card): <strong>{addressPreview || "—"}</strong>
+            </p>
           </div>
         </SectionPanel>
 
-        {/* Emergency Contact */}
+        {/* Emergency Contact — printed on the health card and NFC view */}
         <SectionPanel title="Emergency Contact">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <label className={labelCls} htmlFor="guardianName">Contact Name</label>
-              <input id="guardianName" type="text" {...register("guardianName")} className={inputCls} placeholder="Full name of emergency contact" />
+              <label className={labelCls} htmlFor="emergencyContactName">Emergency Contact Name</label>
+              <input id="emergencyContactName" type="text" {...register("emergencyContactName")}
+                className={`${inputCls} ${errors.emergencyContactName ? "border-[#fca5a5]" : ""}`}
+                placeholder="Full name of emergency contact" />
+              {errors.emergencyContactName && <p className={errorCls}>{errors.emergencyContactName.message}</p>}
             </div>
             <div>
-              <label className={labelCls} htmlFor="guardianContact">Contact No.</label>
+              <label className={labelCls} htmlFor="emergencyContactNumber">Emergency Contact No.</label>
+              <input id="emergencyContactNumber" type="tel" {...register("emergencyContactNumber")}
+                className={`${inputCls} ${errors.emergencyContactNumber ? "border-[#fca5a5]" : ""}`} placeholder="e.g. 09171234567" />
+              {errors.emergencyContactNumber && <p className={errorCls}>{errors.emergencyContactNumber.message}</p>}
+            </div>
+          </div>
+        </SectionPanel>
+
+        {/* Guardian — for minors, seniors and PWD (separate from the emergency contact) */}
+        <SectionPanel title="Guardian">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className={labelCls} htmlFor="guardianName">Guardian Name</label>
+              <input id="guardianName" type="text" {...register("guardianName")} className={inputCls} placeholder="Optional" />
+            </div>
+            <div>
+              <label className={labelCls} htmlFor="guardianContact">Guardian Contact No.</label>
               <input id="guardianContact" type="tel" {...register("guardianContact")}
                 className={`${inputCls} ${errors.guardianContact ? "border-[#fca5a5]" : ""}`} placeholder="e.g. 09171234567" />
               {errors.guardianContact && <p className={errorCls}>{errors.guardianContact.message}</p>}
