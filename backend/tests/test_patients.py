@@ -38,6 +38,7 @@ from app.core.security import create_access_token, hash_password
 from app.models.audit_log import AuditLog
 from app.models.patient import Patient
 from app.models.user import Role, User
+from app.utils.encryption import decrypt_text
 
 
 # ---------------------------------------------------------------------------
@@ -625,6 +626,112 @@ async def test_update_patient_writes_audit_log(
     )
     logs = result.scalars().all()
     assert len(logs) >= 1
+
+
+# ── Allergies / known conditions editing (encrypted, clearable) ────────────
+
+
+async def _put(
+    client: AsyncClient, patient_id: uuid.UUID, token: str, body: dict[str, object]
+) -> dict[str, object]:
+    resp = await client.put(
+        patient_url(patient_id),
+        json=body,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+async def test_update_patient_allergies_stored_encrypted_returned_decrypted(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    sample_patient: Patient,
+    bhw_user: tuple[User, str],
+) -> None:
+    """Editing allergies encrypts the column and the response shows plain text."""
+    _, token = bhw_user
+    data = await _put(
+        client,
+        sample_patient.id,
+        token,
+        {"allergies": "Penicillin, Shrimp", "known_conditions": "Asthma"},
+    )
+
+    assert data["allergies"] == "Penicillin, Shrimp"
+    assert data["known_conditions"] == "Asthma"
+
+    await db_session.refresh(sample_patient)
+    assert sample_patient.allergies != "Penicillin, Shrimp"
+    assert decrypt_text(sample_patient.allergies or "") == "Penicillin, Shrimp"
+    assert sample_patient.known_conditions != "Asthma"
+    assert decrypt_text(sample_patient.known_conditions or "") == "Asthma"
+
+
+@pytest.mark.parametrize("cleared_value", [None, "", "   "])
+async def test_update_patient_allergies_can_be_cleared(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    sample_patient: Patient,
+    bhw_user: tuple[User, str],
+    cleared_value: str | None,
+) -> None:
+    """Sending null / empty text for allergies removes them (not ignored)."""
+    _, token = bhw_user
+    await _put(
+        client, sample_patient.id, token, {"allergies": "Penicillin", "known_conditions": "Asthma"}
+    )
+
+    data = await _put(
+        client,
+        sample_patient.id,
+        token,
+        {"allergies": cleared_value, "known_conditions": cleared_value},
+    )
+
+    assert data["allergies"] is None
+    assert data["known_conditions"] is None
+    await db_session.refresh(sample_patient)
+    assert sample_patient.allergies is None
+    assert sample_patient.known_conditions is None
+
+
+async def test_update_patient_omitting_allergies_keeps_them(
+    client: AsyncClient,
+    sample_patient: Patient,
+    bhw_user: tuple[User, str],
+) -> None:
+    """A PUT that does not mention allergies must leave them unchanged."""
+    _, token = bhw_user
+    await _put(client, sample_patient.id, token, {"allergies": "Penicillin"})
+
+    data = await _put(client, sample_patient.id, token, {"first_name": "Maricel"})
+
+    assert data["allergies"] == "Penicillin"
+
+
+async def test_update_patient_allergies_audit_log_has_field_name_not_value(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    sample_patient: Patient,
+    bhw_user: tuple[User, str],
+) -> None:
+    """The UPDATE audit row lists 'allergies' as changed but never the allergy text."""
+    _, token = bhw_user
+    await _put(client, sample_patient.id, token, {"allergies": "Penicillin"})
+    await _put(client, sample_patient.id, token, {"allergies": None})
+
+    result = await db_session.execute(
+        select(AuditLog).where(
+            AuditLog.entity_id == sample_patient.id,
+            AuditLog.action == "UPDATE",
+        )
+    )
+    logs = result.scalars().all()
+    assert len(logs) == 2
+    for log in logs:
+        assert "allergies" in str(log.metadata_)
+        assert "Penicillin" not in str(log.metadata_)
 
 
 async def test_update_patient_unauthenticated_returns_401(

@@ -115,6 +115,10 @@ def _compose_address(
     return cleaned_address or ""
 
 
+# Encrypted free-text fields that a PUT may clear by sending null or "".
+_CLEARABLE_TEXT_FIELDS: frozenset[str] = frozenset({"allergies", "known_conditions"})
+
+
 def _encrypt_optional_text(value: str | None) -> str | None:
     cleaned = _clean_text(value)
     if cleaned is None:
@@ -408,7 +412,8 @@ async def update_patient(
     """
     Partial-update patient demographics.
 
-    Only fields explicitly set in ``data`` (i.e. not None) are updated.
+    Only fields explicitly set in ``data`` (i.e. not None) are updated, except
+    ``allergies`` / ``known_conditions``: sending them as null or "" clears them.
     ``is_senior`` is re-computed if ``birth_date`` is changed.
 
     Raises:
@@ -428,6 +433,14 @@ async def update_patient(
             stored_value = value
         update_fields[field] = stored_value
         setattr(patient, field, stored_value)
+
+    # The loop above skips None, so "not sent" and "cleared" look alike there.
+    # For these free-text fields an explicit null / empty value (the schema
+    # strips "" to None) means "remove it", e.g. an allergy entered by mistake.
+    for field in _CLEARABLE_TEXT_FIELDS & data.model_fields_set:
+        if getattr(data, field) is None and getattr(patient, field) is not None:
+            update_fields[field] = None
+            setattr(patient, field, None)
 
     if any(
         field in update_fields

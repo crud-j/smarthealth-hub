@@ -9,6 +9,7 @@ import { usePatient, useUpdatePatient } from "@/hooks/usePatients";
 import { useCurrentUser } from "@/hooks/useAuth";
 import { toast } from "@/lib/toast";
 import { patientUpdateSchema, type PatientUpdateFormValues } from "@/lib/schemas/patient";
+import { textFieldChange } from "@/lib/text-field-change";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -96,6 +97,7 @@ export default function PatientEditPage({ params }: { params: Promise<{ patientI
         guardianContact: patient.guardianContact ?? null, philhealthNo: patient.philhealthNo ?? null,
         philhealthMemberType: patient.philhealthMemberType ?? null, isPwd: patient.isPwd,
         isPregnant: patient.isPregnant, bloodType: (patient.bloodType as PatientUpdateFormValues["bloodType"]) ?? null,
+        allergies: patient.allergies ?? "", knownConditions: patient.knownConditions ?? "",
         confirmDuplicate: false,
       });
     }
@@ -117,6 +119,9 @@ export default function PatientEditPage({ params }: { params: Promise<{ patientI
       isPwd: isAdmin ? (data.isPwd ?? false) : (patient?.isPwd ?? false),
       isPregnant: isAdmin ? (data.isPregnant ?? false) : (patient?.isPregnant ?? false),
       bloodType: data.bloodType ?? null,
+      // Sent only when edited; an emptied field is sent as null so the backend clears it.
+      allergies: textFieldChange(patient?.allergies, data.allergies),
+      knownConditions: textFieldChange(patient?.knownConditions, data.knownConditions),
     };
     const updated = await updatePatient(payload);
     if (!updated) { toast.error(saveError?.message ?? "Failed to save patient record."); return; }
@@ -240,6 +245,29 @@ export default function PatientEditPage({ params }: { params: Promise<{ patientI
                 <option value="">— Unknown —</option>
                 {["A+","A-","B+","B-","AB+","AB-","O+","O-","Unknown"].map((bt) => <option key={bt} value={bt}>{bt}</option>)}
               </select>
+            </div>
+          </div>
+        </SectionPanel>
+
+        {/* Allergies + known conditions (encrypted at rest; shown on the health card and NFC view) */}
+        <SectionPanel title="Allergies & Conditions">
+          <div className="grid gap-4">
+            <div>
+              <label className={labelCls} htmlFor="allergies">Allergies</label>
+              <textarea id="allergies" rows={3} {...register("allergies")}
+                className={`${inputCls} resize-y ${errors.allergies ? "border-[#fca5a5]" : ""}`}
+                placeholder="Drug, food, or environmental allergies" />
+              {errors.allergies && <p className={errorCls}>{errors.allergies.message}</p>}
+              <p className="mt-1 text-xs text-[#9b6e6e]">
+                Printed on the health card and shown when the NFC card is tapped. Leave empty if none.
+              </p>
+            </div>
+            <div>
+              <label className={labelCls} htmlFor="knownConditions">Known Conditions</label>
+              <textarea id="knownConditions" rows={3} {...register("knownConditions")}
+                className={`${inputCls} resize-y ${errors.knownConditions ? "border-[#fca5a5]" : ""}`}
+                placeholder="Chronic conditions, special notes, or relevant history" />
+              {errors.knownConditions && <p className={errorCls}>{errors.knownConditions.message}</p>}
             </div>
           </div>
         </SectionPanel>

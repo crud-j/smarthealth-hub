@@ -79,9 +79,11 @@ from app.schemas.health_card import (
 )
 from app.services import card_generation_service, nfc_payload_service, qr_service
 from app.services.audit_service import write_audit_log
+from app.services.card_generation_service import NO_ALLERGIES_TEXT as _NO_ALLERGIES_TEXT
+from app.services.card_generation_service import card_allergies as _card_allergies
 from app.services.card_generation_service import get_bulk_card_status
+from app.services.card_generation_service import patient_allergies as _patient_allergies
 from app.services.patient_service import get_patient
-from app.utils.encryption import decrypt_text
 
 logger = get_logger(__name__)
 
@@ -207,35 +209,6 @@ def _esc(value: object) -> str:
     import html as _html  # noqa: PLC0415
 
     return _html.escape(str(value)) if value is not None else ""
-
-
-def _patient_allergies(patient: Patient) -> str | None:
-    """
-    Return the patient's allergies as readable text, or ``None`` if not recorded.
-
-    ``patients.allergies`` is stored AES-256-GCM encrypted (patient_service
-    encrypts it on every write), so it must be decrypted before display.
-    ``decrypt_text`` returns legacy plaintext values unchanged.
-    """
-    if not patient.allergies:
-        return None
-    return decrypt_text(patient.allergies) or None
-
-
-# Shown on every card surface when the patient has no allergies recorded.
-# card_back.html and HealthCardPreview.tsx compare against this exact string.
-_NO_ALLERGIES_TEXT = "None on record"
-
-
-def _card_allergies(patient: Patient) -> str:
-    """
-    Allergies text for the card PDF, the UID scan payload and the relay monitor.
-
-    Always ``patients.allergies`` (decrypted), the same source as the NFC tap
-    view, never ``medical_histories.condition_name``: a chronic condition such
-    as hypertension is not an allergy.
-    """
-    return _patient_allergies(patient) or _NO_ALLERGIES_TEXT
 
 
 def _render_nfc_view_html(  # noqa: PLR0912, PLR0915

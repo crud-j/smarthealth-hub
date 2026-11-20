@@ -73,7 +73,7 @@ async def _generate_health_card_pdf_async(
     2. Set generation_status = "pending" and commit so the API status endpoint
        reflects the in-progress state (the endpoint already set this, but this
        makes the task idempotent on retry).
-    3. Fetch the associated Patient with medical_histories loaded.
+    3. Fetch the associated Patient (allergies via card_allergies, decrypted).
     4. Fetch the most-recent Visit for vitals.
     5. Generate QR data URI (deterministic — patient_id + card_version + HMAC).
     6. Resolve the profile photo as a base64 data URI.
@@ -90,10 +90,10 @@ async def _generate_health_card_pdf_async(
     from sqlalchemy import select  # noqa: PLC0415
 
     from app.models.health_card import HealthCard  # noqa: PLC0415
-    from app.models.medical_history import MedicalHistory  # noqa: PLC0415
     from app.models.patient import Patient  # noqa: PLC0415
     from app.models.visit import Visit  # noqa: PLC0415
     from app.services import qr_service  # noqa: PLC0415
+    from app.services.card_generation_service import card_allergies  # noqa: PLC0415
     from app.services.patient_photo_service import get_photo_data_uri  # noqa: PLC0415
     from app.services.pdf_renderer import render_health_card_pdf  # noqa: PLC0415
     from app.workers.db import CelerySessionLocal  # noqa: PLC0415
@@ -113,20 +113,14 @@ async def _generate_health_card_pdf_async(
         await db.commit()
 
         try:
-            # ── 3. Fetch Patient with medical_histories ───────────────────────
+            # ── 3. Fetch Patient ──────────────────────────────────────────────
             patient_result = await db.execute(select(Patient).where(Patient.id == patient_uuid))
             patient: Patient | None = patient_result.scalar_one_or_none()
             if patient is None:
                 raise ValueError(f"Patient {patient_id} not found")
 
-            # Fetch medical history (condition_name only — plain text, not encrypted).
-            mh_result = await db.execute(
-                select(MedicalHistory.condition_name).where(
-                    MedicalHistory.patient_id == patient_uuid
-                )
-            )
-            mh_rows = mh_result.scalars().all()
-            allergies_str = ", ".join(r for r in mh_rows if r) or "None on record"
+            # patients.allergies (decrypted), same source as every other card surface.
+            allergies_str = card_allergies(patient)
 
             # ── 4. Most-recent Visit for vitals ───────────────────────────────
             visit_result = await db.execute(

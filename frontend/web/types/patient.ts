@@ -181,8 +181,9 @@ export interface PatientCreatePayload {
   estimatedDueDate?: string;
   heightCm?: number;
   weightKg?: number;
-  allergies?: string;
-  knownConditions?: string;
+  /** `null` on update clears the stored value (see lib/text-field-change.ts). */
+  allergies?: string | null;
+  knownConditions?: string | null;
   registrationSource?: "walk_in" | "referral" | "outreach" | "others";
   dataPrivacyConsent: boolean;
   /** ABO/Rh blood group. Null / omitted when unknown at registration. */
