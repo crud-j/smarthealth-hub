@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Annotated, Any
@@ -62,14 +63,24 @@ _logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _redis_pool: aioredis.Redis | None = None
+# The event loop the pool was created in (None = created outside a loop).
+_redis_pool_loop: asyncio.AbstractEventLoop | None = None
 
 
 def _get_redis() -> aioredis.Redis:
     """
     Return a lazy-initialised async Redis client backed by a connection pool.
 
-    The first call creates the pool; subsequent calls reuse it.  If Redis is
-    unavailable at call time, the caller catches the ConnectionError.
+    The first call creates the pool; subsequent calls in the same event loop
+    reuse it.  If Redis is unavailable at call time, the caller catches the
+    ConnectionError.
+
+    One pool per running event loop: redis.asyncio connections are bound to
+    the loop that opened them. The API has one loop per worker, so in
+    production this is a single pool; but pytest (a new loop per test) and
+    Celery tasks (``asyncio.run`` per task) change loops, and a pool from a
+    finished loop fails every call ("Event loop is closed") — which made the
+    fail-open Redis checks silently do nothing in tests.
 
     Explicit socket timeouts are required here: without them a stalled
     connection (e.g. a Docker Desktop port-forward that accepted the TCP
@@ -79,8 +90,13 @@ def _get_redis() -> aioredis.Redis:
     point of the try/except graceful-degradation around every caller is
     defeated if the call itself has no ceiling on how long it can hang.
     """
-    global _redis_pool
-    if _redis_pool is None:
+    global _redis_pool, _redis_pool_loop
+    try:
+        loop: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if _redis_pool is None or _redis_pool_loop is not loop:
+        _redis_pool_loop = loop
         _redis_pool = aioredis.from_url(
             settings.REDIS_URL,
             encoding="utf-8",
@@ -130,7 +146,7 @@ async def revoke_token(jti: str, ttl_seconds: int) -> None:
         return  # token is already expired — nothing to revoke
     try:
         r = _get_redis()
-        await r.setex(f"revoked:jti:{jti}", ttl_seconds, "1")
+        await r.set(f"revoked:jti:{jti}", "1", ex=ttl_seconds)
     except (Exception, asyncio.CancelledError) as exc:  # noqa: BLE001
         # asyncio.CancelledError is BaseException in Python 3.8+ — catch explicitly
         # so a Windows-side TCP reset (error 10054) on the Redis connection never
@@ -174,26 +190,61 @@ async def is_token_revoked(jti: str) -> bool:
 
 async def revoke_all_user_tokens(user_id: str) -> None:
     """
-    Best-effort: set a Redis marker that signals all tokens for ``user_id``
-    issued before now should be treated as revoked.
+    Best-effort "sign out everywhere": every access token for ``user_id``
+    issued in an earlier second than now is rejected by ``get_current_user``.
 
-    Because we do not maintain a per-user token index, this sets a
-    ``revoked:user:{user_id}`` key that ``is_token_revoked`` could check
-    in addition to the per-JTI key.  Short-lived access tokens (8 h) and
-    7-day refresh tokens mean the window of exposure is bounded.
+    Stores the revocation time (Unix seconds) in ``revoked:user:{user_id}``
+    for the longest token lifetime (the refresh-token lifetime). Callers must
+    also clear ``users.refresh_token_hash`` in the DB — that part does not
+    depend on Redis, so even during a Redis outage a signed-out user loses
+    access when their current access token expires.
 
     On Redis error: logs a WARNING and returns — best-effort only.
     """
     try:
         r = _get_redis()
-        # Keep the marker for 7 days (longest possible token lifetime).
-        await r.setex(f"revoked:user:{user_id}", 7 * 24 * 3600, "1")
+        ttl = settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600
+        await r.set(f"revoked:user:{user_id}", str(int(time.time())), ex=ttl)
     except (Exception, asyncio.CancelledError) as exc:  # noqa: BLE001
         _logger.warning(
             "revoke_all_user_tokens: Redis unavailable — tokens for user %s not revoked. Error: %s",
             user_id,
             exc,
         )
+
+
+async def is_user_session_revoked(user_id: str, issued_at: int) -> bool:
+    """
+    True if ``revoke_all_user_tokens(user_id)`` ran after a token issued at
+    ``issued_at`` (JWT ``iat``, Unix seconds).
+
+    ``iat`` has one-second precision, so a token issued in the same second
+    as the revocation is still accepted; the user must have logged in before
+    the admin's click for it to be cut off, which is the case this is for.
+
+    On Redis error: logs a WARNING and returns ``False`` (fail open, like
+    ``is_token_revoked``). A marker that is not a number (written by older
+    code as "1") is ignored.
+    """
+    try:
+        r = _get_redis()
+        value = await r.get(f"revoked:user:{user_id}")
+    except (Exception, asyncio.CancelledError) as exc:  # noqa: BLE001
+        _logger.warning(
+            "is_user_session_revoked: Redis unavailable — allowing token for user %s. Error: %s",
+            user_id,
+            exc,
+        )
+        return False
+    if value is None:
+        return False
+    try:
+        revoked_at = int(value)
+    except (TypeError, ValueError):
+        return False
+    if revoked_at < 1_000_000_000:  # legacy "1" marker, not a timestamp
+        return False
+    return issued_at < revoked_at
 
 
 # ---------------------------------------------------------------------------
@@ -432,6 +483,11 @@ async def get_current_user(
     jti: str | None = payload.get("jti")
     if jti and await is_token_revoked(jti):
         raise UnauthorizedError("Token has been revoked. Please log in again.")
+
+    # "Sign out everywhere" (admin action or password reset).
+    issued_at = payload.get("iat")
+    if isinstance(issued_at, int) and await is_user_session_revoked(subject, issued_at):
+        raise UnauthorizedError("You were signed out by an administrator. Please log in again.")
 
     # Load user with role relationship in one query (avoids lazy-load error in async).
     result = await db.execute(

@@ -79,6 +79,22 @@ def _test_database_url(base_url: str) -> str:
 _TEST_DATABASE_URL = _test_database_url(settings.DATABASE_URL)
 settings.DATABASE_URL = _TEST_DATABASE_URL
 
+# Tests use their own Redis database (index 15), flushed before every test by
+# ``_clean_redis``, so they never touch the app's data in DB 0 and one test's
+# cached values (analytics overview, NFC last scan, rate-limit counts,
+# revocation markers) can never leak into the next test.
+_TEST_REDIS_DB = 15
+
+
+def _test_redis_url(base_url: str) -> str:
+    """Point ``base_url`` at the test Redis database (the URL path is the DB index)."""
+    from urllib.parse import urlsplit, urlunsplit
+
+    return urlunsplit(urlsplit(base_url)._replace(path=f"/{_TEST_REDIS_DB}"))
+
+
+settings.REDIS_URL = _test_redis_url(settings.REDIS_URL)
+
 from app.db.session import get_db
 from app.main import app
 from app.workers.db import set_test_session
@@ -107,6 +123,29 @@ async def engine():
     )
     yield test_engine
     await test_engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# Redis isolation
+# ---------------------------------------------------------------------------
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _clean_redis():
+    """
+    Start every test with an empty test Redis database (see _TEST_REDIS_DB).
+
+    Runs in the test's own event loop, so it uses that loop's Redis pool. If
+    Redis is not running (a local run without Docker), Redis-backed features
+    fail open exactly as in production and the test still runs.
+    """
+    from app.core.security import get_shared_redis
+
+    try:
+        await get_shared_redis().flushdb()
+    except Exception:  # noqa: BLE001
+        pass
+    yield
 
 
 # ---------------------------------------------------------------------------

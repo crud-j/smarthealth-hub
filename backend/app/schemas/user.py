@@ -10,7 +10,15 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 
 # ---------------------------------------------------------------------------
 # Request schemas
@@ -184,3 +192,38 @@ class PaginatedUsers(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+# ---------------------------------------------------------------------------
+# Admin account-security actions
+# ---------------------------------------------------------------------------
+
+
+class AdminPasswordReset(BaseModel):
+    """
+    Body for POST /users/{id}/reset-password.
+
+    The admin types a temporary password (same rules as changing your own
+    password) and hands it over in person; ``send_sms`` also texts it to the
+    user's registered mobile number. The password is never returned or logged.
+    """
+
+    new_password: SecretStr = Field(..., min_length=8, max_length=128)
+    send_sms: bool = False
+
+    @field_validator("new_password")
+    @classmethod
+    def password_complexity(cls, v: SecretStr) -> SecretStr:
+        raw = v.get_secret_value()
+        if not any(c.isupper() for c in raw):
+            raise ValueError("Password must contain at least one uppercase letter.")
+        if not any(c.isdigit() for c in raw):
+            raise ValueError("Password must contain at least one digit.")
+        return v
+
+
+class AccountActionResult(BaseModel):
+    """Result of an admin account-security action."""
+
+    message: str
+    trusted_devices_removed: int

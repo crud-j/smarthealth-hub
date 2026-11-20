@@ -9,6 +9,10 @@ Routes:
   POST   /users        — Admin only. Create a new staff account.
   PUT    /users/{id}   — Admin only. Update a staff account.
   DELETE /users/{id}   — Admin only. Permanently delete a staff account.
+  POST   /users/{id}/reset-password — Admin only. Set a temporary password
+                                      and sign the account out everywhere.
+  POST   /users/{id}/sign-out       — Admin only. Sign the account out
+                                      everywhere (sessions, remembered devices).
 
 Auth: require_role("admin") on all routes except GET /users/me (CurrentUser)
 and GET /users/roles (CurrentUser).
@@ -25,12 +29,14 @@ import logging
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from app.core.security import CurrentUser, require_role
 from app.db.session import DbDep
 from app.models.user import User
 from app.schemas.user import (
+    AccountActionResult,
+    AdminPasswordReset,
     PaginatedUsers,
     RoleItem,
     UserCreate,
@@ -278,3 +284,83 @@ async def delete_user(
         deleted_by=current_user.id,
     )
     return Response(status_code=204)
+
+
+# ---------------------------------------------------------------------------
+# Admin account-security actions — Admin only
+# ---------------------------------------------------------------------------
+
+_SELF_ACTION_DETAIL = "Use your own Security page to change your password or end your sessions."
+
+
+def _client_ip(request: Request) -> str | None:
+    return request.client.host if request.client else None
+
+
+@router.post(
+    "/{user_id}/reset-password",
+    response_model=AccountActionResult,
+    summary="Set a temporary password and sign the user out (Admin only)",
+)
+async def reset_user_password(
+    user_id: uuid.UUID,
+    body: AdminPasswordReset,
+    request: Request,
+    current_user: Annotated[User, AdminOnly],
+    db: DbDep,
+) -> AccountActionResult:
+    """
+    For a staff member who forgot their password or may have shared it.
+
+    Sets the temporary password the admin typed, ends every session of that
+    account (refresh token, remembered devices, current access tokens) and,
+    if ``send_sms`` is true, texts the password to the user's registered
+    mobile. Audited as PASSWORD_RESET (the password itself is never stored
+    in the audit log or returned).
+    """
+    if user_id == current_user.id:
+        raise HTTPException(status_code=400, detail=_SELF_ACTION_DETAIL)
+
+    removed = await user_service.reset_password(
+        db,
+        user_id,
+        body.new_password.get_secret_value(),
+        send_sms=body.send_sms,
+        reset_by=current_user.id,
+        ip_address=_client_ip(request),
+    )
+    return AccountActionResult(
+        message="Password reset. The user has been signed out everywhere.",
+        trusted_devices_removed=removed,
+    )
+
+
+@router.post(
+    "/{user_id}/sign-out",
+    response_model=AccountActionResult,
+    summary="Sign the user out on every device (Admin only)",
+)
+async def sign_user_out_everywhere(
+    user_id: uuid.UUID,
+    request: Request,
+    current_user: Annotated[User, AdminOnly],
+    db: DbDep,
+) -> AccountActionResult:
+    """
+    For a lost or shared phone/computer: ends every session of the account
+    and forgets its remembered devices, so the next login needs the password
+    and the OTP again. Audited as SESSIONS_REVOKED.
+    """
+    if user_id == current_user.id:
+        raise HTTPException(status_code=400, detail=_SELF_ACTION_DETAIL)
+
+    removed = await user_service.sign_out_everywhere(
+        db,
+        user_id,
+        signed_out_by=current_user.id,
+        ip_address=_client_ip(request),
+    )
+    return AccountActionResult(
+        message="The user has been signed out everywhere.",
+        trusted_devices_removed=removed,
+    )
