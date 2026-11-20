@@ -92,6 +92,51 @@ class VersionInfo(BaseModel):
     environment: str
 
 
+# Reliability (SDP §11.7 — SMS delivery and OTP failure rates). Counts only.
+
+
+class SmsWindow(BaseModel):
+    sent: int = Field(..., description="sent + delivered + replied")
+    failed: int
+    stuck: int = Field(..., description="still 'queued' more than an hour after creation")
+    failure_percent: float | None = Field(default=None, description="failed / (sent + failed)")
+
+
+class SmsReliability(_Check):
+    last_24h: SmsWindow
+    last_7d: SmsWindow
+
+
+class SignInWindow(BaseModel):
+    successful: int = Field(..., description="LOGIN + LOGIN_TRUSTED_DEVICE + PASSKEY_LOGIN")
+    failed_password: int = Field(..., description="LOGIN_FAILED")
+    failed_otp: int = Field(..., description="OTP_FAILED")
+    otp_sent: int
+    otp_verified: int = Field(..., description="LOGIN (always follows a correct OTP)")
+    otp_success_percent: float | None = None
+
+
+class SignInReliability(_Check):
+    last_24h: SignInWindow
+    last_7d: SignInWindow
+
+
+class ReminderRun(BaseModel):
+    job: Literal["appointment", "immunization"]
+    last_run_at: datetime | None = None
+    queued: int | None = Field(default=None, description="SMS queued by that run")
+
+
+class ReminderRuns(_Check):
+    runs: list[ReminderRun]
+
+
+class ReliabilityChecks(BaseModel):
+    sms: SmsReliability
+    sign_in: SignInReliability
+    reminders: ReminderRuns
+
+
 class SystemStatusResponse(BaseModel):
     """Everything the admin needs to answer "is the system working?"."""
 
@@ -105,6 +150,7 @@ class SystemStatusResponse(BaseModel):
     media: MediaCheck
     backup: BackupCheck
     alerts: AlertsCheck
+    reliability: ReliabilityChecks
 
 
 # ---------------------------------------------------------------------------

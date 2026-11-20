@@ -40,6 +40,7 @@ from sqlalchemy.engine import CursorResult
 from app.core.logging import get_logger
 from app.services.system_settings_service import load_runtime_settings
 from app.workers.celery_app import celery_app
+from app.workers.monitoring_tasks import record_reminder_run
 
 logger = get_logger(__name__)
 
@@ -295,6 +296,7 @@ def dispatch_appointment_reminders() -> dict:  # type: ignore[type-arg]
         "dispatch_appointment_reminders: completed",
         extra={"queued_count": queued},
     )
+    record_reminder_run("appointment", queued)  # shown on System Health
     return {"queued_count": queued}
 
 
@@ -314,6 +316,7 @@ def dispatch_immunization_reminders() -> dict:  # type: ignore[type-arg]
         "dispatch_immunization_reminders: completed",
         extra={"queued_count": queued},
     )
+    record_reminder_run("immunization", queued)  # shown on System Health
     return {"queued_count": queued}
 
 

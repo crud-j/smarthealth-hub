@@ -5,6 +5,16 @@ import { RefreshCw } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api-client";
 import AccessDenied from "@/components/layout/AccessDenied";
 import RoleGuard from "@/components/layout/RoleGuard";
+import {
+  reminderLine,
+  signInHeadline,
+  signInLine,
+  smsHeadline,
+  smsLine,
+  type ReminderRun,
+  type SignInWindow,
+  type SmsWindow,
+} from "@/lib/reliability";
 
 // ---------------------------------------------------------------------------
 // Types (mirror backend/app/schemas/system_config.py SystemStatusResponse)
@@ -36,6 +46,13 @@ interface SystemStatus {
     keep_days: number | null;
   };
   alerts: Check & { admin_alert_phone_configured: boolean };
+  // Optional: Vercel ships this page before the backend is redeployed, and an
+  // older backend does not send it. The section is hidden until it does.
+  reliability?: {
+    sms: Check & { last_24h: SmsWindow; last_7d: SmsWindow };
+    sign_in: Check & { last_24h: SignInWindow; last_7d: SignInWindow };
+    reminders: Check & { runs: ReminderRun[] };
+  };
 }
 
 const REFRESH_MS = 60_000;
@@ -194,6 +211,13 @@ function SystemHealth() {
   }
 
   const banner = data ? BANNER[data.overall] : null;
+  // Most recent run of any reminder job (ISO strings in UTC sort correctly).
+  const latestRun =
+    data?.reliability?.reminders.runs
+      .map((run) => run.last_run_at)
+      .filter((at): at is string => at !== null)
+      .sort()
+      .at(-1) ?? null;
 
   return (
     <div>
@@ -239,6 +263,7 @@ function SystemHealth() {
           ))}
         </div>
       ) : data ? (
+        <>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <HealthCard
             title="Backups"
@@ -329,6 +354,57 @@ function SystemHealth() {
             detail={data.version.commit === "unknown" ? "Deploy with scripts/deploy.sh to record the commit" : "Git commit running on the server"}
           />
         </div>
+
+        {/* Reliability (SDP §11.7): counts only, no patient data */}
+        {data.reliability && (
+        <section aria-labelledby="reliability-heading" className="mt-8">
+          <h2 id="reliability-heading" className="font-display text-xl text-[#1a0808]">
+            Reliability
+          </h2>
+          <p className="mb-4 mt-1 text-sm text-[#7a5252]">
+            How well SMS and sign-ins worked. The big number is the last 24 hours.
+          </p>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <HealthCard
+              title="SMS delivery"
+              check={data.reliability.sms}
+              value={smsHeadline(data.reliability.sms.last_24h)}
+              detail={
+                <>
+                  {smsLine("24 h", data.reliability.sms.last_24h)}
+                  <br />
+                  {smsLine("7 days", data.reliability.sms.last_7d)}
+                  <br />
+                  Only failures the SMS gateway reports are counted.
+                </>
+              }
+            />
+
+            <HealthCard
+              title="Sign-in"
+              check={data.reliability.sign_in}
+              value={signInHeadline(data.reliability.sign_in.last_24h)}
+              detail={
+                <>
+                  {signInLine("24 h", data.reliability.sign_in.last_24h)}
+                  <br />
+                  {signInLine("7 days", data.reliability.sign_in.last_7d)}
+                </>
+              }
+            />
+
+            <HealthCard
+              title="Reminder runs"
+              check={data.reliability.reminders}
+              value={latestRun ? `Last: ${formatManila(latestRun)}` : "Not recorded yet"}
+              detail={data.reliability.reminders.runs.map((run) => (
+                <div key={run.job}>{reminderLine(run)}</div>
+              ))}
+            />
+          </div>
+        </section>
+        )}
+        </>
       ) : null}
     </div>
   );
