@@ -7,7 +7,9 @@ audit failures are logged to the application logger but must NOT interrupt
 the primary clinical workflow.
 
 Standard ``action`` values (extend the AuditLog docstring when you add new ones):
-  LOGIN, LOGOUT, LOGIN_FAILED, OTP_SENT, OTP_VERIFIED
+  LOGIN, LOGOUT, LOGIN_FAILED, OTP_SENT, OTP_VERIFIED, OTP_FAILED
+  (LOGIN_FAILED / OTP_FAILED are committed before the 401/403 is raised —
+  see auth_service.login and mfa_service._record_failure)
   CREATE, UPDATE, DELETE, VIEW_PHI
   CARD_ISSUE, CARD_VERIFY, CARD_REVOKE
   PASSWORD_CHANGED, PASSWORD_RESET_REQUESTED

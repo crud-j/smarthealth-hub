@@ -159,6 +159,9 @@ async def login(
                 metadata={"reason": reason},
                 ip_address=ip_address,
             )
+            # Commit now: get_db rolls the session back when we raise, which
+            # would silently discard this audit row.
+            await db.commit()
         raise UnauthorizedError("Invalid credentials. Please check your email and password.")
 
     assert user is not None  # narrowed: password_ok=True implies user is not None
@@ -173,6 +176,7 @@ async def login(
             metadata={"reason": "account_disabled"},
             ip_address=ip_address,
         )
+        await db.commit()  # survive get_db's rollback on the error below
         raise ForbiddenError("Account is disabled. Contact your system administrator.")
 
     # ── Trusted-device check (L-1) ──────────────────────────────────────────
@@ -294,6 +298,7 @@ async def verify_otp_and_issue_tokens(
         user_id=user_id,
         plain_code=otp_code,
         purpose="login",
+        ip_address=ip_address,
     )
 
     # Issue tokens.
@@ -603,6 +608,7 @@ async def reset_password(
         user_id=user_id,
         plain_code=otp_code,
         purpose="password_reset",
+        ip_address=ip_address,
     )
 
     user.password_hash = hash_password(new_password)

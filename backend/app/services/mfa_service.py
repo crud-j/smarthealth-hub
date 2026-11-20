@@ -8,6 +8,9 @@ Brute-force protection:
   - Each ``MfaOtp`` row tracks ``attempt_count``.
   - After ``MAX_OTP_ATTEMPTS`` failed verifications the row is marked used
     (effectively invalidated) and the caller receives an error.
+  - Every failure is committed (attempt count + an ``OTP_FAILED`` audit row)
+    *before* the error is raised: ``get_db`` rolls the session back on errors,
+    which would otherwise discard both and make the lockout unreachable.
 
 Resend rate-limiting:
   - At most ``MAX_RESENDS_PER_SESSION`` active (unused, non-expired) OTP rows
@@ -31,6 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import UnauthorizedError
 from app.core.logging import get_logger
+from app.services import audit_service
 
 logger = get_logger(__name__)
 
@@ -159,6 +163,7 @@ async def verify_otp(
     user_id: uuid.UUID,
     plain_code: str,
     purpose: OtpPurpose = "login",
+    ip_address: str | None = None,
 ) -> None:
     """
     Verify a submitted OTP code against the stored hash.
@@ -173,6 +178,9 @@ async def verify_otp(
         user_id:    UUID of the user attempting verification.
         plain_code: The 6-digit OTP submitted by the user.
         purpose:    Must match the purpose used when the OTP was generated.
+        ip_address: Client IP, stored on the ``OTP_FAILED`` audit row.
+
+    Every failure commits the session before raising (see module docstring).
 
     Raises:
         UnauthorizedError: Code is wrong, expired, already used, or the
@@ -201,6 +209,12 @@ async def verify_otp(
             "OTP verification failed — no active OTP found",
             extra={"user_id": str(user_id), "purpose": purpose},
         )
+        await _record_failure(
+            db,
+            user_id=user_id,
+            metadata={"reason": "expired_or_missing", "purpose": purpose},
+            ip_address=ip_address,
+        )
         raise UnauthorizedError("Invalid or expired OTP. Please request a new code.")
 
     # Increment attempt counter before verifying to prevent race-condition bypasses.
@@ -208,10 +222,19 @@ async def verify_otp(
 
     if otp_row.attempt_count > MAX_OTP_ATTEMPTS:
         otp_row.is_used = True  # lock out this OTP row permanently
-        await db.flush()
         logger.warning(
             "OTP locked — too many failed attempts",
             extra={"user_id": str(user_id), "otp_id": str(otp_row.id)},
+        )
+        await _record_failure(
+            db,
+            user_id=user_id,
+            metadata={
+                "reason": "too_many_attempts",
+                "purpose": purpose,
+                "attempt": otp_row.attempt_count,
+            },
+            ip_address=ip_address,
         )
         raise UnauthorizedError(
             "Too many failed OTP attempts. Please log in again to receive a new code."
@@ -226,7 +249,6 @@ async def verify_otp(
         is_valid = False
 
     if not is_valid:
-        await db.flush()  # persist incremented attempt_count
         logger.warning(
             "OTP verification failed — wrong code",
             extra={
@@ -236,6 +258,12 @@ async def verify_otp(
             },
         )
         remaining = MAX_OTP_ATTEMPTS - otp_row.attempt_count
+        await _record_failure(
+            db,
+            user_id=user_id,
+            metadata={"reason": "wrong_code", "purpose": purpose, "attempt": otp_row.attempt_count},
+            ip_address=ip_address,
+        )
         raise UnauthorizedError(f"Invalid OTP code. {max(remaining, 0)} attempt(s) remaining.")
 
     # Success — mark used so it cannot be replayed.
@@ -246,3 +274,27 @@ async def verify_otp(
         "OTP verified successfully",
         extra={"user_id": str(user_id), "otp_id": str(otp_row.id), "purpose": purpose},
     )
+
+
+async def _record_failure(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    metadata: dict[str, str | int],
+    ip_address: str | None,
+) -> None:
+    """Write an ``OTP_FAILED`` audit row and commit it with the attempt count.
+
+    Must run right before the UnauthorizedError is raised: the request's
+    ``get_db`` rolls back on errors, so anything only flushed would be lost.
+    """
+    await audit_service.write_audit_log(
+        db=db,
+        user_id=user_id,
+        action="OTP_FAILED",
+        entity_type="user",
+        entity_id=user_id,
+        metadata=dict(metadata),
+        ip_address=ip_address,
+    )
+    await db.commit()
