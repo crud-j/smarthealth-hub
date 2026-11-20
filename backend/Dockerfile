@@ -83,10 +83,14 @@ COPY scripts ./scripts
 # volume here in production so files survive container rebuilds.
 # Strip Windows line endings from the entrypoint in case the repo was checked
 # out with CRLF, and make it executable — both BEFORE switching user.
+# Only media/ is given to appuser: it is the one place the app writes (fonts
+# cache and celery beat use /tmp). Code and the venv stay root-owned and
+# read-only for appuser. Never `chown -R /app`: it copies the whole venv into
+# a new ~400 MB layer on every build (slow deploys, disk filling up).
 RUN mkdir -p /app/media/patient_photos /app/media/health_cards \
     && sed -i 's/\r$//' /app/scripts/entrypoint.sh \
     && chmod +x /app/scripts/entrypoint.sh \
-    && chown -R appuser:appuser /app
+    && chown -R appuser:appuser /app/media
 
 # Ensure the venv's bin/ is first on PATH so `python` / `uvicorn` resolve there.
 # XDG_CACHE_HOME: appuser has no home directory, so give fontconfig (used by
