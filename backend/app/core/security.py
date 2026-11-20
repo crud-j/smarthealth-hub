@@ -146,7 +146,7 @@ async def revoke_token(jti: str, ttl_seconds: int) -> None:
         return  # token is already expired — nothing to revoke
     try:
         r = _get_redis()
-        await r.setex(f"revoked:jti:{jti}", ttl_seconds, "1")
+        await r.set(f"revoked:jti:{jti}", "1", ex=ttl_seconds)
     except (Exception, asyncio.CancelledError) as exc:  # noqa: BLE001
         # asyncio.CancelledError is BaseException in Python 3.8+ — catch explicitly
         # so a Windows-side TCP reset (error 10054) on the Redis connection never
@@ -204,7 +204,7 @@ async def revoke_all_user_tokens(user_id: str) -> None:
     try:
         r = _get_redis()
         ttl = settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600
-        await r.setex(f"revoked:user:{user_id}", ttl, str(int(time.time())))
+        await r.set(f"revoked:user:{user_id}", str(int(time.time())), ex=ttl)
     except (Exception, asyncio.CancelledError) as exc:  # noqa: BLE001
         _logger.warning(
             "revoke_all_user_tokens: Redis unavailable — tokens for user %s not revoked. Error: %s",

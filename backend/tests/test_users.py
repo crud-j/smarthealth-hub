@@ -264,7 +264,7 @@ def _bearer(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def _token_issued_minutes_ago(user: User, role: str, minutes: int) -> str:
+def _token_issued_minutes_ago(user_id: uuid.UUID, role: str, minutes: int) -> str:
     """An access token that was issued before an admin action (iat in the past)."""
     from datetime import UTC, datetime, timedelta
 
@@ -275,7 +275,7 @@ def _token_issued_minutes_ago(user: User, role: str, minutes: int) -> str:
     now = datetime.now(tz=UTC)
     return jwt.encode(
         {
-            "sub": str(user.id),
+            "sub": str(user_id),
             "role": role,
             "type": "access",
             "jti": uuid.uuid4().hex,
@@ -308,7 +308,8 @@ async def _add_session(db_session: AsyncSession, user: User) -> None:
 async def _session_state(db_session: AsyncSession, user_id: uuid.UUID) -> tuple[str | None, int]:
     from app.models.trusted_device import TrustedDevice
 
-    db_session.expire_all()
+    # Column selects always read the DB; no expire_all() needed (it would make
+    # later attribute reads lazy-load, which async SQLAlchemy rejects).
     refresh = (
         await db_session.execute(sa.select(User.refresh_token_hash).where(User.id == user_id))
     ).scalar_one()
@@ -341,10 +342,11 @@ async def test_admin_resets_password_and_ends_sessions(
     from app.core.security import verify_password
 
     target: User = await make_user("bhw")
+    target_id = target.id  # plain UUID: no ORM attribute reads later on
     await _add_session(db_session, target)
 
     response = await client.post(
-        f"/api/v1/users/{target.id}/reset-password",
+        f"/api/v1/users/{target_id}/reset-password",
         json={"new_password": "NewTemp123", "send_sms": False},
         headers=_bearer(admin_token),
     )
@@ -352,13 +354,12 @@ async def test_admin_resets_password_and_ends_sessions(
     assert response.json()["trusted_devices_removed"] == 1
     assert "NewTemp123" not in response.text  # never echoed back
 
-    db_session.expire_all()
     stored = (
-        await db_session.execute(sa.select(User.password_hash).where(User.id == target.id))
+        await db_session.execute(sa.select(User.password_hash).where(User.id == target_id))
     ).scalar_one()
     assert stored is not None and verify_password("NewTemp123", stored)
-    assert await _session_state(db_session, target.id) == (None, 0)
-    assert "PASSWORD_RESET" in await _audit_actions(db_session, target.id)
+    assert await _session_state(db_session, target_id) == (None, 0)
+    assert "PASSWORD_RESET" in await _audit_actions(db_session, target_id)
 
 
 @pytest.mark.asyncio
@@ -426,20 +427,21 @@ async def test_admin_signs_user_out_everywhere(
     db_session: AsyncSession,
 ) -> None:
     target: User = await make_user("bhw")
+    target_id = target.id  # plain UUID: no ORM attribute reads later on
     await _add_session(db_session, target)
-    old_token = _token_issued_minutes_ago(target, "bhw", 5)
+    old_token = _token_issued_minutes_ago(target_id, "bhw", 5)
 
     before = await client.get("/api/v1/users/me", headers=_bearer(old_token))
     assert before.status_code == 200, before.text
 
     response = await client.post(
-        f"/api/v1/users/{target.id}/sign-out", headers=_bearer(admin_token)
+        f"/api/v1/users/{target_id}/sign-out", headers=_bearer(admin_token)
     )
     assert response.status_code == 200, response.text
     assert response.json()["trusted_devices_removed"] == 1
 
-    assert await _session_state(db_session, target.id) == (None, 0)
-    assert "SESSIONS_REVOKED" in await _audit_actions(db_session, target.id)
+    assert await _session_state(db_session, target_id) == (None, 0)
+    assert "SESSIONS_REVOKED" in await _audit_actions(db_session, target_id)
 
     after = await client.get("/api/v1/users/me", headers=_bearer(old_token))
     assert after.status_code == 401, after.text
