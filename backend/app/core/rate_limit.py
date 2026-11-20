@@ -126,15 +126,12 @@ class RedisRateLimiter:
         clock: Callable[[], float] = time.time,
         fallback: InMemoryRateLimiter | None = None,
         retry_after_failure_seconds: float = 30.0,
-        key_prefix: str = _KEY_PREFIX,
     ) -> None:
         self._redis_factory = redis_factory
         self._clock = clock
         self._fallback = fallback or InMemoryRateLimiter()
         self._retry_after_failure = retry_after_failure_seconds
         self._skip_redis_until = 0.0
-        # Tests set a per-session prefix so counts never leak between runs.
-        self.key_prefix = key_prefix
 
     async def check_rate_limit(
         self,
@@ -153,7 +150,7 @@ class RedisRateLimiter:
             await self._fallback.check_rate_limit(key, max_attempts, window_seconds)
             return
 
-        redis_key = f"{self.key_prefix}{key}"
+        redis_key = f"{_KEY_PREFIX}{key}"
         member = f"{now}:{uuid.uuid4().hex}"
         try:
             redis = self._redis_factory()

@@ -63,14 +63,24 @@ _logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _redis_pool: aioredis.Redis | None = None
+# The event loop the pool was created in (None = created outside a loop).
+_redis_pool_loop: asyncio.AbstractEventLoop | None = None
 
 
 def _get_redis() -> aioredis.Redis:
     """
     Return a lazy-initialised async Redis client backed by a connection pool.
 
-    The first call creates the pool; subsequent calls reuse it.  If Redis is
-    unavailable at call time, the caller catches the ConnectionError.
+    The first call creates the pool; subsequent calls in the same event loop
+    reuse it.  If Redis is unavailable at call time, the caller catches the
+    ConnectionError.
+
+    One pool per running event loop: redis.asyncio connections are bound to
+    the loop that opened them. The API has one loop per worker, so in
+    production this is a single pool; but pytest (a new loop per test) and
+    Celery tasks (``asyncio.run`` per task) change loops, and a pool from a
+    finished loop fails every call ("Event loop is closed") — which made the
+    fail-open Redis checks silently do nothing in tests.
 
     Explicit socket timeouts are required here: without them a stalled
     connection (e.g. a Docker Desktop port-forward that accepted the TCP
@@ -80,8 +90,13 @@ def _get_redis() -> aioredis.Redis:
     point of the try/except graceful-degradation around every caller is
     defeated if the call itself has no ceiling on how long it can hang.
     """
-    global _redis_pool
-    if _redis_pool is None:
+    global _redis_pool, _redis_pool_loop
+    try:
+        loop: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if _redis_pool is None or _redis_pool_loop is not loop:
+        _redis_pool_loop = loop
         _redis_pool = aioredis.from_url(
             settings.REDIS_URL,
             encoding="utf-8",

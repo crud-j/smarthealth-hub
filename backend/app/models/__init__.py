@@ -10,7 +10,7 @@ Import order respects FK dependency:
   roles → users → patients → medical_history → immunizations →
   appointments → visits → health_cards → card_verifications →
   mfa_otp → sms_logs → audit_logs → passkey_credentials →
-  ai_risk_scores → ai_anomaly_alerts
+  ai_risk_scores → ai_anomaly_alerts → trusted_devices
 """
 
 from app.models.ai_anomaly_alert import AiAnomalyAlert  # noqa: F401
@@ -27,6 +27,7 @@ from app.models.mfa_otp import MfaOtp  # noqa: F401
 from app.models.passkey_credential import PasskeyCredential  # noqa: F401
 from app.models.patient import Patient  # noqa: F401
 from app.models.sms_log import SmsLog  # noqa: F401
+from app.models.trusted_device import TrustedDevice  # noqa: F401
 from app.models.user import Role, User  # noqa: F401
 from app.models.visit import Visit  # noqa: F401
 
@@ -48,4 +49,5 @@ __all__ = [
     "AiAnomalyAlert",
     "PatientIntakeToken",
     "IntakeApplication",
+    "TrustedDevice",
 ]
