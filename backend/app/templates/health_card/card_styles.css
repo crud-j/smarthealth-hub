@@ -418,9 +418,16 @@ body {
   font-size: 4.5pt;
 }
 
+/* Up to 2 lines: house no./street/landmark + sitio, barangay, municipality,
+   province is often 60-120 characters.  One nowrap line silently cut off the
+   municipality and province (measured with WeasyPrint: ~62 chars fit).  A fully
+   filled back panel still has spare height with 2 lines. */
 .bp-address .bp-value {
   font-size: 4.3pt;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  min-width: 0;
+  line-clamp: 2;
   overflow: hidden;
 }
 

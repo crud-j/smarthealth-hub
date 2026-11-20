@@ -151,22 +151,27 @@ export const patientCreateSchema = z.object({
 export type PatientCreateFormValues = z.infer<typeof patientCreateSchema>;
 
 /**
- * The address the backend will store, mirroring
- * `patient_service._compose_address`: the structured parts joined with ", "
- * when any of them is filled, otherwise the free-text address.
+ * The address the backend will store and print, mirroring
+ * `patient_service.compose_address` (change both together; the backend tests
+ * in tests/test_patient_address.py use the same cases):
+ *   - any location part (sitio/purok, barangay, municipality, province) filled:
+ *     house/street, sitio/purok, barangay, municipality, province joined with ", "
+ *   - otherwise the free-text address, falling back to the house/street.
  */
 export function effectiveAddress(parts: {
   address?: string | null;
+  houseStreet?: string | null;
   sitioPurok?: string | null;
   barangay?: string | null;
   municipality?: string | null;
   province?: string | null;
 }): string {
-  const structured = [parts.sitioPurok, parts.barangay, parts.municipality, parts.province]
-    .map((p) => p?.trim() ?? "")
-    .filter(Boolean);
-  if (structured.length > 0) return structured.join(", ");
-  return parts.address?.trim() ?? "";
+  const clean = (p: string | null | undefined): string => p?.trim() ?? "";
+  const location = [parts.sitioPurok, parts.barangay, parts.municipality, parts.province].map(clean);
+  if (location.some(Boolean)) {
+    return [clean(parts.houseStreet), ...location].filter(Boolean).join(", ");
+  }
+  return clean(parts.address) || clean(parts.houseStreet);
 }
 
 /**
@@ -198,6 +203,8 @@ export const patientUpdateSchema = patientCreateSchema
     knownConditions: true,
   })
   .extend({
+    // House no. / street / landmark (patients.house_street, VARCHAR 255).
+    houseStreet: z.string().max(255, "House no. / street / landmark: 255 characters at most.").optional().nullable(),
     // Optional on edit: older patients only have the free-text address.
     barangay: z.string().max(150).optional().nullable(),
     municipality: z.string().max(150).optional().nullable(),

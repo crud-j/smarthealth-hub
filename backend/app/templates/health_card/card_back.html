@@ -44,16 +44,9 @@
     <!-- Address -->
     <div class="bp-row bp-address">
       <span class="bp-label">Address</span>
-      <span class="bp-value">
-        {%- if patient.barangay or patient.municipality or patient.province -%}
-          {%- if patient.sitio_purok %}{{ patient.sitio_purok }}, {% endif -%}
-          {%- if patient.barangay %}{{ patient.barangay }}{% endif -%}
-          {%- if patient.municipality %}, {{ patient.municipality }}{% endif -%}
-          {%- if patient.province %}, {{ patient.province }}{% endif -%}
-        {%- elif patient.address and patient.address != "—" -%}
-          {{ patient.address }}
-        {%- else -%}—{%- endif -%}
-      </span>
+      <!-- patient.address = patient_service.patient_address(): house/street,
+           sitio, barangay, municipality, province (same rule as saving). -->
+      <span class="bp-value">{{ patient.address or "—" }}</span>
     </div>
 
     <!-- Blood type (large) + Allergies/Alerts -->

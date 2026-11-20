@@ -88,6 +88,11 @@ class PatientCreate(BaseSchema):
     sex: Literal["male", "female"] = Field(..., description="'male' or 'female'")
     civil_status: str | None = Field(None, max_length=20)
     household_number: str | None = Field(None, max_length=50)
+    house_street: str | None = Field(
+        None,
+        max_length=255,
+        description="House no. / street / landmark (first part of the address)",
+    )
     sitio_purok: str | None = Field(None, max_length=150)
     barangay: str | None = Field(None, max_length=150)
     municipality: str | None = Field(None, max_length=150)
@@ -210,6 +215,7 @@ class PatientCreate(BaseSchema):
         "last_name",
         "civil_status",
         "household_number",
+        "house_street",
         "sitio_purok",
         "barangay",
         "municipality",
@@ -297,6 +303,11 @@ class PatientUpdate(BaseSchema):
     sex: Literal["male", "female"] | None = Field(None)
     civil_status: str | None = Field(None, max_length=20)
     household_number: str | None = Field(None, max_length=50)
+    house_street: str | None = Field(
+        None,
+        max_length=255,
+        description="House no. / street / landmark (first part of the address)",
+    )
     sitio_purok: str | None = Field(None, max_length=150)
     barangay: str | None = Field(None, max_length=150)
     municipality: str | None = Field(None, max_length=150)
@@ -362,6 +373,7 @@ class PatientUpdate(BaseSchema):
         "last_name",
         "civil_status",
         "household_number",
+        "house_street",
         "sitio_purok",
         "barangay",
         "municipality",
@@ -444,6 +456,7 @@ class PatientResponse(BaseSchema):
     sex: str
     civil_status: str | None
     household_number: str | None
+    house_street: str | None = None
     sitio_purok: str | None
     barangay: str | None
     municipality: str | None

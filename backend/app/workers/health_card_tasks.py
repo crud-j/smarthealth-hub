@@ -95,6 +95,7 @@ async def _generate_health_card_pdf_async(
     from app.services import qr_service  # noqa: PLC0415
     from app.services.card_generation_service import card_allergies  # noqa: PLC0415
     from app.services.patient_photo_service import get_photo_data_uri  # noqa: PLC0415
+    from app.services.patient_service import patient_address  # noqa: PLC0415
     from app.services.pdf_renderer import render_health_card_pdf  # noqa: PLC0415
     from app.workers.db import CelerySessionLocal  # noqa: PLC0415
 
@@ -176,7 +177,7 @@ async def _generate_health_card_pdf_async(
                 "mobile_number": patient.mobile_number or "—",
                 "philhealth_no": patient.philhealth_no or "—",
                 "philhealth_member_type": patient.philhealth_member_type or "",
-                "address": patient.address or "—",
+                "address": patient_address(patient) or "—",
                 "sitio_purok": patient.sitio_purok or "",
                 "barangay": patient.barangay or "",
                 "municipality": patient.municipality or "",

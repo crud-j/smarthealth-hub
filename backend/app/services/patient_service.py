@@ -99,24 +99,51 @@ def _clean_text(value: str | None) -> str | None:
     return stripped or None
 
 
-def _compose_address(
+def compose_address(
     *,
     address: str | None,
+    house_street: str | None = None,
     sitio_purok: str | None = None,
     barangay: str | None = None,
     municipality: str | None = None,
     province: str | None = None,
 ) -> str:
-    structured_parts = [sitio_purok, barangay, municipality, province]
-    cleaned_structured = [part.strip() for part in structured_parts if part and part.strip()]
-    if cleaned_structured:
-        return ", ".join(cleaned_structured)
-    cleaned_address = _clean_text(address)
-    return cleaned_address or ""
+    """
+    The single address rule, used when saving and by every display.
+
+    - Any location part (sitio/purok, barangay, municipality, province) filled:
+      ``house_street, sitio_purok, barangay, municipality, province`` joined with
+      ", ", blanks skipped.  The free-text ``address`` is not used.
+    - Otherwise the free-text ``address`` (older / seeded patients), falling back
+      to ``house_street``.
+
+    Mirrored by ``effectiveAddress`` in ``frontend/web/lib/schemas/patient.ts``;
+    change both together.
+    """
+    location = [_clean_text(p) for p in (sitio_purok, barangay, municipality, province)]
+    if any(location):
+        parts = [_clean_text(house_street), *location]
+        return ", ".join(p for p in parts if p)
+    return _clean_text(address) or _clean_text(house_street) or ""
 
 
-# Encrypted free-text fields that a PUT may clear by sending null or "".
-_CLEARABLE_TEXT_FIELDS: frozenset[str] = frozenset({"allergies", "known_conditions"})
+def patient_address(patient: Patient) -> str:
+    """The address to print for ``patient`` (card back, NFC tap view, summary PDF)."""
+    return compose_address(
+        address=patient.address,
+        house_street=patient.house_street,
+        sitio_purok=patient.sitio_purok,
+        barangay=patient.barangay,
+        municipality=patient.municipality,
+        province=patient.province,
+    )
+
+
+# Free-text fields that a PUT may clear by sending null or "" (the loop in
+# update_patient skips None, so it cannot clear them).
+_CLEARABLE_TEXT_FIELDS: frozenset[str] = frozenset(
+    {"allergies", "known_conditions", "house_street"}
+)
 
 
 def _encrypt_optional_text(value: str | None) -> str | None:
@@ -317,14 +344,16 @@ async def create_patient(
         sex=data.sex,
         civil_status=data.civil_status,
         household_number=data.household_number,
+        house_street=data.house_street,
         sitio_purok=data.sitio_purok,
         barangay=data.barangay,
         municipality=data.municipality,
         province=data.province,
         occupation=data.occupation,
         mobile_number=data.mobile_number,
-        address=_compose_address(
+        address=compose_address(
             address=data.address,
+            house_street=data.house_street,
             sitio_purok=data.sitio_purok,
             barangay=data.barangay,
             municipality=data.municipality,
@@ -428,7 +457,7 @@ async def update_patient(
         elif field == "known_conditions":
             stored_value = _encrypt_optional_text(value)
         elif field == "address":
-            stored_value = _compose_address(address=value)
+            stored_value = compose_address(address=value)
         else:
             stored_value = value
         update_fields[field] = stored_value
@@ -444,10 +473,18 @@ async def update_patient(
 
     if any(
         field in update_fields
-        for field in ("sitio_purok", "barangay", "municipality", "province", "address")
+        for field in (
+            "house_street",
+            "sitio_purok",
+            "barangay",
+            "municipality",
+            "province",
+            "address",
+        )
     ):
-        patient.address = _compose_address(
+        patient.address = compose_address(
             address=update_fields.get("address", patient.address),
+            house_street=patient.house_street,
             sitio_purok=patient.sitio_purok,
             barangay=patient.barangay,
             municipality=patient.municipality,

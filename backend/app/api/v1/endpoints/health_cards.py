@@ -83,7 +83,7 @@ from app.services.card_generation_service import NO_ALLERGIES_TEXT as _NO_ALLERG
 from app.services.card_generation_service import card_allergies as _card_allergies
 from app.services.card_generation_service import get_bulk_card_status
 from app.services.card_generation_service import patient_allergies as _patient_allergies
-from app.services.patient_service import get_patient
+from app.services.patient_service import get_patient, patient_address
 
 logger = get_logger(__name__)
 
@@ -252,13 +252,9 @@ def _render_nfc_view_html(  # noqa: PLR0912, PLR0915
         visit_date_str = latest_visit.visit_date.strftime("%b %d, %Y")
 
     # ── Address assembly ─────────────────────────────────────────────────────
-    addr_parts = [
-        patient.sitio_purok,
-        patient.barangay,
-        patient.municipality,
-        patient.province,
-    ]
-    address_display = ", ".join(p for p in addr_parts if p) or _esc(patient.address) or "—"
+    # Same rule as the stored address and the printed card.  Escaped as a whole:
+    # house/street and barangay text can come from the public intake form.
+    address_display = _esc(patient_address(patient)) or "—"
 
     # ── PhilHealth ───────────────────────────────────────────────────────────
     philhealth_display = "—"
@@ -1586,7 +1582,8 @@ async def batch_health_card_pdf(
             "mobile_number": patient.mobile_number or "—",
             "philhealth_no": patient.philhealth_no or "—",
             "philhealth_member_type": patient.philhealth_member_type or "",
-            "address": patient.address or "—",
+            # Printed as-is on the card back (house/street first, same rule as saving).
+            "address": patient_address(patient) or "—",
             # Structured address fields for the back-face template.
             "sitio_purok": patient.sitio_purok or "",
             "barangay": patient.barangay or "",
@@ -2148,9 +2145,9 @@ async def download_health_card_pdf(
         "philhealth_no": patient.philhealth_no or "—",
         "philhealth_member_type": patient.philhealth_member_type or "",
         # ── Back face fields ───────────────────────────────────────────
-        "address": patient.address or "—",
-        # Structured address fields for the back-face template.
-        # The template prefers these over the composite address field.
+        # Printed as-is on the card back (house/street first, same rule as saving).
+        "address": patient_address(patient) or "—",
+        # Structured address fields, kept for other template uses.
         "sitio_purok": patient.sitio_purok or "",
         "barangay": patient.barangay or "",
         "municipality": patient.municipality or "",

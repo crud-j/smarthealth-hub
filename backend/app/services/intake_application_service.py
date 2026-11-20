@@ -189,7 +189,9 @@ async def approve_application(
     # map it carefully before validating with the existing PatientCreate schema.
     fd: dict[str, Any] = dict(app.form_data)
 
-    # Compose a full address from the parts collected by the intake form
+    # house_street goes to its own column; create_patient composes the address
+    # (house/street first).  This composed value is only the fallback when no
+    # barangay/municipality/province was given.
     address_parts = [
         fd.get("house_street"),
         fd.get("barangay"),
@@ -216,6 +218,7 @@ async def approve_application(
         "birth_date": fd.get("birth_date"),
         "sex": patient_sex,
         "civil_status": fd.get("civil_status"),
+        "house_street": fd.get("house_street"),
         "barangay": fd.get("barangay"),
         "municipality": fd.get("municipality"),
         "province": fd.get("province"),

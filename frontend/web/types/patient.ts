@@ -23,6 +23,8 @@ export interface Patient {
   sex: "male" | "female";
   civilStatus?: string | null;
   householdNumber?: string | null;
+  /** House no. / street / landmark; first part of `address`. */
+  houseStreet?: string | null;
   sitioPurok?: string | null;
   barangay?: string | null;
   municipality?: string | null;
@@ -147,6 +149,8 @@ export interface PatientCreatePayload {
   sex: "male" | "female";
   civilStatus?: string;
   householdNumber?: string;
+  /** House no. / street / landmark. null clears it on update. */
+  houseStreet?: string | null;
   sitioPurok?: string;
   barangay?: string;
   municipality?: string;

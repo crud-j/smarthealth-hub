@@ -28,7 +28,8 @@ function computeAge(birthDateStr: string): number {
 // Labels for the "please check" message when validation blocks saving.
 const FIELD_LABELS: Partial<Record<keyof PatientUpdateFormValues, string>> = {
   firstName: "First Name", lastName: "Last Name", birthDate: "Birthday", sex: "Sex",
-  mobileNumber: "Contact No.", address: "Address", barangay: "Barangay",
+  mobileNumber: "Contact No.", address: "Address", houseStreet: "House No. / Street / Landmark",
+  barangay: "Barangay",
   municipality: "Municipality", province: "Province",
   emergencyContactName: "Emergency Contact Name", emergencyContactNumber: "Emergency Contact No.",
   guardianContact: "Guardian Contact No.", allergies: "Allergies", knownConditions: "Known Conditions",
@@ -102,7 +103,7 @@ export default function PatientEditPage({ params }: { params: Promise<{ patientI
         firstName: patient.firstName, middleName: patient.middleName ?? null,
         lastName: patient.lastName, birthDate: patient.birthDate, sex: patient.sex,
         civilStatus: patient.civilStatus ?? null, mobileNumber: patient.mobileNumber ?? null,
-        address: patient.address,
+        address: patient.address, houseStreet: patient.houseStreet ?? "",
         sitioPurok: patient.sitioPurok ?? "", barangay: patient.barangay ?? "",
         municipality: patient.municipality ?? "", province: patient.province ?? "",
         emergencyContactName: patient.emergencyContactName ?? "",
@@ -119,9 +120,10 @@ export default function PatientEditPage({ params }: { params: Promise<{ patientI
   const birthDateValue = watch("birthDate") ?? "";
   const philhealthMemberTypeValue = watch("philhealthMemberType");
   const age = computeAge(birthDateValue);
-  // What the backend will store as the address (structured parts win over free text).
+  // What the backend will store as the address (house/street + structured parts win over free text).
   const addressPreview = effectiveAddress({
-    address: watch("address"), sitioPurok: watch("sitioPurok"), barangay: watch("barangay"),
+    address: watch("address"), houseStreet: watch("houseStreet"),
+    sitioPurok: watch("sitioPurok"), barangay: watch("barangay"),
     municipality: watch("municipality"), province: watch("province"),
   });
 
@@ -151,6 +153,7 @@ export default function PatientEditPage({ params }: { params: Promise<{ patientI
       isPregnant: isAdmin ? (data.isPregnant ?? false) : (patient?.isPregnant ?? false),
       bloodType: data.bloodType ?? null,
       // Sent only when edited; an emptied field is sent as null so the backend clears it.
+      houseStreet: textFieldChange(patient?.houseStreet, data.houseStreet),
       allergies: textFieldChange(patient?.allergies, data.allergies),
       knownConditions: textFieldChange(patient?.knownConditions, data.knownConditions),
     };
@@ -340,6 +343,13 @@ export default function PatientEditPage({ params }: { params: Promise<{ patientI
               className={`${inputCls} ${errors.mobileNumber ? "border-[#fca5a5]" : ""}`} placeholder="e.g. 09171234567 or +639171234567" />
             {errors.mobileNumber && <p className={errorCls}>{errors.mobileNumber.message}</p>}
             <p className="mt-1 text-xs text-[#9b6e6e]">Used for appointment reminders and SMS notifications</p>
+          </div>
+          <div className="mb-4">
+            <label className={labelCls} htmlFor="houseStreet">House No. / Street / Landmark</label>
+            <input id="houseStreet" type="text" maxLength={255} {...register("houseStreet")}
+              className={`${inputCls} ${errors.houseStreet ? "border-[#fca5a5]" : ""}`}
+              placeholder="House no., street, landmark or nearby reference" />
+            {errors.houseStreet && <p className={errorCls}>{errors.houseStreet.message}</p>}
           </div>
           <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-4">
             <div>

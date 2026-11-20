@@ -52,6 +52,7 @@ export interface PatientApiResponse {
   sex: "male" | "female";
   civil_status?: string | null;
   household_number?: string | null;
+  house_street?: string | null;
   sitio_purok?: string | null;
   barangay?: string | null;
   municipality?: string | null;
@@ -190,6 +191,7 @@ export function mapPatient(r: PatientApiResponse): Patient {
     sex: r.sex,
     civilStatus: r.civil_status,
     householdNumber: r.household_number ?? null,
+    houseStreet: r.house_street ?? null,
     sitioPurok: r.sitio_purok ?? null,
     barangay: r.barangay ?? null,
     municipality: r.municipality ?? null,
@@ -329,6 +331,8 @@ function toApiPayload(data: PatientCreatePayload): Record<string, unknown> {
     sex: data.sex,
     civil_status: data.civilStatus,
     household_number: data.householdNumber,
+    // null clears it on update (only sent when changed); undefined is omitted.
+    house_street: data.houseStreet,
     sitio_purok: data.sitioPurok,
     barangay: data.barangay,
     municipality: data.municipality,
