@@ -34,7 +34,7 @@ from app.schemas.appointment import (
     AppointmentUpdate,
     PaginatedAppointments,
 )
-from app.services import appointment_service
+from app.services import appointment_service, system_settings_service
 
 router = APIRouter(prefix="/appointments", tags=["appointments"])
 
@@ -253,7 +253,6 @@ async def send_appointment_reminder(
     """
     from sqlalchemy import select
 
-    from app.core.config import settings
     from app.core.exceptions import NotFoundError
     from app.core.logging import get_logger
     from app.models.appointment import Appointment
@@ -284,7 +283,7 @@ async def send_appointment_reminder(
     # Human-readable appointment type (replace underscores, title-case).
     appointment_type_label = appt.appointment_type.replace("_", " ").title()
 
-    bhc_name: str = getattr(settings, "BHC_NAME", "Barangay Health Center")
+    bhc_name = (await system_settings_service.load_runtime_settings(db)).bhc_name
     message = (
         f"Hi {patient.first_name}, this is a reminder for your "
         f"{appointment_type_label} appointment at {bhc_name} on "
