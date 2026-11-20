@@ -1,14 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, use } from "react";
+import { useCallback, useEffect, useState, use } from "react";
 import { apiFetch, ApiError } from "@/lib/api-client";
 import HealthCardPreview from "@/components/cards/HealthCardPreview";
 import { mapPatient, type PatientApiResponse } from "@/hooks/usePatients";
-import type {
-  CardGenerateResponse,
-  GenerationStatus,
-  HealthCardData,
-} from "@/types/healthCard";
+import type { CardGenerateResponse, HealthCardData } from "@/types/healthCard";
 import type { Patient } from "@/types/patient";
 
 // ---------------------------------------------------------------------------
@@ -30,7 +26,6 @@ type PageState =
   | { phase: "loading" }
   | { phase: "no_card"; patient: Patient }
   | { phase: "generating"; patient: Patient; cardId: string; card?: HealthCardData }
-  | { phase: "pdf_pending"; patient: Patient; card: HealthCardData; cardId: string }
   | { phase: "ready"; patient: Patient; card: HealthCardData }
   | { phase: "error"; message: string };
 
@@ -99,59 +94,6 @@ export default function HealthCardPrintPage({
   const [reissueInProgress, setReissueInProgress] = useState(false);
   const [reissueError, setReissueError] = useState("");
 
-  // Ref to cancel polling when the component unmounts or state changes.
-  const pollingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // ---------------------------------------------------------------------------
-  // Cleanup polling on unmount
-  // ---------------------------------------------------------------------------
-  useEffect(() => {
-    return () => {
-      if (pollingRef.current !== null) clearTimeout(pollingRef.current);
-    };
-  }, []);
-
-  // ---------------------------------------------------------------------------
-  // PDF generation-status polling
-  // ---------------------------------------------------------------------------
-  const startPolling = useCallback(
-    (cardId: string, patient: Patient, card: HealthCardData) => {
-      let attempts = 0;
-      const MAX_ATTEMPTS = 60; // 2 minutes at 2 s intervals
-
-      const poll = async () => {
-        attempts++;
-        try {
-          const status = await apiFetch<GenerationStatus>(
-            `/health-cards/generation-status/${cardId}`
-          );
-          if (status.status === "ready") {
-            // PDF is ready — transition to ready phase (Download button enabled)
-            setPageState({ phase: "ready", patient, card });
-            return;
-          }
-          if (status.status === "failed" || attempts >= MAX_ATTEMPTS) {
-            // PDF failed or timed out — still show "ready" so the user can
-            // use the synchronous /pdf endpoint via the Download button.
-            // The /pdf endpoint renders on-demand and does not require Celery.
-            setPageState({ phase: "ready", patient, card });
-            return;
-          }
-        } catch {
-          // Status endpoint error — still show ready after a few failures.
-          if (attempts >= 5) {
-            setPageState({ phase: "ready", patient, card });
-            return;
-          }
-        }
-        // Schedule next poll.
-        pollingRef.current = setTimeout(() => void poll(), 2000);
-      };
-
-      pollingRef.current = setTimeout(() => void poll(), 2000);
-    },
-    []
-  );
 
   // ---------------------------------------------------------------------------
   // Initial data load
@@ -196,27 +138,23 @@ export default function HealthCardPrintPage({
     setPageState({ phase: "generating", patient, cardId: "" });
 
     try {
-      // POST /health-cards/{patientId}/generate now returns HTTP 200 with
-      // real card data immediately (card_number is never PENDING-).
-      // PDF rendering is async — poll generation-status for PDF readiness.
+      // Returns the real card at once (card_number is never PENDING-).  The PDF
+      // is rendered on demand by Download (GET .../pdf), so there is nothing to
+      // wait for.
       const resp = await apiFetch<CardGenerateResponse>(
         `/health-cards/${patientId}/generate`,
         { method: "POST" }
       );
 
       const card: HealthCardData = { ...resp.card, qr_data_uri: resp.qr_data_uri };
-      const cardId = resp.card.id;
-
-      // Transition to pdf_pending and start polling for PDF readiness.
-      setPageState({ phase: "pdf_pending", patient, card, cardId });
-      startPolling(cardId, patient, card);
+      setPageState({ phase: "ready", patient, card });
     } catch (err) {
       setGenerateError(
         err instanceof ApiError ? err.message : "Failed to generate health card. Please try again."
       );
       setPageState({ phase: "no_card", patient });
     }
-  }, [pageState, patientId, startPolling]);
+  }, [pageState, patientId]);
 
   // ---------------------------------------------------------------------------
   // Reissue handler
@@ -397,58 +335,6 @@ export default function HealthCardPrintPage({
             <p className="text-sm text-[#4338ca]">
               Assigning card number and generating QR code...
             </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ---------------------------------------------------------------------------
-  // Render: pdf_pending (card number assigned, PDF rendering in background)
-  // ---------------------------------------------------------------------------
-  if (pageState.phase === "pdf_pending") {
-    const { patient, card } = pageState;
-    return (
-      <div className="mx-auto max-w-[600px] px-4 py-6">
-        <div className="mb-6">
-          <h1 className="text-3xl leading-tight text-[#1a0808] font-display">Health Card</h1>
-          <p className="mt-1 text-sm font-medium text-[#7a5252]">
-            {patient.lastName}, {patient.firstName} &middot; {patient.patientCode}
-          </p>
-        </div>
-
-        {/* Card number assigned — show it immediately */}
-        <div
-          className="mb-6 overflow-hidden rounded-xl border border-[#c7d2fe] bg-[#eef2ff]"
-          style={{ boxShadow: "0 2px 10px rgba(99,102,241,0.07)" }}
-        >
-          <div className="flex items-center gap-2.5 px-5 py-4 bg-gradient-to-br from-[#eef2ff] to-white border-b border-[#c7d2fe]">
-            <div
-              className="h-4 w-4 animate-spin rounded-full border-2 border-[#c7d2fe] border-t-[#6366f1]"
-              aria-hidden="true"
-            />
-            <h2 className="text-sm font-bold text-[#3730a3]">PDF Rendering...</h2>
-          </div>
-          <div className="p-5">
-            <p className="mb-3 text-sm text-[#4338ca]">
-              Card number assigned. The PDF is rendering in the background — the Download
-              button will appear when it is ready (usually under 30 seconds).
-            </p>
-            <dl className="grid grid-cols-2 gap-4 text-sm">
-              <div>
-                <dt className="text-xs font-bold uppercase tracking-wider text-[#6366f1]">
-                  Card Number
-                </dt>
-                <dd className="mt-1 font-semibold text-[#1a0808]">{card.card_number}</dd>
-              </div>
-              <div>
-                <dt className="text-xs font-bold uppercase tracking-wider text-[#6366f1]">
-                  Version
-                </dt>
-                <dd className="mt-1 font-semibold text-[#1a0808]">v{card.card_version}</dd>
-              </div>
-            </dl>
-            <NfcUrlHint url={card.nfc_view_url} />
           </div>
         </div>
       </div>

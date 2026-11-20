@@ -7,10 +7,9 @@ import { toast } from "@/lib/toast";
 import { downloadHealthCardPdf } from "@/lib/health-card-pdf";
 import { usePatientList } from "@/hooks/usePatients";
 import type {
-  CardGenerationAccepted,
+  CardGenerateResponse,
   GenerationStatus,
   HealthCardData,
-  HealthCardMaybeResponse,
 } from "@/types/healthCard";
 
 // ---------------------------------------------------------------------------
@@ -18,8 +17,6 @@ import type {
 // ---------------------------------------------------------------------------
 
 const PAGE_SIZE = 15;
-/** How often (ms) to poll the single-card generation-status endpoint. */
-const POLL_INTERVAL_MS = 3000;
 /** How often (ms) to poll the batch-status endpoint. */
 const BATCH_POLL_INTERVAL_MS = 2000;
 
@@ -403,16 +400,11 @@ export default function HealthCardsPage() {
 
   const [cardMap, setCardMap] = useState<Record<string, RowCardState>>({});
 
-  // Map: patientId → GenerationStatus — tracks in-flight single-card tasks.
+  // Map: patientId → GenerationStatus for cards generated on this page
+  // ("pending" while the request runs, then "ready": the PDF renders on demand).
   const [genStatusMap, setGenStatusMap] = useState<
     Record<string, GenerationStatus>
   >({});
-
-  // Ref to hold the current genStatusMap for use inside the polling interval.
-  const genStatusRef = useRef(genStatusMap);
-  useEffect(() => {
-    genStatusRef.current = genStatusMap;
-  }, [genStatusMap]);
 
   // ---------------------------------------------------------------------------
   // Batch selection state
@@ -521,57 +513,6 @@ export default function HealthCardsPage() {
   }, [data]);
 
   // ---------------------------------------------------------------------------
-  // Single-card polling loop
-  // ---------------------------------------------------------------------------
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      const current = genStatusRef.current;
-      const pendingEntries = Object.entries(current).filter(
-        ([, gs]) => gs.status === "pending"
-      );
-      if (pendingEntries.length === 0) return;
-
-      await Promise.all(
-        pendingEntries.map(async ([patientId, gs]) => {
-          try {
-            const updated = await apiFetch<GenerationStatus>(
-              `/health-cards/generation-status/${gs.card_id}`
-            );
-            setGenStatusMap((prev) => ({
-              ...prev,
-              [patientId]: { ...updated, task_id: gs.task_id },
-            }));
-
-            if (updated.status === "ready") {
-              try {
-                const resp = await apiFetch<HealthCardMaybeResponse>(
-                  `/health-cards/${patientId}?allow_missing=true`
-                );
-                if (resp.card_found && resp.card !== null) {
-                  setCardMap((m) => ({
-                    ...m,
-                    [patientId]: {
-                      status: "found",
-                      card: resp.card as HealthCardData,
-                    },
-                  }));
-                }
-              } catch {
-                // Non-critical — badge stays as-is.
-              }
-              toast.success("Health card PDF is ready.");
-            }
-          } catch {
-            // Non-fatal polling error — retry next tick.
-          }
-        })
-      );
-    }, POLL_INTERVAL_MS);
-
-    return () => clearInterval(interval);
-  }, []); // stable interval — reads genStatusRef.current each tick
-
-  // ---------------------------------------------------------------------------
   // Batch polling loop
   // ---------------------------------------------------------------------------
   useEffect(() => {
@@ -635,18 +576,20 @@ export default function HealthCardsPage() {
     }));
 
     try {
-      const resp = await apiFetch<CardGenerationAccepted>(
+      // The card exists and its PDF can be downloaded (rendered on demand by
+      // GET .../pdf) as soon as this returns: nothing to poll.  This used to
+      // read resp.card_id, which the response does not have, so the row kept
+      // spinning "Generating..." until the page was reloaded.
+      const resp = await apiFetch<CardGenerateResponse>(
         `/health-cards/${patientId}/generate`,
         { method: "POST" }
       );
+      setCardMap((m) => ({ ...m, [patientId]: { status: "found", card: resp.card } }));
       setGenStatusMap((prev) => ({
         ...prev,
-        [patientId]: {
-          card_id: resp.card_id,
-          task_id: resp.task_id,
-          status: "pending",
-        },
+        [patientId]: { card_id: resp.card.id, status: "ready" },
       }));
+      toast.success("Health card generated.");
     } catch (err) {
       setGenStatusMap((prev) => {
         const next = { ...prev };

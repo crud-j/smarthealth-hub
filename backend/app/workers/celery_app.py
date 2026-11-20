@@ -56,7 +56,6 @@ celery_app = Celery(
         "app.workers.ai_tasks",
         "app.workers.registration_tasks",
         "app.workers.monitoring_tasks",
-        "app.workers.health_card_tasks",
         "app.workers.card_tasks",
         "app.workers.audit_tasks",
         "app.workers.report_tasks",

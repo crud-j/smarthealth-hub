@@ -33,6 +33,7 @@ import pytest
 import pytest_asyncio
 from httpx import AsyncClient
 
+from app.core.config import settings
 from app.services.qr_service import (
     build_qr_url,
     encode_qr_payload,
@@ -324,6 +325,34 @@ class TestHealthCardEndpoints:
             resp1.json()["card"]["card_number"]
             == resp2.json()["card"]["card_number"]
         )
+
+    async def test_generate_stores_no_pdf_and_is_ready_at_once(
+        self, client: AsyncClient, bhw_token: str
+    ) -> None:
+        """
+        Card PDFs are rendered on demand by GET .../pdf (login required).
+
+        generate used to queue a Celery task that wrote
+        media/health_cards/<card_id>.pdf: patient data on disk and in every
+        backup, served by nothing.  Now no file is written and the card is
+        downloadable ("ready") as soon as generate returns.
+        """
+        patient = await _register_patient(client, bhw_token)
+        headers = {"Authorization": f"Bearer {bhw_token}"}
+
+        resp = await client.post(
+            f"/api/v1/health-cards/{patient['id']}/generate", headers=headers
+        )
+        assert resp.status_code == 201, resp.text
+        card_id = resp.json()["card"]["id"]
+
+        status = await client.get(
+            f"/api/v1/health-cards/generation-status/{card_id}", headers=headers
+        )
+        assert status.status_code == 200, status.text
+        assert status.json()["status"] == "ready"
+        assert status.json()["pdf_url"] is None
+        assert not (settings.MEDIA_DIR / "health_cards" / f"{card_id}.pdf").exists()
 
     async def test_get_card_no_qr_data_uri(
         self, client: AsyncClient, bhw_token: str
