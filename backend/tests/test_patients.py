@@ -734,6 +734,61 @@ async def test_update_patient_allergies_audit_log_has_field_name_not_value(
         assert "Penicillin" not in str(log.metadata_)
 
 
+# ── Edit form contract (frontend lib/schemas/patient.ts effectiveAddress) ───
+
+
+async def test_update_patient_structured_address_wins_over_free_text(
+    client: AsyncClient,
+    sample_patient: Patient,
+    bhw_user: tuple[User, str],
+) -> None:
+    """The Edit form's "Address after saving" preview relies on this rule."""
+    _, token = bhw_user
+    data = await _put(
+        client,
+        sample_patient.id,
+        token,
+        {
+            "address": "123 Rizal St.",
+            "sitio_purok": "Purok 2",
+            "barangay": "Turo",
+            "municipality": "Bocaue",
+            "province": "Bulacan",
+        },
+    )
+
+    assert data["address"] == "Purok 2, Turo, Bocaue, Bulacan"
+
+
+async def test_update_patient_free_text_address_used_without_structured_parts(
+    client: AsyncClient,
+    sample_patient: Patient,
+    bhw_user: tuple[User, str],
+) -> None:
+    _, token = bhw_user
+    data = await _put(client, sample_patient.id, token, {"address": "123 Rizal St., Marilao"})
+
+    assert data["address"] == "123 Rizal St., Marilao"
+
+
+async def test_update_patient_emergency_contact(
+    client: AsyncClient,
+    sample_patient: Patient,
+    bhw_user: tuple[User, str],
+) -> None:
+    """The Edit form's Emergency Contact section writes emergency_contact_* (printed on the card)."""
+    _, token = bhw_user
+    data = await _put(
+        client,
+        sample_patient.id,
+        token,
+        {"emergency_contact_name": "Juan Dela Cruz", "emergency_contact_number": "09171234567"},
+    )
+
+    assert data["emergency_contact_name"] == "Juan Dela Cruz"
+    assert data["emergency_contact_number"] == "+639171234567"
+
+
 async def test_update_patient_unauthenticated_returns_401(
     client: AsyncClient,
     sample_patient: Patient,
