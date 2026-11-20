@@ -262,7 +262,7 @@ All on the server, in `/opt/smarthealth-hub`:
 | Database shell | `dc exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"'` |
 | Current migration | `dc exec backend alembic current` |
 | Disk / memory | `df -h /` · `free -h` · `docker system df` |
-| Free disk from old images | `docker image prune -f` |
+| Free disk (old build cache + untagged images; `deploy.sh` does this after every deploy) | `docker builder prune -f` · `docker image prune -f` |
 
 **Saving Azure credit ($100/year, about $45/month at 24/7):** Azure portal →
 Virtual machines → `smarthealth-server` → **Stop** when nobody needs it, and

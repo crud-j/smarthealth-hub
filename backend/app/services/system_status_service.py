@@ -110,7 +110,7 @@ def classify_disk(total: int, free: int) -> DiskCheck:
         message = "Disk almost full. The database stops working when the disk is full."
     elif used_percent >= DISK_WARN_PERCENT:
         status = "warning"
-        message = "Disk is filling up. Free space soon (e.g. docker image prune -f)."
+        message = "Disk is filling up. Free space soon (e.g. docker builder prune -f)."
     return DiskCheck(
         status=status,
         message=message,

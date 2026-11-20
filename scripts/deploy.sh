@@ -10,6 +10,8 @@
 #   2. rebuilds + restarts the stack with GIT_COMMIT set, so the System Health
 #      page shows exactly which commit is running
 #   3. waits until every service is up / healthy and says if anything failed
+#   4. after a successful deploy, deletes old Docker build cache and untagged
+#      images (never volumes: database, photos and Redis data are untouched)
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -17,6 +19,20 @@ cd "$(dirname "$0")/.."
 
 compose() {
     docker compose -f docker-compose.server.yml --env-file .env.server "$@"
+}
+
+# Build cache newer than this is kept so the next deploy still builds quickly.
+KEEP_BUILD_CACHE=72h
+
+# Every rebuild leaves build cache and the previous (now untagged) backend
+# image behind; without this the server disk fills up. Only runs after a
+# successful deploy, and a failure here never fails the deploy.
+cleanup() {
+    echo "==> Freeing disk space (old build cache and untagged images)"
+    docker image prune -f >/dev/null || echo "WARNING: could not remove old images."
+    docker builder prune -f --filter "until=$KEEP_BUILD_CACHE" >/dev/null ||
+        echo "WARNING: could not remove old build cache."
+    df -h / | awk 'NR==2 {print "Disk: " $3 " used, " $4 " free (" $5 " used)"}'
 }
 
 branch=$(git rev-parse --abbrev-ref HEAD)
@@ -38,6 +54,8 @@ echo "==> Building and starting commit $GIT_COMMIT (usually 1-3 minutes)"
 
 if compose up -d --build --wait --wait-timeout 300; then
     compose ps
+    echo
+    cleanup
     echo
     echo "OK: commit $GIT_COMMIT is running."
     echo "Check it in the website: Settings > System Health (Version)."

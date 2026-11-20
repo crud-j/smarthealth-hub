@@ -22,6 +22,14 @@
 
 name: smarthealth
 
+# Container logs: at most 3 files of 10 MB per service (`dc logs` still works).
+# Without a limit Docker's json-file logs grow until the disk is full.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 # Shared settings for the three containers that run the backend image.
 # Only `backend` builds the image; worker and beat reuse it and must never try
 # to pull an image of that name from Docker Hub.
@@ -29,6 +37,7 @@ x-backend: &backend
   image: smarthealth-backend:latest
   pull_policy: never
   restart: unless-stopped
+  logging: *logging
   env_file:
     - .env.server
   environment: &backend-env
@@ -51,6 +60,7 @@ services:
   caddy:
     image: caddy:2.8-alpine
     restart: unless-stopped
+    logging: *logging
     ports:
       - "80:80"
       - "443:443"
@@ -114,6 +124,7 @@ services:
     # pg_dump from the dev PC restores cleanly.
     image: postgres:18-alpine
     restart: unless-stopped
+    logging: *logging
     environment:
       POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env.server}
       POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env.server}
@@ -133,6 +144,7 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    logging: *logging
     command: redis-server --appendonly yes
     volumes:
       - redisdata:/data
@@ -150,6 +162,7 @@ services:
     # BACKUP_TIME (Azure auto-shutdown), a catch-up backup runs after start-up.
     image: postgres:18-alpine
     restart: unless-stopped
+    logging: *logging
     command: ["sh", "/scripts/backup.sh", "loop"]
     environment:
       TZ: Asia/Manila
