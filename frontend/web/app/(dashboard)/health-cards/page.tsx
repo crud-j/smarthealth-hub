@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { apiFetch, ApiError } from "@/lib/api-client";
 import { toast } from "@/lib/toast";
-import { downloadHealthCardPdf } from "@/lib/health-card-pdf";
+import DownloadCardPdfButton from "@/components/cards/DownloadCardPdfButton";
 import { usePatientList } from "@/hooks/usePatients";
 import type {
   CardGenerateResponse,
@@ -240,6 +240,8 @@ interface ActionCellProps {
   rowState: RowCardState;
   genStatus: GenerationStatus | null;
   onGenerate: (patientId: string) => void;
+  /** After a successful download the row goes back to "View / Print". */
+  onDownloaded: (patientId: string) => void;
 }
 
 function ActionCell({
@@ -247,6 +249,7 @@ function ActionCell({
   rowState,
   genStatus,
   onGenerate,
+  onDownloaded,
 }: ActionCellProps) {
   if (genStatus !== null) {
     if (genStatus.status === "pending") {
@@ -259,21 +262,9 @@ function ActionCell({
     }
 
     if (genStatus.status === "ready") {
-      // Authenticated, on-demand /pdf endpoint (the stored /media file was public).
-      return (
-        <button
-          type="button"
-          onClick={() => {
-            downloadHealthCardPdf(patientId, `health_card_${patientId}.pdf`).catch((err: unknown) =>
-              toast.error(err instanceof Error ? err.message : "Failed to download PDF."),
-            );
-          }}
-          className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600 transition-all active:scale-[0.96]"
-        >
-          <PrintIcon />
-          Download PDF
-        </button>
-      );
+      // Just generated: offer the PDF once (authenticated, rendered on demand),
+      // then the row goes back to "View / Print".
+      return <DownloadCardPdfButton patientId={patientId} onDownloaded={onDownloaded} />;
     }
 
     if (genStatus.status === "failed") {
@@ -604,6 +595,17 @@ export default function HealthCardsPage() {
     }
   }, []);
 
+  // After the generated card's PDF is downloaded, drop the row's generate
+  // state so it shows the normal "View / Print" link again (cardMap is
+  // already "found" from handleGenerate).
+  const handleDownloaded = useCallback((patientId: string) => {
+    setGenStatusMap((prev) => {
+      const next = { ...prev };
+      delete next[patientId];
+      return next;
+    });
+  }, []);
+
   // ---------------------------------------------------------------------------
   // handleBatchGenerate — POST batch-generate with selected IDs
   // ---------------------------------------------------------------------------
@@ -890,6 +892,7 @@ export default function HealthCardsPage() {
                           rowState={rowState}
                           genStatus={genStatus}
                           onGenerate={(id) => void handleGenerate(id)}
+                          onDownloaded={handleDownloaded}
                         />
                       </td>
                     </tr>
