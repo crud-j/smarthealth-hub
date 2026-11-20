@@ -119,7 +119,7 @@ async def _dispatch_appointment_reminders_async() -> int:
                 "appointment_reminder",
                 patient.preferred_language,
                 patient_name=full_name,
-                appointment_type=appt.appointment_type,
+                appointment_type=appt.appointment_type.replace("_", " "),
                 scheduled_date=scheduled_date,
                 scheduled_time=scheduled_time,
             )

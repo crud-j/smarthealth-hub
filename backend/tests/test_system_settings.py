@@ -272,7 +272,7 @@ async def test_appointment_reminder_uses_saved_lead_time_and_template(
             "bhc_name": "BHC Uno",
             "sms_reminder_lead_hours": 48,
             "sms_templates": {
-                "appointment_reminder.en": "Paalala {patient_name}: {scheduled_date} {scheduled_time} sa {bhc_name}."
+                "appointment_reminder.en": "Paalala {patient_name}: {appointment_type} {scheduled_date} {scheduled_time} sa {bhc_name}."
             },
         },
         headers=_auth(admin_token),
@@ -280,7 +280,7 @@ async def test_appointment_reminder_uses_saved_lead_time_and_template(
     appt = Appointment(
         id=uuid.uuid4(),
         patient_id=patient.id,
-        appointment_type="consultation",
+        appointment_type="follow_up",
         scheduled_at=datetime.now(tz=UTC) + timedelta(hours=48),
         status="pending",
     )
@@ -294,7 +294,7 @@ async def test_appointment_reminder_uses_saved_lead_time_and_template(
 
     messages = await _queued_messages(db_session, appointment_id=appt_id)
     assert len(messages) == 1
-    assert messages[0].startswith("Paalala Maria Santos Dela Cruz: ")
+    assert messages[0].startswith("Paalala Maria Santos Dela Cruz: follow up ")
     assert "sa BHC Uno." in messages[0]
     assert messages[0].endswith("to confirm.")
 
@@ -367,5 +367,5 @@ async def test_broken_stored_template_falls_back_to_default(
 
     messages = await _queued_messages(db_session, immunization_id=shot_id)
     assert len(messages) == 1
-    assert messages[0].startswith("Hi Maria Santos Dela Cruz, your Hepatitis B immunization")
+    assert messages[0].startswith("Hi Maria Santos Dela Cruz, Hepatitis B immunization due ")
     assert "__class__" not in messages[0]

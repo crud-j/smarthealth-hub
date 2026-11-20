@@ -14,12 +14,11 @@ import { apiFetch, ApiError } from "@/lib/api-client";
 import { toast } from "@/lib/toast";
 import AccessDenied from "@/components/layout/AccessDenied";
 import RoleGuard from "@/components/layout/RoleGuard";
-import SmsTemplateEditor from "@/components/settings/SmsTemplateEditor";
+import SmsTemplateCard from "@/components/settings/SmsTemplateCard";
 import {
   buildSettingsUpdate,
   draftFrom,
   draftProblems,
-  templateId,
   type SettingsDraft,
   type SettingsUpdate,
   type SettingValue,
@@ -207,23 +206,17 @@ function SystemConfiguration() {
 
           <Card>
             <SectionHeader title="SMS templates" note="Patients get the version in their preferred language" />
-            <div className="space-y-6 p-5">
+            <div className="space-y-5 p-5">
               {TEMPLATE_GROUPS.map((group) => (
-                <div key={group.kind}>
-                  <h3 className="text-sm font-bold text-[#1a0808]">{group.title}</h3>
-                  <p className="mb-3 text-xs text-[#9b6e6e]">{group.when(draft)}</p>
-                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                    {settings.sms_templates.filter((t) => t.kind === group.kind).map((t) => (
-                      <SmsTemplateEditor
-                        key={templateId(t)}
-                        template={t}
-                        value={draft.templates[templateId(t)] ?? t.value}
-                        onChange={(next) => setDraft((d) => (d ? { ...d, templates: { ...d.templates, [templateId(t)]: next } } : d))}
-                        sampleValues={{ ...settings.sample_values, bhc_name: draft.bhcName.trim() || settings.sample_values.bhc_name }}
-                      />
-                    ))}
-                  </div>
-                </div>
+                <SmsTemplateCard
+                  key={group.kind}
+                  title={group.title}
+                  when={group.when(draft)}
+                  templates={settings.sms_templates.filter((t) => t.kind === group.kind)}
+                  values={draft.templates}
+                  onChange={(id, next) => setDraft((d) => (d ? { ...d, templates: { ...d.templates, [id]: next } } : d))}
+                  sampleValues={{ ...settings.sample_values, bhc_name: draft.bhcName.trim() || settings.sample_values.bhc_name }}
+                />
               ))}
             </div>
           </Card>

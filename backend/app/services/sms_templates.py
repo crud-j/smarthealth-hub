@@ -33,30 +33,29 @@ TEMPLATE_KINDS: tuple[str, ...] = (
 TEMPLATE_LANGUAGES: tuple[str, ...] = ("en", "fil")
 MAX_TEMPLATE_LENGTH = 480
 
+# Sized to fit with long real values (see LONG_VALUES and the test that
+# checks them): appointment reminders within APPOINTMENT_TEMPLATE_LIMIT, the
+# rest within one 160-character SMS. The old appointment wording (183 chars
+# with typical values) was always cut before the CONFIRM code.
 TEMPLATE_DEFAULTS: dict[str, dict[str, str]] = {
     "appointment_reminder": {
         "en": (
-            "Hi {patient_name}, this is a reminder for your {appointment_type} "
-            "appointment at {bhc_name} on {scheduled_date} at "
-            "{scheduled_time}. Please arrive 15 minutes early. "
-            "Reply STOP to unsubscribe."
+            "Hi {patient_name}, reminder: {appointment_type} at {bhc_name} "
+            "on {scheduled_date} {scheduled_time}. Reply STOP to opt out."
         ),
         "fil": (
-            "Kamusta {patient_name}, paalala: mayroon kang {appointment_type} "
-            "na appointment sa {bhc_name} sa {scheduled_date} ng {scheduled_time}. "
-            "Sagutin ng STOP para mag-opt out."
+            "Kamusta {patient_name}, paalala: {appointment_type} sa {bhc_name}, "
+            "{scheduled_date} {scheduled_time}. STOP para mag-opt out."
         ),
     },
     "immunization_reminder": {
         "en": (
-            "Hi {patient_name}, your {vaccine_name} immunization is due on "
-            "{due_date} at {bhc_name}. Please bring your health "
-            "card. Reply STOP to unsubscribe."
+            "Hi {patient_name}, {vaccine_name} immunization due {due_date} "
+            "at {bhc_name}. Bring health card. Reply STOP to opt out."
         ),
         "fil": (
             "Kamusta {patient_name}, ang {vaccine_name} (dose {dose_number}) "
-            "para kay {patient_name} ay dapat ibigay sa {due_date}. "
-            "Pakidalaw ang {bhc_name}."
+            "ay dapat ibigay sa {due_date}. Pakidalaw ang {bhc_name}."
         ),
     },
     "missed_appointment": {
@@ -103,12 +102,25 @@ APPOINTMENT_TEMPLATE_LIMIT = 135
 SAMPLE_VALUES: dict[str, str] = {
     "patient_name": "Juan Dela Cruz",
     "first_name": "Juan",
-    "appointment_type": "consultation",
+    "appointment_type": "checkup",
     "scheduled_date": "12/01/2026",
     "scheduled_time": "09:00 AM",
     "vaccine_name": "Measles (MMR)",
     "dose_number": "1",
     "due_date": "12/04/2026",
+}
+
+# Long but realistic values; the built-in templates must fit with these.
+LONG_VALUES: dict[str, str] = {
+    "patient_name": "Maria Cristina Santos Dela Cruz",
+    "first_name": "Maria Cristina",
+    "appointment_type": "vaccination",
+    "scheduled_date": "12/01/2026",
+    "scheduled_time": "09:00 AM",
+    "vaccine_name": "Pentavalent (DPT-HepB-Hib)",
+    "dose_number": "3",
+    "due_date": "12/04/2026",
+    "bhc_name": "Barangay Health Center",
 }
 
 
