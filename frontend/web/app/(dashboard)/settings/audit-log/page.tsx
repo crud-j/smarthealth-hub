@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { Download } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api-client";
+import AccessDenied from "@/components/layout/AccessDenied";
+import RoleGuard from "@/components/layout/RoleGuard";
 
 interface AuditLogEntry {
   id: string; user_id: string | null; user_email?: string | null; action: string;
@@ -29,7 +31,7 @@ function formatDateTime(iso: string): string {
 const ACTIONS = ["CREATE", "UPDATE", "DELETE", "VIEW", "VIEW_PHI", "LOGIN", "LOGOUT"];
 const PAGE_SIZE = 20;
 
-export default function AuditLogPage() {
+function AuditLog() {
   const [data, setData] = useState<PaginatedAuditLogs | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -254,5 +256,15 @@ export default function AuditLogPage() {
         )}
       </div>
     </div>
+  );
+}
+
+// Admin only (backend: require_role("admin")). Non-admins who type the URL get
+// a clear message instead of a failed API call.
+export default function AuditLogPage() {
+  return (
+    <RoleGuard roles={["admin"]} fallback={<AccessDenied allowed="Admins" what="the audit log" />}>
+      <AuditLog />
+    </RoleGuard>
   );
 }

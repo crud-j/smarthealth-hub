@@ -498,7 +498,7 @@ export default function RegistrationsPage() {
         <div>
           <div className="flex items-center gap-2.5">
             <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
-              Pending Registrations
+              Registration Inbox
             </h1>
             {totalPending > 0 && (
               <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-rose-600 px-1.5 text-xs font-bold text-white">

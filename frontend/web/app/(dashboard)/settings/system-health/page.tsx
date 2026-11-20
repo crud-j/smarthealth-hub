@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { apiFetch, ApiError } from "@/lib/api-client";
+import AccessDenied from "@/components/layout/AccessDenied";
+import RoleGuard from "@/components/layout/RoleGuard";
 
 // ---------------------------------------------------------------------------
 // Types (mirror backend/app/schemas/system_config.py SystemStatusResponse)
@@ -145,7 +147,7 @@ function SkeletonCard() {
 // Page
 // ---------------------------------------------------------------------------
 
-export default function SystemHealthPage() {
+function SystemHealth() {
   const [data, setData] = useState<SystemStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -329,5 +331,15 @@ export default function SystemHealthPage() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+// Admin only (backend: require_role("admin")). Non-admins who type the URL get
+// a clear message instead of a failed API call.
+export default function SystemHealthPage() {
+  return (
+    <RoleGuard roles={["admin"]} fallback={<AccessDenied allowed="Admins" what="system health" />}>
+      <SystemHealth />
+    </RoleGuard>
   );
 }
