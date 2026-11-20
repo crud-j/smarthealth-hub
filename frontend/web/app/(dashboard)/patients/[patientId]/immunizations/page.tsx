@@ -3,6 +3,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useCurrentUser } from "@/hooks/useAuth";
 import { canDeleteImmunization } from "@/lib/permissions";
+import { PatientAllergyAlert } from "@/components/ui/AllergyAlert";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -268,6 +269,8 @@ export default function PatientImmunizationsPage({ params }: { params: Promise<{
           </button>
         )}
       </div>
+
+      <PatientAllergyAlert patientId={patientId} />
 
       {showAddForm && (
         <ImmunizationForm initial={EMPTY_FORM} onSubmit={(f) => void handleAdd(f)} onCancel={() => setShowAddForm(false)} submitLabel="Add Record" submitting={addSubmitting} />

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { usePatient, usePatientVisits, useDeactivatePatient, useArchivePatient } from "@/hooks/usePatients";
 import { useCurrentUser } from "@/hooks/useAuth";
 import { canLogVisit } from "@/lib/permissions";
+import { AllergyAlert } from "@/components/ui/AllergyAlert";
 import type { VisitSummary } from "@/types/patient";
 import React, { useEffect, useState } from "react";
 import ProfilePhotoUploader from "@/app/(dashboard)/patients/_components/ProfilePhotoUploader";
@@ -325,6 +326,8 @@ export default function PatientProfilePage({ params }: { params: Promise<{ patie
           )}
         </div>
       </div>
+
+      <AllergyAlert status="ready" allergies={patient.allergies} editHref={`/patients/${patientId}/edit`} />
 
       {toast && <Toast toast={toast} onDismiss={() => setToast(null)} />}
 

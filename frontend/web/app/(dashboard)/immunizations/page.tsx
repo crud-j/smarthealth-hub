@@ -13,6 +13,7 @@ import { useCurrentUser } from "@/hooks/useAuth";
 import { canDeleteImmunization } from "@/lib/permissions";
 import { toast } from "@/lib/toast";
 import { AlertDialog } from "@/components/ui/alert-dialog";
+import { PatientAllergyAlert } from "@/components/ui/AllergyAlert";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -240,6 +241,10 @@ function ImmunizationModal({ mode, initial, onClose, onSaved }: ImmunizationModa
               )}
             </div>
           )}
+
+          {/* Allergies of the selected patient, before the vaccine is recorded.
+              No edit link here: leaving the dialog would lose the form. */}
+          {selectedPatientId && <PatientAllergyAlert patientId={selectedPatientId} showEditLink={false} />}
 
           {/* Vaccine */}
           <div>

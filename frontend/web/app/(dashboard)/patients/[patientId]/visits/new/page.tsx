@@ -7,6 +7,7 @@ import { useCurrentUser } from "@/hooks/useAuth";
 import { useCreateVisit, usePatient } from "@/hooks/usePatients";
 import { canLogVisit } from "@/lib/permissions";
 import { toast } from "@/lib/toast";
+import { AllergyAlert } from "@/components/ui/AllergyAlert";
 import type { VisitCreatePayload } from "@/types/patient";
 
 const inputClass =
@@ -126,6 +127,8 @@ export default function NewVisitPage({
           Record a visit for <strong>{patient.fullName}</strong> ({patient.patientCode}).
         </p>
       </div>
+
+      <AllergyAlert status="ready" allergies={patient.allergies} editHref={`/patients/${patientId}/edit`} />
 
       <form onSubmit={(event) => void handleSubmit(event)} className="space-y-4" noValidate>
         <section className="rounded-xl border border-[#e5d4cc] bg-white p-5 shadow-sm">
