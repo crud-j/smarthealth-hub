@@ -456,3 +456,124 @@ async def delete_user(
     #    passkey_credentials, and trusted_devices automatically.
     await db.delete(user)
     await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Admin account-security actions
+# ---------------------------------------------------------------------------
+
+
+async def _end_sessions(db: AsyncSession, user: User) -> int:
+    """
+    Clear the user's refresh token and remembered devices (DB part of
+    "sign out everywhere"). Returns how many trusted devices were removed.
+    The caller commits, then calls ``revoke_all_user_tokens`` for the
+    short-lived access tokens.
+    """
+    from app.models.trusted_device import TrustedDevice  # noqa: PLC0415
+
+    user.refresh_token_hash = None
+    result = await db.execute(sa.delete(TrustedDevice).where(TrustedDevice.user_id == user.id))
+    return int(getattr(result, "rowcount", 0) or 0)
+
+
+async def _revoke_access_tokens(user_id: uuid.UUID) -> None:
+    from app.core.security import revoke_all_user_tokens  # noqa: PLC0415
+
+    await revoke_all_user_tokens(str(user_id))
+
+
+async def reset_password(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    new_password: str,
+    *,
+    send_sms: bool,
+    reset_by: uuid.UUID,
+    ip_address: str | None = None,
+) -> int:
+    """
+    Admin sets a temporary password for a staff account and signs it out
+    everywhere (refresh token, remembered devices, current access tokens).
+
+    The plaintext password is only hashed and, when ``send_sms`` is True,
+    texted to the user's registered mobile number. It is never logged,
+    audited or returned. Returns the number of trusted devices removed.
+
+    Raises:
+        NotFoundError: If user_id does not exist.
+    """
+    user = await get_user(db, user_id)
+    user.password_hash = hash_password(new_password)
+    removed = await _end_sessions(db, user)
+
+    await write_audit_log(
+        db=db,
+        action="PASSWORD_RESET",
+        entity_type="user",
+        entity_id=user.id,
+        user_id=reset_by,
+        metadata={
+            "trigger": "admin",
+            "sms_sent": send_sms,
+            "trusted_devices_removed": removed,
+        },
+        ip_address=ip_address,
+    )
+    await db.commit()
+    await _revoke_access_tokens(user.id)
+
+    if send_sms:
+        # Fire-and-forget, like the welcome SMS: an SMS failure must not undo
+        # the reset (the admin also knows the password and can hand it over).
+        try:
+            from app.workers.sms_tasks import send_sms_task  # noqa: PLC0415
+
+            send_sms_task.delay(
+                mobile_number=user.mobile_number,
+                message=(
+                    "SmartHealth Hub: your password was reset by the administrator. "
+                    f"Temporary password: {new_password} . "
+                    "Please log in and change it right away."
+                ),
+            )
+        except Exception:
+            logger.warning(
+                "reset_password: failed to enqueue SMS for user %s — password reset anyway.",
+                user.id,
+                exc_info=True,
+            )
+    return removed
+
+
+async def sign_out_everywhere(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    signed_out_by: uuid.UUID,
+    ip_address: str | None = None,
+) -> int:
+    """
+    End every session of a staff account: refresh token, remembered devices
+    (next login asks for the OTP again) and current access tokens.
+
+    Returns the number of trusted devices removed.
+
+    Raises:
+        NotFoundError: If user_id does not exist.
+    """
+    user = await get_user(db, user_id)
+    removed = await _end_sessions(db, user)
+
+    await write_audit_log(
+        db=db,
+        action="SESSIONS_REVOKED",
+        entity_type="user",
+        entity_id=user.id,
+        user_id=signed_out_by,
+        metadata={"trigger": "admin", "trusted_devices_removed": removed},
+        ip_address=ip_address,
+    )
+    await db.commit()
+    await _revoke_access_tokens(user.id)
+    return removed

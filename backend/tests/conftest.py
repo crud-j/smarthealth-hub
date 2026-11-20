@@ -110,6 +110,28 @@ async def engine():
 
 
 # ---------------------------------------------------------------------------
+# Rate limiter isolation
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _isolated_rate_limits():
+    """
+    The rate limiter keeps its counts in Redis, which outlives the test run.
+    Give every session its own key prefix so a second local run within the
+    15-minute window does not start with the previous run's login attempts.
+    """
+    import uuid as _uuid
+
+    from app.core.rate_limit import limiter
+
+    original = limiter.key_prefix
+    limiter.key_prefix = f"ratelimit:test-{_uuid.uuid4().hex[:8]}:"
+    yield
+    limiter.key_prefix = original
+
+
+# ---------------------------------------------------------------------------
 # Session-scoped table setup / teardown
 # ---------------------------------------------------------------------------
 

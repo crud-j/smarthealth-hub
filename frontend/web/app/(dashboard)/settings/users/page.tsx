@@ -8,6 +8,8 @@ import { toast } from "@/lib/toast";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import CreateUserModal from "@/components/modals/CreateUserModal";
 import EditUserModal from "@/components/modals/EditUserModal";
+import ResetPasswordModal, { type AccountActionResult } from "@/components/modals/ResetPasswordModal";
+import { useCurrentUser } from "@/hooks/useAuth";
 
 export interface StaffUser {
   id: string; full_name: string; email: string; mobile_number: string;
@@ -29,10 +31,19 @@ const ROLE_BADGE: Record<string, string> = {
 
 const PAGE_SIZE = 20;
 
-function formatDate(iso: string | null | undefined): string {
+function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return "Never";
-  return new Date(iso).toLocaleDateString("en-PH", { year: "numeric", month: "short", day: "numeric" });
+  return new Date(iso).toLocaleString("en-PH", {
+    year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+  });
 }
+
+function devicesNote(removed: number): string {
+  if (removed === 0) return "";
+  return ` ${removed} remembered device${removed === 1 ? "" : "s"} will ask for the OTP again.`;
+}
+
+const rowBtnCls = "rounded-lg border border-[#e5d4cc] bg-white px-3 py-1.5 text-xs font-semibold text-[#3d2222] hover:bg-[#fdf5f0] disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e]";
 
 function StaffUsers() {
   const [data, setData] = useState<PaginatedUsers | null>(null);
@@ -49,6 +60,10 @@ function StaffUsers() {
   const [editTarget, setEditTarget] = useState<StaffUser | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<StaffUser | null>(null);
+  const [resetTarget, setResetTarget] = useState<StaffUser | null>(null);
+  const [signOutTarget, setSignOutTarget] = useState<StaffUser | null>(null);
+  const [signingOut, setSigningOut] = useState(false);
+  const { user: me } = useCurrentUser();
 
   const fetchUsers = useCallback(async () => {
     setLoading(true); setFetchError("");
@@ -92,6 +107,27 @@ function StaffUsers() {
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Failed to delete user.");
     } finally { setDeleting(false); }
+  }
+
+  async function confirmSignOut() {
+    if (!signOutTarget) return;
+    setSigningOut(true);
+    try {
+      const result = await apiFetch<AccountActionResult>(`/users/${signOutTarget.id}/sign-out`, { method: "POST" });
+      toast.success(`${signOutTarget.full_name} was signed out everywhere.${devicesNote(result.trusted_devices_removed)}`);
+      setSignOutTarget(null);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Failed to sign the user out.");
+    } finally { setSigningOut(false); }
+  }
+
+  function handleResetDone(result: AccountActionResult, smsSent: boolean) {
+    const name = resetTarget?.full_name ?? "The user";
+    const handover = smsSent
+      ? "The temporary password was texted to them."
+      : "Give them the temporary password in person.";
+    toast.success(`Password reset for ${name}. ${handover}${devicesNote(result.trusted_devices_removed)}`);
+    setResetTarget(null);
   }
 
   const totalPages = data ? Math.ceil(data.total / PAGE_SIZE) : 1;
@@ -199,14 +235,29 @@ function StaffUsers() {
                       {u.is_active ? "Active" : "Inactive"}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-sm text-[#9b6e6e]">{formatDate(u.last_login_at)}</td>
+                  <td className="px-4 py-3 text-sm whitespace-nowrap text-[#9b6e6e]">{formatDateTime(u.last_login_at)}</td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <button type="button" onClick={() => { setEditTarget(u); setModalMode("edit"); }}
-                        className="rounded-lg border border-[#e5d4cc] bg-white px-3 py-1.5 text-xs font-semibold text-[#3d2222] hover:bg-[#fdf5f0] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e]"
+                        className={rowBtnCls}
                         aria-label={`Edit ${u.full_name}`}>
                         Edit
                       </button>
+                      {/* Own account: use the Security page instead (backend returns 400). */}
+                      {u.id !== me?.id && (
+                        <>
+                          <button type="button" onClick={() => setResetTarget(u)}
+                            className={rowBtnCls}
+                            aria-label={`Reset password for ${u.full_name}`}>
+                            Reset password
+                          </button>
+                          <button type="button" onClick={() => setSignOutTarget(u)} disabled={signingOut}
+                            className={rowBtnCls}
+                            aria-label={`Sign out ${u.full_name} everywhere`}>
+                            Sign out
+                          </button>
+                        </>
+                      )}
                       <button type="button" onClick={() => handleDelete(u)} disabled={deleting}
                         className="rounded-lg border border-[#fca5a5] bg-[#fef2f2] px-3 py-1.5 text-xs font-semibold text-[#dc2626] hover:bg-[#fee2e2] disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#dc2626]"
                         aria-label={`Delete ${u.full_name}`}>
@@ -271,6 +322,27 @@ function StaffUsers() {
         loading={deleting}
         onConfirm={() => void confirmDelete()}
         onCancel={() => setDeleteTarget(null)}
+      />
+
+      {resetTarget && (
+        <ResetPasswordModal
+          key={resetTarget.id}
+          open
+          user={resetTarget}
+          onClose={() => setResetTarget(null)}
+          onDone={handleResetDone}
+        />
+      )}
+
+      <AlertDialog
+        open={signOutTarget !== null}
+        title={signOutTarget ? `Sign out ${signOutTarget.full_name} everywhere?` : "Sign out everywhere?"}
+        description="Ends their sessions on every phone and computer and forgets remembered devices. Their next login needs the password and the OTP. Use this for a lost or shared device."
+        confirmLabel="Sign out everywhere"
+        isDangerous
+        loading={signingOut}
+        onConfirm={() => void confirmSignOut()}
+        onCancel={() => setSignOutTarget(null)}
       />
     </div>
   );

@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Annotated, Any
@@ -174,26 +175,61 @@ async def is_token_revoked(jti: str) -> bool:
 
 async def revoke_all_user_tokens(user_id: str) -> None:
     """
-    Best-effort: set a Redis marker that signals all tokens for ``user_id``
-    issued before now should be treated as revoked.
+    Best-effort "sign out everywhere": every access token for ``user_id``
+    issued in an earlier second than now is rejected by ``get_current_user``.
 
-    Because we do not maintain a per-user token index, this sets a
-    ``revoked:user:{user_id}`` key that ``is_token_revoked`` could check
-    in addition to the per-JTI key.  Short-lived access tokens (8 h) and
-    7-day refresh tokens mean the window of exposure is bounded.
+    Stores the revocation time (Unix seconds) in ``revoked:user:{user_id}``
+    for the longest token lifetime (the refresh-token lifetime). Callers must
+    also clear ``users.refresh_token_hash`` in the DB — that part does not
+    depend on Redis, so even during a Redis outage a signed-out user loses
+    access when their current access token expires.
 
     On Redis error: logs a WARNING and returns — best-effort only.
     """
     try:
         r = _get_redis()
-        # Keep the marker for 7 days (longest possible token lifetime).
-        await r.setex(f"revoked:user:{user_id}", 7 * 24 * 3600, "1")
+        ttl = settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS * 24 * 3600
+        await r.setex(f"revoked:user:{user_id}", ttl, str(int(time.time())))
     except (Exception, asyncio.CancelledError) as exc:  # noqa: BLE001
         _logger.warning(
             "revoke_all_user_tokens: Redis unavailable — tokens for user %s not revoked. Error: %s",
             user_id,
             exc,
         )
+
+
+async def is_user_session_revoked(user_id: str, issued_at: int) -> bool:
+    """
+    True if ``revoke_all_user_tokens(user_id)`` ran after a token issued at
+    ``issued_at`` (JWT ``iat``, Unix seconds).
+
+    ``iat`` has one-second precision, so a token issued in the same second
+    as the revocation is still accepted; the user must have logged in before
+    the admin's click for it to be cut off, which is the case this is for.
+
+    On Redis error: logs a WARNING and returns ``False`` (fail open, like
+    ``is_token_revoked``). A marker that is not a number (written by older
+    code as "1") is ignored.
+    """
+    try:
+        r = _get_redis()
+        value = await r.get(f"revoked:user:{user_id}")
+    except (Exception, asyncio.CancelledError) as exc:  # noqa: BLE001
+        _logger.warning(
+            "is_user_session_revoked: Redis unavailable — allowing token for user %s. Error: %s",
+            user_id,
+            exc,
+        )
+        return False
+    if value is None:
+        return False
+    try:
+        revoked_at = int(value)
+    except (TypeError, ValueError):
+        return False
+    if revoked_at < 1_000_000_000:  # legacy "1" marker, not a timestamp
+        return False
+    return issued_at < revoked_at
 
 
 # ---------------------------------------------------------------------------
@@ -432,6 +468,11 @@ async def get_current_user(
     jti: str | None = payload.get("jti")
     if jti and await is_token_revoked(jti):
         raise UnauthorizedError("Token has been revoked. Please log in again.")
+
+    # "Sign out everywhere" (admin action or password reset).
+    issued_at = payload.get("iat")
+    if isinstance(issued_at, int) and await is_user_session_revoked(subject, issued_at):
+        raise UnauthorizedError("You were signed out by an administrator. Please log in again.")
 
     # Load user with role relationship in one query (avoids lazy-load error in async).
     result = await db.execute(
