@@ -33,9 +33,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import NotFoundError
 from app.core.logging import get_logger
 from app.models.health_card import HealthCard
+from app.models.patient import Patient
 from app.services import nfc_payload_service, qr_service
 from app.services.audit_service import write_audit_log
 from app.services.patient_service import get_patient
+from app.utils.encryption import decrypt_text
 
 logger = get_logger(__name__)
 
@@ -423,3 +425,37 @@ async def get_bulk_card_status(
 
     no_card: dict = {"status": "none", "card_number": None, "card_id": None, "card_version": None}
     return {str(pid): card_map.get(str(pid), no_card) for pid in patient_ids}
+
+
+# ---------------------------------------------------------------------------
+# Allergies text shared by every card surface
+# ---------------------------------------------------------------------------
+
+# Shown on every card surface when the patient has no allergies recorded.
+# card_back.html and HealthCardPreview.tsx compare against this exact string.
+NO_ALLERGIES_TEXT = "None on record"
+
+
+def patient_allergies(patient: Patient) -> str | None:
+    """
+    Return the patient's allergies as readable text, or ``None`` if not recorded.
+
+    ``patients.allergies`` is stored AES-256-GCM encrypted (patient_service
+    encrypts it on every write), so it must be decrypted before display.
+    ``decrypt_text`` returns legacy plaintext values unchanged.
+    """
+    if not patient.allergies:
+        return None
+    return decrypt_text(patient.allergies) or None
+
+
+def card_allergies(patient: Patient) -> str:
+    """
+    Allergies text for the card PDF (on-demand and Celery-rendered), the UID
+    scan payload and the relay monitor.
+
+    Always ``patients.allergies`` (decrypted), the same source as the NFC tap
+    view, never ``medical_histories.condition_name``: a chronic condition such
+    as hypertension is not an allergy.
+    """
+    return patient_allergies(patient) or NO_ALLERGIES_TEXT
