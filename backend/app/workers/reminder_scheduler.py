@@ -18,16 +18,13 @@ Tasks:
 Both tasks are idempotent: the NOT EXISTS guard prevents double-queuing if
 Beat fires more than once in the same window (e.g. clock skew, restart).
 
-Template registry (extend here for additional language variants):
-  SMS_TEMPLATES["appointment_reminder"]["en"]   — English
-  SMS_TEMPLATES["appointment_reminder"]["fil"]  — Filipino
-  SMS_TEMPLATES["immunization_reminder"]["en"]  — English
-  SMS_TEMPLATES["immunization_reminder"]["fil"] — Filipino
-  SMS_TEMPLATES["missed_appointment"]["en"]     — English
-  SMS_TEMPLATES["missed_appointment"]["fil"]    — Filipino
+Lead times, the clinic name and the SMS templates come from
+app.services.system_settings_service (admin-editable on the System
+Configuration page; defaults: .env and app.services.sms_templates). They are
+read at the start of every run, so a change applies on the next run.
 
 Template selection uses patient.preferred_language; falls back to "en" when
-the patient's preferred language is not present in the registry.
+there is no template for the patient's language.
 """
 
 from __future__ import annotations
@@ -40,8 +37,8 @@ from typing import Any, cast
 
 from sqlalchemy.engine import CursorResult
 
-from app.core.config import settings
 from app.core.logging import get_logger
+from app.services.system_settings_service import load_runtime_settings
 from app.workers.celery_app import celery_app
 
 logger = get_logger(__name__)
@@ -49,64 +46,6 @@ logger = get_logger(__name__)
 from app.workers.sms_tasks import send_reminder_task as _celery_send_reminder_task  # noqa: E402
 
 send_reminder_task = _celery_send_reminder_task
-
-# ---------------------------------------------------------------------------
-# SMS template registry
-# ---------------------------------------------------------------------------
-# Add Filipino ("fil") variants by adding another key under each template.
-# The scheduler reads the "en" key by default; make the key selection
-# configurable (e.g. from a barangay settings row) in a future iteration.
-
-SMS_TEMPLATES: dict[str, dict[str, str]] = {
-    "appointment_reminder": {
-        "en": (
-            "Hi {patient_name}, this is a reminder for your {appointment_type} "
-            "appointment at the Barangay Health Center on {scheduled_date} at "
-            "{scheduled_time}. Please arrive 15 minutes early. "
-            "Reply STOP to unsubscribe."
-        ),
-        "fil": (
-            "Kamusta {patient_name}, paalala: mayroon kang {appointment_type} "
-            "na appointment sa {bhc_name} sa {scheduled_date} ng {scheduled_time}. "
-            "Sagutin ng STOP para mag-opt out."
-        ),
-    },
-    "immunization_reminder": {
-        "en": (
-            "Hi {patient_name}, your {vaccine_name} immunization is due on "
-            "{due_date} at the Barangay Health Center. Please bring your health "
-            "card. Reply STOP to unsubscribe."
-        ),
-        "fil": (
-            "Kamusta {patient_name}, ang {vaccine_name} (dose {dose_number}) "
-            "para kay {patient_name} ay dapat ibigay sa {due_date}. "
-            "Pakidalaw ang {bhc_name}."
-        ),
-    },
-    "missed_appointment": {
-        "en": (
-            "Hi {first_name}, we noticed you missed your appointment today. "
-            "Please contact {bhc_name} to reschedule."
-        ),
-        "fil": (
-            "Kamusta {first_name}, napansin namin na hindi ka dumating sa "
-            "iyong appointment ngayon. Makipag-ugnayan sa {bhc_name} para mag-reschedule."
-        ),
-    },
-}
-
-
-def _resolve_lang(preferred_language: str | None, template_key: str) -> str:
-    """
-    Return the language key to use for a given template.
-
-    Falls back to "en" when ``preferred_language`` is None, empty, or not
-    present as a key in ``SMS_TEMPLATES[template_key]``.
-    """
-    lang = preferred_language or "en"
-    if lang not in SMS_TEMPLATES.get(template_key, {}):
-        lang = "en"
-    return lang
 
 
 def _build_full_name(first: str, middle: str | None, last: str) -> str:
@@ -135,14 +74,15 @@ async def _dispatch_appointment_reminders_async() -> int:
     from app.models.sms_log import SmsLog
     from app.workers.db import CelerySessionLocal
 
-    lead_hours = settings.SMS_REMINDER_LEAD_HOURS
-    now = datetime.now(tz=UTC)
-    window_start = now + timedelta(hours=lead_hours) - timedelta(minutes=30)
-    window_end = now + timedelta(hours=lead_hours) + timedelta(minutes=30)
-
     queued_count = 0
 
     async with CelerySessionLocal() as db:
+        runtime = await load_runtime_settings(db)
+        lead_hours = runtime.sms_reminder_lead_hours
+        now = datetime.now(tz=UTC)
+        window_start = now + timedelta(hours=lead_hours) - timedelta(minutes=30)
+        window_end = now + timedelta(hours=lead_hours) + timedelta(minutes=30)
+
         # Find appointments in the reminder window that have not yet had
         # an sms_log created for them (status queued / sent / delivered).
         existing_sms_subq = (
@@ -175,13 +115,13 @@ async def _dispatch_appointment_reminders_async() -> int:
             scheduled_date = appt.scheduled_at.strftime("%m/%d/%Y")
             scheduled_time = appt.scheduled_at.strftime("%I:%M %p")
 
-            lang = _resolve_lang(patient.preferred_language, "appointment_reminder")
-            base_message = SMS_TEMPLATES["appointment_reminder"][lang].format(
+            base_message = runtime.render_sms(
+                "appointment_reminder",
+                patient.preferred_language,
                 patient_name=full_name,
                 appointment_type=appt.appointment_type,
                 scheduled_date=scheduled_date,
                 scheduled_time=scheduled_time,
-                bhc_name=settings.BHC_NAME,
             )
 
             # Generate a 4-digit confirmation token for SMS reply-confirm flow.
@@ -248,13 +188,14 @@ async def _dispatch_immunization_reminders_async() -> int:
     from app.models.sms_log import SmsLog
     from app.workers.db import CelerySessionLocal
 
-    lead_days = settings.SMS_IMMUNIZATION_LEAD_DAYS
-    target_date: date = (datetime.now(tz=UTC) + timedelta(days=lead_days)).date()
-    today: date = datetime.now(tz=UTC).date()
-
     queued_count = 0
 
     async with CelerySessionLocal() as db:
+        runtime = await load_runtime_settings(db)
+        lead_days = runtime.sms_immunization_lead_days
+        target_date: date = (datetime.now(tz=UTC) + timedelta(days=lead_days)).date()
+        today: date = datetime.now(tz=UTC).date()
+
         # Idempotency: skip if there's already an sms_log for this patient
         # today whose message contains the word "immunization".
         existing_today_subq = (
@@ -291,13 +232,13 @@ async def _dispatch_immunization_reminders_async() -> int:
                 else ""
             )  # type: ignore[union-attr]
 
-            lang = _resolve_lang(patient.preferred_language, "immunization_reminder")
-            message = SMS_TEMPLATES["immunization_reminder"][lang].format(
+            message = runtime.render_sms(
+                "immunization_reminder",
+                patient.preferred_language,
                 patient_name=full_name,
                 vaccine_name=immunization.vaccine_name,
                 due_date=due_date_str,
                 dose_number=immunization.dose_number,
-                bhc_name=settings.BHC_NAME,
             )
 
             sms_log = SmsLog(
@@ -343,7 +284,7 @@ def dispatch_appointment_reminders() -> dict:  # type: ignore[type-arg]
     """
     Hourly periodic task (Celery Beat, runs at :00 every hour).
 
-    Finds appointments within the SMS_REMINDER_LEAD_HOURS ± 30 min window,
+    Finds appointments within the reminder lead time (admin setting) ± 30 min window,
     creates sms_logs rows (status='queued'), and enqueues send_reminder_task
     for each.  The NOT EXISTS guard makes this idempotent — duplicate runs
     (e.g. due to Beat restart) will not double-queue reminders.
@@ -362,7 +303,7 @@ def dispatch_immunization_reminders() -> dict:  # type: ignore[type-arg]
     """
     Daily periodic task (Celery Beat, runs at 10:00 Asia/Manila).
 
-    Finds immunizations with next_due_date == today + SMS_IMMUNIZATION_LEAD_DAYS,
+    Finds immunizations with next_due_date == today + immunization lead days (admin setting),
     creates sms_logs rows, and enqueues send_reminder_task for each.
     Idempotent: will not create a second log if one was already created today
     for the same immunization row.
@@ -443,7 +384,7 @@ async def _mark_missed_appointments_async() -> int:
             missed_result = await db.execute(missed_stmt)
             missed_rows = missed_result.all()
 
-            bhc_name: str = settings.BHC_NAME
+            runtime = await load_runtime_settings(db)
             enqueued_count = 0
 
             for (
@@ -453,10 +394,10 @@ async def _mark_missed_appointments_async() -> int:
                 first_name,
                 preferred_language,
             ) in missed_rows:
-                lang = _resolve_lang(preferred_language, "missed_appointment")
-                message = SMS_TEMPLATES["missed_appointment"][lang].format(
+                message = runtime.render_sms(
+                    "missed_appointment",
+                    preferred_language,
                     first_name=first_name,
-                    bhc_name=bhc_name,
                 )
 
                 sms_log = SmsLog(

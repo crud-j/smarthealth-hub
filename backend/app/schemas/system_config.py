@@ -8,7 +8,9 @@ Credentials, secret keys, and tokens are NEVER included here.
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.services.sms_templates import TEMPLATE_KINDS, TEMPLATE_LANGUAGES, template_problems
 
 # ok = working; warning = works but needs attention soon; error = broken or
 # will break; unknown = cannot be checked here (e.g. no backups on a dev PC).
@@ -103,3 +105,92 @@ class SystemStatusResponse(BaseModel):
     media: MediaCheck
     backup: BackupCheck
     alerts: AlertsCheck
+
+
+# ---------------------------------------------------------------------------
+# GET / PUT /system/settings — admin-editable runtime settings (Admin only)
+# ---------------------------------------------------------------------------
+
+
+class SettingValue(BaseModel):
+    """One editable setting: what is in effect, the default, and who changed it."""
+
+    value: str | int
+    default: str | int
+    is_custom: bool = Field(..., description="True when an admin override is in effect")
+    updated_at: datetime | None = None
+    updated_by: str | None = Field(None, description="Full name of the last editor")
+
+
+class SmsTemplateSetting(SettingValue):
+    """An SMS reminder template plus the rules the editor must follow."""
+
+    kind: str
+    language: str
+    placeholders: list[str]
+    required: list[str]
+    max_length: int
+    send_limit: int | None = Field(
+        None,
+        description="Characters actually sent before the message is cut "
+        "(appointment reminders: room is kept for the CONFIRM code)",
+    )
+
+
+class SystemSettingsResponse(BaseModel):
+    bhc_name: SettingValue
+    sms_reminder_lead_hours: SettingValue
+    sms_immunization_lead_days: SettingValue
+    sms_templates: list[SmsTemplateSetting]
+    sample_values: dict[str, str] = Field(
+        ..., description="Fictional values the page uses for the live preview"
+    )
+
+
+class SystemSettingsUpdate(BaseModel):
+    """
+    Partial update. Omit a field to leave it alone; send ``null`` to go back
+    to the default. ``sms_templates`` keys are ``"<kind>.<language>"``, e.g.
+    ``"appointment_reminder.fil"``; a ``null`` value resets that template.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    bhc_name: str | None = Field(None, max_length=120)
+    sms_reminder_lead_hours: int | None = Field(None, ge=1, le=168)
+    sms_immunization_lead_days: int | None = Field(None, ge=0, le=30)
+    sms_templates: dict[str, str | None] | None = None
+
+    @field_validator("bhc_name")
+    @classmethod
+    def _bhc_name(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if len(v) < 2:
+            raise ValueError("Clinic name must be at least 2 characters.")
+        return v
+
+    @field_validator("sms_templates")
+    @classmethod
+    def _templates(cls, v: dict[str, str | None] | None) -> dict[str, str | None] | None:
+        if v is None:
+            return v
+        cleaned: dict[str, str | None] = {}
+        errors: list[str] = []
+        for key, text in v.items():
+            kind, _, lang = key.partition(".")
+            if kind not in TEMPLATE_KINDS or lang not in TEMPLATE_LANGUAGES:
+                errors.append(f"Unknown template '{key}'.")
+                continue
+            if text is None:
+                cleaned[key] = None
+                continue
+            text = text.strip()
+            problems = template_problems(kind, text)
+            if problems:
+                errors.append(f"{key}: " + "; ".join(problems))
+            cleaned[key] = text
+        if errors:
+            raise ValueError(" | ".join(errors))
+        return cleaned

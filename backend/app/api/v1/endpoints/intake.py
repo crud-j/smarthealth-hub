@@ -29,7 +29,7 @@ from app.schemas.intake import (
     IntakeLinkResponse,
     PendingIntakeSummary,
 )
-from app.services import intake_service
+from app.services import intake_service, system_settings_service
 
 router = APIRouter(prefix="/intake", tags=["intake"])
 logger = get_logger(__name__)
@@ -300,9 +300,10 @@ async def send_intake_link(
     # the clinical workflow (rule §13.7).
     sms_sent = False
     if patient.mobile_number:
+        bhc_name = (await system_settings_service.load_runtime_settings(db)).bhc_name
         sms_message = (
             f"Hi {patient.first_name}, please fill in your pre-visit health "
-            f"information before your appointment at {settings.BHC_NAME}. "
+            f"information before your appointment at {bhc_name}. "
             f"Click the link: {intake_url} "
             f"(expires in 48 hours)"
         )

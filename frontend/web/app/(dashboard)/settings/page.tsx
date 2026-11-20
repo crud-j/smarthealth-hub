@@ -1,145 +1,103 @@
 "use client";
 
-import { useEffect, useState } from "react";
+/**
+ * System Configuration — Admin only.
+ *
+ * Editable (GET/PUT /system/settings, audited): clinic name, reminder lead
+ * times and the SMS reminder templates. Changes apply from the next reminder
+ * run; no restart needed. Read-only server settings (environment, SMS
+ * provider, NFC base URL) still come from GET /system/info (.env).
+ */
+
+import { useEffect, useMemo, useState } from "react";
 import { apiFetch, ApiError } from "@/lib/api-client";
+import { toast } from "@/lib/toast";
 import AccessDenied from "@/components/layout/AccessDenied";
 import RoleGuard from "@/components/layout/RoleGuard";
+import SmsTemplateEditor from "@/components/settings/SmsTemplateEditor";
+import {
+  buildSettingsUpdate,
+  draftFrom,
+  draftProblems,
+  templateId,
+  type SettingsDraft,
+  type SettingsUpdate,
+  type SettingValue,
+  type SystemSettings,
+} from "@/lib/system-settings";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 interface SystemInfo {
-  bhc_name: string;
   environment: string;
   sms_provider: string;
-  sms_reminder_lead_hours: number;
-  sms_immunization_lead_days: number;
   nfc_view_base_url: string;
 }
 
-// ---------------------------------------------------------------------------
-// Data hook
-// ---------------------------------------------------------------------------
+const TEMPLATE_GROUPS: { kind: string; title: string; when: (s: SettingsDraft) => string }[] = [
+  {
+    kind: "appointment_reminder",
+    title: "Appointment reminder",
+    when: (d) => `Sent ${d.leadHours || "?"} hours before the appointment. Patients reply CONFIRM with the code.`,
+  },
+  {
+    kind: "immunization_reminder",
+    title: "Immunization reminder",
+    when: (d) => `Sent at 10:00 AM, ${d.leadDays || "?"} days before the vaccine is due.`,
+  },
+  {
+    kind: "missed_appointment",
+    title: "Missed appointment follow-up",
+    when: () => "Sent the same day an appointment is marked missed.",
+  },
+];
 
-interface UseSystemInfoResult {
-  data: SystemInfo | null;
-  loading: boolean;
-  error: string | null;
-}
-
-function useSystemInfo(): UseSystemInfoResult {
-  const [data, setData] = useState<SystemInfo | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      setLoading(true);
-      setError(null);
-      try {
-        const result = await apiFetch<SystemInfo>("/system/info");
-        if (!cancelled) setData(result);
-      } catch (err) {
-        if (!cancelled) {
-          setError(
-            err instanceof ApiError
-              ? err.message
-              : "Failed to load system configuration."
-          );
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  return { data, loading, error };
+function changeCount(update: SettingsUpdate): number {
+  const { sms_templates, ...rest } = update;
+  return Object.keys(rest).length + Object.keys(sms_templates ?? {}).length;
 }
 
 // ---------------------------------------------------------------------------
-// Sub-components
+// Small pieces
 // ---------------------------------------------------------------------------
 
-function SectionAccent() {
+function SectionHeader({ title, note }: { title: string; note?: string }) {
   return (
-    <span
-      className="inline-block h-4 w-1 rounded-full bg-gradient-to-b from-[#b5343e] to-[#e07070]"
-      aria-hidden="true"
-    />
-  );
-}
-
-interface ConfigCardProps {
-  label: string;
-  children: React.ReactNode;
-}
-
-function ConfigCard({ label, children }: ConfigCardProps) {
-  return (
-    <div className="flex flex-col gap-1 rounded-xl bg-white border border-[#e5d4cc] px-5 py-4"
-      style={{ boxShadow: "0 1px 6px rgba(160,80,80,0.06)" }}
-    >
-      <dt className="text-xs font-semibold uppercase tracking-wider text-[#9b6e6e]">
-        {label}
-      </dt>
-      <dd className="mt-1 text-sm font-medium text-[#1a0808]">{children}</dd>
+    <div className="flex flex-wrap items-center gap-2.5 border-b border-[#edd9d0] bg-gradient-to-br from-[#fdf0eb] to-white px-5 py-4">
+      <span className="inline-block h-4 w-1 rounded-full bg-gradient-to-b from-[#b5343e] to-[#e07070]" aria-hidden="true" />
+      <h2 className="text-sm font-bold text-[#1a0808]">{title}</h2>
+      {note && <span className="ml-auto text-xs text-[#c08080]">{note}</span>}
     </div>
   );
 }
 
-interface EnvBadgeProps {
-  value: string;
-}
-
-function EnvBadge({ value }: EnvBadgeProps) {
-  const isProduction = value.toLowerCase() === "production";
+function Card({ children }: { children: React.ReactNode }) {
   return (
-    <span
-      className={`inline-flex items-center rounded-md px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${
-        isProduction
-          ? "bg-green-50 text-green-800 ring-green-600/20"
-          : "bg-yellow-50 text-yellow-800 ring-yellow-600/20"
-      }`}
-    >
-      {value.charAt(0).toUpperCase() + value.slice(1)}
-    </span>
+    <section className="mb-6 overflow-hidden rounded-xl border border-[#e5d4cc] bg-white" style={{ boxShadow: "0 2px 10px rgba(160,80,80,0.07)" }}>
+      {children}
+    </section>
   );
 }
 
-const SMS_PROVIDER_LABELS: Record<string, string> = {
-  semaphore: "Semaphore",
-  itexmo: "iTExmo",
-  philsms: "PhilSMS",
-};
-
-interface SmsProviderBadgeProps {
-  value: string;
-}
-
-function SmsProviderBadge({ value }: SmsProviderBadgeProps) {
-  const label = SMS_PROVIDER_LABELS[value.toLowerCase()] ?? value;
+function FieldMeta<T>({ setting }: { setting: SettingValue<T> }) {
   return (
-    <span className="inline-flex items-center rounded-md bg-[#fdf0eb] px-2.5 py-1 text-xs font-semibold text-[#b5343e] ring-1 ring-inset ring-[#edd9d0]">
-      {label}
-    </span>
+    <p className="mt-1 text-[11px] text-[#9b6e6e]">
+      {setting.is_custom
+        ? `Changed${setting.updated_by ? ` by ${setting.updated_by}` : ""} · default: ${String(setting.default)}`
+        : "Default value"}
+    </p>
   );
 }
 
-function SkeletonCard() {
+const inputCls = "w-full rounded-lg border px-3 py-2 text-sm text-[#1a0808] focus:outline-none focus:ring-2 focus:ring-[#b5343e]/40";
+
+function ReadOnlyItem({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex flex-col gap-2 rounded-xl bg-white border border-[#e5d4cc] px-5 py-4"
-      style={{ boxShadow: "0 1px 6px rgba(160,80,80,0.06)" }}
-    >
-      <div className="h-3 w-24 animate-pulse rounded bg-[#f0ddd8]" />
-      <div className="h-5 w-40 animate-pulse rounded bg-[#f5e8e4] mt-1" />
+    <div className="rounded-lg border border-[#f0e4dd] px-4 py-3">
+      <dt className="text-xs font-semibold uppercase tracking-wider text-[#9b6e6e]">{label}</dt>
+      <dd className="mt-1 text-sm font-medium text-[#1a0808]">{children}</dd>
     </div>
   );
 }
@@ -149,219 +107,162 @@ function SkeletonCard() {
 // ---------------------------------------------------------------------------
 
 function SystemConfiguration() {
-  const { data, loading, error } = useSystemInfo();
+  const [settings, setSettings] = useState<SystemSettings | null>(null);
+  const [draft, setDraft] = useState<SettingsDraft | null>(null);
+  const [info, setInfo] = useState<SystemInfo | null>(null);
+  const [loadError, setLoadError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([apiFetch<SystemSettings>("/system/settings"), apiFetch<SystemInfo>("/system/info")])
+      .then(([s, i]) => {
+        if (cancelled) return;
+        setSettings(s);
+        setDraft(draftFrom(s));
+        setInfo(i);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setLoadError(err instanceof ApiError ? err.message : "Failed to load system configuration.");
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const update = useMemo(() => (settings && draft ? buildSettingsUpdate(settings, draft) : {}), [settings, draft]);
+  const problems = useMemo(() => (settings && draft ? draftProblems(settings, draft) : {}), [settings, draft]);
+  const pending = changeCount(update);
+  const problemCount = Object.keys(problems).length;
+
+  // Warn before leaving the page with unsaved edits.
+  useEffect(() => {
+    if (pending === 0) return;
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [pending]);
+
+  async function save() {
+    if (pending === 0 || problemCount > 0) return;
+    setSaving(true);
+    try {
+      const saved = await apiFetch<SystemSettings>("/system/settings", { method: "PUT", body: JSON.stringify(update) });
+      setSettings(saved);
+      setDraft(draftFrom(saved));
+      toast.success("Settings saved. Reminders use them from the next run.");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Failed to save settings.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const setField = (patch: Partial<SettingsDraft>) => setDraft((d) => (d ? { ...d, ...patch } : d));
 
   return (
-    <div>
-      {/* Page header */}
+    <div className="pb-24">
       <div className="mb-6">
-        <h1 className="text-3xl leading-tight text-[#1a0808] font-display">
-          System Configuration
-        </h1>
+        <h1 className="font-display text-3xl leading-tight text-[#1a0808]">System Configuration</h1>
         <p className="mt-1 text-sm font-medium text-[#7a5252]">
-          Read-only — change values via environment variables
+          Clinic name, reminder timing and SMS text. Every change is recorded in the Audit Log.
         </p>
       </div>
 
-      {/* Error state */}
-      {error && (
-        <div
-          role="alert"
-          className="mb-6 rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-medium text-red-800"
-        >
-          Could not load system configuration: {error}
+      {loadError && (
+        <div role="alert" className="mb-6 rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-medium text-red-800">
+          Could not load system configuration: {loadError}
         </div>
       )}
 
-      {/* Card section */}
-      <div
-        className="overflow-hidden rounded-xl bg-white border border-[#e5d4cc]"
-        style={{ boxShadow: "0 2px 10px rgba(160,80,80,0.07)" }}
-      >
-        {/* Section header */}
-        <div className="flex items-center gap-2.5 px-5 py-4 bg-gradient-to-br from-[#fdf0eb] to-white border-b border-[#edd9d0]">
-          <SectionAccent />
-          <h2 className="text-sm font-bold text-[#1a0808]">
-            Runtime Settings
-          </h2>
-          <span className="ml-auto text-xs text-[#c08080]">
-            Source: environment variables
-          </span>
-        </div>
+      {!settings || !draft ? (
+        !loadError && <div className="h-64 animate-pulse rounded-xl bg-[#f5e8e4]" aria-label="Loading" />
+      ) : (
+        <>
+          <Card>
+            <SectionHeader title="Clinic & reminders" />
+            <div className="grid grid-cols-1 gap-5 p-5 md:grid-cols-3">
+              <div>
+                <label htmlFor="bhc-name" className="mb-1 block text-sm font-medium text-[#3d2222]">Clinic name</label>
+                <input id="bhc-name" value={draft.bhcName} maxLength={120}
+                  onChange={(e) => setField({ bhcName: e.target.value })}
+                  className={`${inputCls} ${problems.bhcName ? "border-red-300" : "border-[#e5d4cc]"}`} />
+                {problems.bhcName ? <p className="mt-1 text-xs text-red-600">{problems.bhcName[0]}</p> : <FieldMeta setting={settings.bhc_name} />}
+                <p className="mt-1 text-[11px] text-[#9b6e6e]">Used in SMS and on the registration QR poster.</p>
+              </div>
+              <div>
+                <label htmlFor="lead-hours" className="mb-1 block text-sm font-medium text-[#3d2222]">Appointment reminder (hours before)</label>
+                <input id="lead-hours" type="number" inputMode="numeric" min={1} max={168} value={draft.leadHours}
+                  onChange={(e) => setField({ leadHours: e.target.value })}
+                  className={`${inputCls} ${problems.leadHours ? "border-red-300" : "border-[#e5d4cc]"}`} />
+                {problems.leadHours ? <p className="mt-1 text-xs text-red-600">{problems.leadHours[0]}</p> : <FieldMeta setting={settings.sms_reminder_lead_hours} />}
+              </div>
+              <div>
+                <label htmlFor="lead-days" className="mb-1 block text-sm font-medium text-[#3d2222]">Immunization reminder (days before)</label>
+                <input id="lead-days" type="number" inputMode="numeric" min={0} max={30} value={draft.leadDays}
+                  onChange={(e) => setField({ leadDays: e.target.value })}
+                  className={`${inputCls} ${problems.leadDays ? "border-red-300" : "border-[#e5d4cc]"}`} />
+                {problems.leadDays ? <p className="mt-1 text-xs text-red-600">{problems.leadDays[0]}</p> : <FieldMeta setting={settings.sms_immunization_lead_days} />}
+              </div>
+            </div>
+          </Card>
 
-        {/* Config grid */}
-        <div className="p-5">
-          {loading ? (
-            <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <SkeletonCard key={i} />
+          <Card>
+            <SectionHeader title="SMS templates" note="Patients get the version in their preferred language" />
+            <div className="space-y-6 p-5">
+              {TEMPLATE_GROUPS.map((group) => (
+                <div key={group.kind}>
+                  <h3 className="text-sm font-bold text-[#1a0808]">{group.title}</h3>
+                  <p className="mb-3 text-xs text-[#9b6e6e]">{group.when(draft)}</p>
+                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                    {settings.sms_templates.filter((t) => t.kind === group.kind).map((t) => (
+                      <SmsTemplateEditor
+                        key={templateId(t)}
+                        template={t}
+                        value={draft.templates[templateId(t)] ?? t.value}
+                        onChange={(next) => setDraft((d) => (d ? { ...d, templates: { ...d.templates, [templateId(t)]: next } } : d))}
+                        sampleValues={{ ...settings.sample_values, bhc_name: draft.bhcName.trim() || settings.sample_values.bhc_name }}
+                      />
+                    ))}
+                  </div>
+                </div>
               ))}
-            </dl>
-          ) : data ? (
-            <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              <ConfigCard label="Barangay Health Center">
-                {data.bhc_name}
-              </ConfigCard>
+            </div>
+          </Card>
+        </>
+      )}
 
-              <ConfigCard label="Environment">
-                <EnvBadge value={data.environment} />
-              </ConfigCard>
+      {info && (
+        <Card>
+          <SectionHeader title="Server settings" note="Read-only · change in the server's .env" />
+          <dl className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-3">
+            <ReadOnlyItem label="Environment">{info.environment}</ReadOnlyItem>
+            <ReadOnlyItem label="SMS provider">{info.sms_provider}</ReadOnlyItem>
+            <ReadOnlyItem label="NFC base URL"><span className="break-all font-mono text-xs">{info.nfc_view_base_url}</span></ReadOnlyItem>
+          </dl>
+        </Card>
+      )}
 
-              <ConfigCard label="SMS Provider">
-                <SmsProviderBadge value={data.sms_provider} />
-              </ConfigCard>
-
-              <ConfigCard label="Appointment Reminder Lead">
-                {data.sms_reminder_lead_hours}{" "}
-                {data.sms_reminder_lead_hours === 1 ? "hour" : "hours"} before
-                appointment
-              </ConfigCard>
-
-              <ConfigCard label="Immunization Reminder Lead">
-                {data.sms_immunization_lead_days}{" "}
-                {data.sms_immunization_lead_days === 1 ? "day" : "days"} before
-                due date
-              </ConfigCard>
-
-              <ConfigCard label="NFC Base URL">
-                <span className="break-all font-mono text-xs">
-                  {data.nfc_view_base_url}
-                </span>
-              </ConfigCard>
-            </dl>
-          ) : null}
+      {settings && draft && (pending > 0 || saving) && (
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[#e5d4cc] bg-white/95 px-4 py-3 shadow-[0_-4px_16px_rgba(160,80,80,0.12)] backdrop-blur lg:left-auto lg:right-6 lg:bottom-6 lg:rounded-xl lg:border">
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="text-sm font-medium text-[#3d2222]">
+              {pending} unsaved change{pending === 1 ? "" : "s"}
+              {problemCount > 0 && <span className="ml-2 text-red-600">· fix {problemCount} problem{problemCount === 1 ? "" : "s"} first</span>}
+            </p>
+            <div className="ml-auto flex gap-2">
+              <button type="button" onClick={() => setDraft(draftFrom(settings))} disabled={saving}
+                className="rounded-lg border border-[#e5d4cc] px-4 py-2 text-sm font-medium text-[#3d2222] hover:bg-[#fdf5f0] disabled:opacity-50">
+                Discard
+              </button>
+              <button type="button" onClick={() => void save()} disabled={saving || problemCount > 0}
+                className="min-w-24 rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                style={{ background: "linear-gradient(135deg, #b5343e, #c94060)" }}>
+                {saving ? "Saving..." : "Save changes"}
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
-
-      {/* Sub-section links */}
-      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <a
-          href="/settings/users"
-          className="flex items-center gap-3 rounded-xl border border-[#e5d4cc] bg-white px-5 py-4 text-sm font-medium text-[#1a0808] transition-colors hover:border-[#c08080] hover:bg-[#fdf0eb] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b5343e] focus-visible:ring-offset-2"
-          style={{ boxShadow: "0 1px 6px rgba(160,80,80,0.06)" }}
-        >
-          <IconUsers />
-          <div>
-            <p className="font-semibold">Staff Accounts</p>
-            <p className="text-xs text-[#9b6e6e]">Manage BHW, physician, and admin staff users</p>
-          </div>
-          <IconChevronRight className="ml-auto shrink-0 text-[#c08080]" />
-        </a>
-
-        <a
-          href="/settings/audit-log"
-          className="flex items-center gap-3 rounded-xl border border-[#e5d4cc] bg-white px-5 py-4 text-sm font-medium text-[#1a0808] transition-colors hover:border-[#c08080] hover:bg-[#fdf0eb] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b5343e] focus-visible:ring-offset-2"
-          style={{ boxShadow: "0 1px 6px rgba(160,80,80,0.06)" }}
-        >
-          <IconAudit />
-          <div>
-            <p className="font-semibold">Audit Log</p>
-            <p className="text-xs text-[#9b6e6e]">Immutable trail of all sensitive system actions</p>
-          </div>
-          <IconChevronRight className="ml-auto shrink-0 text-[#c08080]" />
-        </a>
-
-        <a
-          href="/settings/system-health"
-          className="flex items-center gap-3 rounded-xl border border-[#e5d4cc] bg-white px-5 py-4 text-sm font-medium text-[#1a0808] transition-colors hover:border-[#c08080] hover:bg-[#fdf0eb] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b5343e] focus-visible:ring-offset-2"
-          style={{ boxShadow: "0 1px 6px rgba(160,80,80,0.06)" }}
-        >
-          <IconActivity />
-          <div>
-            <p className="font-semibold">System Health</p>
-            <p className="text-xs text-[#9b6e6e]">Database, background jobs, disk, backups and version</p>
-          </div>
-          <IconChevronRight className="ml-auto shrink-0 text-[#c08080]" />
-        </a>
-      </div>
+      )}
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Icons
-// ---------------------------------------------------------------------------
-
-function IconUsers() {
-  return (
-    <svg
-      width="20"
-      height="20"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="shrink-0 text-[#b5343e]"
-      aria-hidden="true"
-    >
-      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-      <circle cx="9" cy="7" r="4" />
-      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-    </svg>
-  );
-}
-
-function IconAudit() {
-  return (
-    <svg
-      width="20"
-      height="20"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="shrink-0 text-[#b5343e]"
-      aria-hidden="true"
-    >
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <polyline points="14 2 14 8 20 8" />
-      <line x1="16" y1="13" x2="8" y2="13" />
-      <line x1="16" y1="17" x2="8" y2="17" />
-      <polyline points="10 9 9 9 8 9" />
-    </svg>
-  );
-}
-
-function IconActivity() {
-  return (
-    <svg
-      width="20"
-      height="20"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="shrink-0 text-[#b5343e]"
-      aria-hidden="true"
-    >
-      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-    </svg>
-  );
-}
-
-function IconChevronRight({ className }: { className?: string }) {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden="true"
-    >
-      <polyline points="9 18 15 12 9 6" />
-    </svg>
   );
 }
 
