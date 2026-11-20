@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { apiFetch, ApiError } from "@/lib/api-client";
+import AccessDenied from "@/components/layout/AccessDenied";
+import RoleGuard from "@/components/layout/RoleGuard";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -146,7 +148,7 @@ function SkeletonCard() {
 // Page
 // ---------------------------------------------------------------------------
 
-export default function SettingsPage() {
+function SystemConfiguration() {
   const { data, loading, error } = useSystemInfo();
 
   return (
@@ -360,5 +362,15 @@ function IconChevronRight({ className }: { className?: string }) {
     >
       <polyline points="9 18 15 12 9 6" />
     </svg>
+  );
+}
+
+// Admin only (backend: require_role("admin")). Non-admins who type the URL get
+// a clear message instead of a failed API call.
+export default function SettingsPage() {
+  return (
+    <RoleGuard roles={["admin"]} fallback={<AccessDenied allowed="Admins" what="the system configuration" />}>
+      <SystemConfiguration />
+    </RoleGuard>
   );
 }

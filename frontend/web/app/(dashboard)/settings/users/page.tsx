@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { apiFetch, ApiError } from "@/lib/api-client";
+import AccessDenied from "@/components/layout/AccessDenied";
+import RoleGuard from "@/components/layout/RoleGuard";
 import { toast } from "@/lib/toast";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import CreateUserModal from "@/components/modals/CreateUserModal";
@@ -32,7 +34,7 @@ function formatDate(iso: string | null | undefined): string {
   return new Date(iso).toLocaleDateString("en-PH", { year: "numeric", month: "short", day: "numeric" });
 }
 
-export default function SettingsUsersPage() {
+function StaffUsers() {
   const [data, setData] = useState<PaginatedUsers | null>(null);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string>("");
@@ -271,5 +273,15 @@ export default function SettingsUsersPage() {
         onCancel={() => setDeleteTarget(null)}
       />
     </div>
+  );
+}
+
+// Admin only (backend: require_role("admin")). Non-admins who type the URL get
+// a clear message instead of a failed API call.
+export default function SettingsUsersPage() {
+  return (
+    <RoleGuard roles={["admin"]} fallback={<AccessDenied allowed="Admins" what="staff accounts" />}>
+      <StaffUsers />
+    </RoleGuard>
   );
 }

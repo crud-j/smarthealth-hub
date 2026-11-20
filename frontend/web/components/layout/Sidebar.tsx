@@ -6,17 +6,15 @@
  * isCollapsed is controlled by the parent (DashboardLayout) and toggled via
  * the button in Topbar, so no collapse/expand button lives here.
  *
- * Role matrix (SDP §10.3):
- *   admin        — full access
- *   bhw          — patients, appointments, health-cards, sms-logs, analytics
- *   physician    — patients, appointments, health-cards, analytics
- *   admin_staff  — patients, appointments, health-cards
+ * Which links each role sees lives in `lib/navigation.ts` (pinned per role by
+ * `tests/lib/navigation.test.ts`); this file only renders it.
  */
 
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { CurrentUser } from "@/hooks/useAuth";
+import { activeNavHref, visibleNavGroups, type NavIcon } from "@/lib/navigation";
 
 // ---------------------------------------------------------------------------
 // Icons
@@ -137,71 +135,33 @@ function IconSettings() {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Nav structure
-// ---------------------------------------------------------------------------
-
-interface NavItem {
-  href: string;
-  label: string;
-  icon: React.ReactNode;
-  roles: string[];
+function IconArchive() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="2" y="3" width="20" height="5" rx="1" /><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" />
+      <line x1="10" y1="12" x2="14" y2="12" />
+    </svg>
+  );
 }
 
-interface NavGroup {
-  label: string;
-  items: NavItem[];
-}
-
-const NAV_GROUPS: NavGroup[] = [
-  {
-    label: "Overview",
-    items: [
-      { href: "/dashboard", label: "Dashboard", icon: <IconDashboard />, roles: [] },
-    ],
-  },
-  {
-    label: "Patient Care",
-    items: [
-      { href: "/patients",       label: "Patients",       icon: <IconPatients />,     roles: [] },
-      { href: "/appointments",   label: "Appointments",   icon: <IconAppointments />, roles: [] },
-      { href: "/registrations",  label: "Registrations",  icon: <IconInbox />,        roles: ["admin", "bhw", "admin_staff", "physician"] },
-      { href: "/immunizations",  label: "Immunizations",  icon: <IconImmunization />, roles: [] },
-      { href: "/health-cards",   label: "Health Cards",   icon: <IconCards />,        roles: [] },
-    ],
-  },
-  {
-    label: "Insights",
-    items: [
-      { href: "/analytics", label: "Analytics", icon: <IconAnalytics />, roles: ["admin", "bhw", "physician"] },
-      { href: "/sms-logs",  label: "SMS Logs",  icon: <IconSms />,       roles: ["admin", "bhw"] },
-    ],
-  },
-  {
-    label: "Settings",
-    items: [
-      { href: "/settings", label: "Settings", icon: <IconSettings />, roles: [] },
-    ],
-  },
-  {
-    label: "Administration",
-    items: [
-      { href: "/settings/users",               label: "Users",                icon: <IconUsers />,   roles: ["admin"] },
-      { href: "/settings/audit-log",           label: "Audit Log",            icon: <IconAudit />,   roles: ["admin"] },
-      { href: "/settings/system-health",       label: "System Health",        icon: <IconActivity />, roles: ["admin"] },
-      { href: "/settings/intake-applications", label: "Online Registrations", icon: <IconPatients />, roles: ["admin"] },
-      { href: "/settings/registration-qr",     label: "Registration QR",      icon: <IconQrCode />,  roles: ["admin", "bhw", "admin_staff"] },
-      { href: "/patients/archived",            label: "Patient Archive",      icon: <IconPatients />, roles: ["admin", "physician"] },
-    ],
-  },
-  {
-    label: "Account",
-    items: [
-      { href: "/settings/profile",  label: "Profile",  icon: <IconProfile />,  roles: [] },
-      { href: "/settings/security", label: "Security", icon: <IconSecurity />, roles: [] },
-    ],
-  },
-];
+const NAV_ICONS: Record<NavIcon, () => React.ReactElement> = {
+  dashboard: IconDashboard,
+  patients: IconPatients,
+  appointments: IconAppointments,
+  immunization: IconImmunization,
+  cards: IconCards,
+  archive: IconArchive,
+  inbox: IconInbox,
+  qr: IconQrCode,
+  analytics: IconAnalytics,
+  sms: IconSms,
+  users: IconUsers,
+  audit: IconAudit,
+  activity: IconActivity,
+  settings: IconSettings,
+  profile: IconProfile,
+  security: IconSecurity,
+};
 
 const ROLE_LABELS: Record<string, string> = {
   admin: "Administrator",
@@ -262,12 +222,11 @@ export default function Sidebar({ user, isOpen, onClose, isCollapsed }: SidebarP
   const role = user?.role?.toLowerCase() ?? "";
   const initials = user?.full_name ? getInitials(user.full_name) : "?";
 
-  const visibleGroups = NAV_GROUPS.map((group) => ({
-    ...group,
-    items: group.items.filter(
-      (item) => item.roles.length === 0 || item.roles.includes(role)
-    ),
-  })).filter((group) => group.items.length > 0);
+  const visibleGroups = visibleNavGroups(role);
+  const activeHref = activeNavHref(
+    pathname,
+    visibleGroups.flatMap((group) => group.items)
+  );
 
   return (
     <>
@@ -342,10 +301,8 @@ export default function Sidebar({ user, isOpen, onClose, isCollapsed }: SidebarP
 
                 <ul className="space-y-0.5" role="list">
                   {group.items.map((item) => {
-                    const isActive =
-                      item.href === "/dashboard"
-                        ? pathname === "/dashboard"
-                        : pathname.startsWith(item.href);
+                    const isActive = item.href === activeHref;
+                    const Icon = NAV_ICONS[item.icon];
 
                     return (
                       <li key={item.href} className={isCollapsed ? "relative group" : ""}>
@@ -376,7 +333,7 @@ export default function Sidebar({ user, isOpen, onClose, isCollapsed }: SidebarP
                           )}
 
                           <span className={["shrink-0", isActive ? "text-[var(--shell-accent)]" : ""].join(" ")}>
-                            {item.icon}
+                            <Icon />
                           </span>
 
                           {!isCollapsed && (
