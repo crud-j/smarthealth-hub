@@ -15,6 +15,8 @@ from __future__ import annotations
 import pytest
 
 from app.services.sms_templates import (
+    APPOINTMENT_TEMPLATE_LIMIT,
+    LONG_VALUES,
     TEMPLATE_DEFAULTS,
     TEMPLATE_KINDS,
     render_template,
@@ -27,6 +29,15 @@ def test_every_default_template_passes_its_own_rules() -> None:
     for kind, by_lang in TEMPLATE_DEFAULTS.items():
         for lang, text in by_lang.items():
             assert template_problems(kind, text) == [], (kind, lang)
+
+
+def test_defaults_fit_without_being_cut() -> None:
+    """With long real values: appointment text fits before the CONFIRM code, the rest in one SMS."""
+    for kind, by_lang in TEMPLATE_DEFAULTS.items():
+        limit = APPOINTMENT_TEMPLATE_LIMIT if kind == "appointment_reminder" else 160
+        for lang, text in by_lang.items():
+            filled = text.format(**LONG_VALUES)
+            assert len(filled) <= limit, (kind, lang, len(filled))
 
 
 def test_kinds_and_languages() -> None:
