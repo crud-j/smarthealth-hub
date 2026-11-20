@@ -222,6 +222,22 @@ def _patient_allergies(patient: Patient) -> str | None:
     return decrypt_text(patient.allergies) or None
 
 
+# Shown on every card surface when the patient has no allergies recorded.
+# card_back.html and HealthCardPreview.tsx compare against this exact string.
+_NO_ALLERGIES_TEXT = "None on record"
+
+
+def _card_allergies(patient: Patient) -> str:
+    """
+    Allergies text for the card PDF, the UID scan payload and the relay monitor.
+
+    Always ``patients.allergies`` (decrypted), the same source as the NFC tap
+    view, never ``medical_histories.condition_name``: a chronic condition such
+    as hypertension is not an allergy.
+    """
+    return _patient_allergies(patient) or _NO_ALLERGIES_TEXT
+
+
 def _render_nfc_view_html(  # noqa: PLR0912, PLR0915
     *,
     patient: Patient,
@@ -242,7 +258,8 @@ def _render_nfc_view_html(  # noqa: PLR0912, PLR0915
     Design principles:
     - Mobile-first, no external CSS (renders offline on BHW phones)
     - No encrypted PHI (diagnosis, treatment_notes, medical_history.notes)
-    - Only condition_name (plain text), vital signs, appointments, immunization
+    - Only condition_name (plain text), vital signs, appointments, immunization,
+      and allergies (decrypted from patients.allergies via _patient_allergies)
     """
 
     # ── Vitals strip ─────────────────────────────────────────────────────────
@@ -355,7 +372,7 @@ def _render_nfc_view_html(  # noqa: PLR0912, PLR0915
     if allergy_text:
         allergy_html = f'<p class="allergy-text">{allergy_text}</p>'
     else:
-        allergy_html = '<p class="empty-note">None recorded.</p>'
+        allergy_html = f'<p class="empty-note">{_NO_ALLERGIES_TEXT}.</p>'
 
     # ── Sex display ───────────────────────────────────────────────────────────
     sex_display = patient.sex.capitalize() if patient.sex else "—"
@@ -1214,7 +1231,7 @@ async def view_health_card_by_identifier(
     last_immunization: Immunization | None = imm_result.scalar_one_or_none()
 
     # ── Build relay monitor cache entry (mirrors _scan_nfc_uid_impl) ──────────
-    allergies_str = _patient_allergies(patient) or "None on record"
+    allergies_str = _card_allergies(patient)
     patient_info = NfcScanPatientInfo(
         patient_id=str(patient.id),
         patient_code=patient.patient_code,
@@ -1584,18 +1601,6 @@ async def batch_health_card_pdf(
             _last_temp = "—"
             _last_visit_date = "—"
 
-        # Allergies from medical_history condition_name (plain text, not encrypted).
-        _allergies: str
-        if patient.medical_histories:
-            _allergies = (
-                ", ".join(
-                    mh.condition_name for mh in patient.medical_histories if mh.condition_name
-                )
-                or "None on record"
-            )
-        else:
-            _allergies = "None on record"
-
         patient_dict: dict[str, object] = {
             "first_name": patient.first_name,
             "last_name": patient.last_name,
@@ -1615,7 +1620,8 @@ async def batch_health_card_pdf(
             "municipality": patient.municipality or "",
             "province": patient.province or "",
             "blood_type": patient.blood_type or "—",
-            "allergies": _allergies,
+            # patients.allergies (decrypted), same source as the NFC tap view.
+            "allergies": _card_allergies(patient),
             "last_bp": _last_bp,
             "last_weight": _last_weight,
             "last_height": _last_height,
@@ -2106,7 +2112,8 @@ async def download_health_card_pdf(
     # Generate QR image (deterministic from patient_id + card_version).
     _signed_url, qr_data_uri = qr_service.encode_qr_payload(str(patient_id), card.card_version)
 
-    # Build template context dicts (only display-safe fields — no encrypted PHI).
+    # Build template context dicts (only display-safe fields — no diagnosis/notes;
+    # allergies are decrypted for display like on every other card surface).
     from datetime import date as _date  # noqa: PLC0415
 
     # Age computation: full years elapsed since birth_date.
@@ -2153,17 +2160,6 @@ async def download_health_card_pdf(
         _last_temp = "—"
         _last_visit_date = "—"
 
-    # ── Allergies: derive from medical_histories already loaded via selectin ──
-    # condition_name is a plain-text field (not encrypted) — safe to display.
-    _allergies: str
-    if patient.medical_histories:
-        _allergies = (
-            ", ".join(mh.condition_name for mh in patient.medical_histories if mh.condition_name)
-            or "None on record"
-        )
-    else:
-        _allergies = "None on record"
-
     patient_dict: dict[str, object] = {
         # ── Front face fields ──────────────────────────────────────────
         "first_name": patient.first_name,
@@ -2188,8 +2184,8 @@ async def download_health_card_pdf(
         "province": patient.province or "",
         # blood_type: use stored value or fall back to em-dash placeholder.
         "blood_type": patient.blood_type or "—",
-        # Allergies sourced from medical_history condition_name rows.
-        "allergies": _allergies,
+        # patients.allergies (decrypted), same source as the NFC tap view.
+        "allergies": _card_allergies(patient),
         # Vitals from most-recent Visit, or "—" if no visit exists.
         "last_bp": _last_bp,
         "last_weight": _last_weight,
@@ -2835,12 +2831,8 @@ async def _scan_nfc_uid_impl(
     # DOB — plain date field, safe to display.
     dob_str = patient.birth_date.strftime("%B %d, %Y") if patient.birth_date else "Unknown"
 
-    # Allergies from medical_history.condition_name (plain text, not encrypted).
-    allergies_result = await db.execute(
-        select(MedicalHistory.condition_name).where(MedicalHistory.patient_id == patient.id)
-    )
-    allergy_rows = allergies_result.scalars().all()
-    allergies_str = ", ".join(r for r in allergy_rows if r) or "None on record"
+    # patients.allergies (decrypted), same source as the NFC tap view.
+    allergies_str = _card_allergies(patient)
 
     patient_info = NfcScanPatientInfo(
         patient_id=str(patient.id),
