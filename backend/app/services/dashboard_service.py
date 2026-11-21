@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime, time, timedelta
-from typing import Literal
+from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 import sqlalchemy as sa
@@ -141,7 +141,9 @@ def _float(value: object) -> float | None:
     return float(value) if value is not None else None  # type: ignore[arg-type]
 
 
-async def _count(db: AsyncSession, stmt: sa.Select[tuple[int]]) -> int:
+async def _count(db: AsyncSession, stmt: sa.Select[Any]) -> int:
+    # Select[Any]: SQLAlchemy 2.0 types a count query as Select[tuple[int]],
+    # 2.1 as Select[int]; pyproject allows both.
     return int((await db.execute(stmt)).scalar_one())
 
 
