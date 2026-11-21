@@ -79,9 +79,14 @@ def test_plain_text_part_has_the_code():
 @pytest.mark.parametrize(
     ("purpose", "subject"),
     [
-        ("login", "Your SmartHealth Hub sign-in code"),
-        ("password_reset", "Your SmartHealth Hub password reset code"),
+        ("login", f"{CODE} is your SmartHealth Hub sign-in code"),
+        ("password_reset", f"{CODE} is your SmartHealth Hub password reset code"),
     ],
 )
-def test_subject_names_the_code_but_never_contains_it(purpose, subject):
-    assert _otp_subject(purpose) == subject
+def test_subject_starts_with_the_code(purpose, subject):
+    """The code leads the subject, like Google's and banks' code emails: Android
+    then offers a one-tap "Copy" button on the new-mail notification and Gmail
+    its "Copy code" button. Approved by the user (2026-11-22) knowing the code
+    shows in notification previews; it expires in 10 minutes and is useless
+    without the password."""
+    assert _otp_subject(CODE, purpose) == subject

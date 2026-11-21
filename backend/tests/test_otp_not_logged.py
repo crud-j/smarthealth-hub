@@ -74,6 +74,22 @@ async def test_smtp_failure_in_production_does_not_log_code(production, email_co
 
 
 @pytest.mark.asyncio
+async def test_sent_email_has_the_code_in_its_subject_but_logs_do_not(
+    production, email_configured, caplog
+):
+    caplog.set_level(logging.DEBUG)
+
+    with patch("app.services.email_service._send_email_sync") as send:
+        sent = await email_service.send_otp_email("staff@example.invalid", CODE)
+
+    assert sent is True
+    to_address, subject, _text, _html = send.call_args.args
+    assert to_address == "staff@example.invalid"
+    assert subject.startswith(CODE)
+    assert not _logged_anywhere(caplog, CODE)
+
+
+@pytest.mark.asyncio
 async def test_development_still_logs_code_for_local_sign_in(monkeypatch, caplog):
     """Local dev without Gmail keeps working: the code is in the console."""
     caplog.set_level(logging.DEBUG)
