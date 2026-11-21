@@ -11,6 +11,7 @@ import NoShowRiskPanel from "@/components/analytics/NoShowRiskPanel";
 import { useNoShowRisk, useAnomalyAlerts } from "@/hooks/useAiAnalytics";
 import { useVisitTypeBreakdown } from "@/hooks/useAnalytics";
 import VisitTypeBreakdownChart from "@/components/charts/VisitTypeBreakdownChart";
+import ReminderEffectCard from "@/components/analytics/ReminderEffectCard";
 
 // ---------------------------------------------------------------------------
 // KPI card
@@ -250,6 +251,11 @@ export default function AnalyticsPage() {
             loading={overviewLoading}
           />
         </ChartCard>
+      </div>
+
+      {/* Return rate after SMS reminders — full width */}
+      <div className="mb-5">
+        <ReminderEffectCard />
       </div>
 
       {/* AI Follow-up */}

@@ -12,6 +12,7 @@
  *   useVaccinationCoverage()
  *   useIllnessTrends(from, to, groupBy)
  *   useNoShowRate(from, to)
+ *   useReminderEffect(days) — return rate after SMS reminders
  *   useAnalyticsExport()  — mutation for CSV/JSON export download
  */
 
@@ -28,6 +29,7 @@ import type {
   VisitTrendsApiResponse,
   VisitTypeBreakdownResponse,
 } from "@/types/analytics";
+import type { ReminderEffect } from "@/types/dashboard";
 
 // ---------------------------------------------------------------------------
 // Wire types (snake_case from backend)
@@ -317,6 +319,43 @@ export function useNoShowRate(from: string, to: string) {
   }, [fetch]);
 
   return { data, loading, error, refetch: fetch };
+}
+
+// ---------------------------------------------------------------------------
+// useReminderEffect — return rate after SMS reminders, last N days
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /analytics/appointments/reminder-effect?days=N (same wire shape as the
+ * dashboards' reminder_effect). Loading is derived from which `days` the
+ * stored result belongs to, so switching 30 ↔ 90 shows loading at once
+ * without a synchronous setState inside the effect.
+ */
+export function useReminderEffect(days: number) {
+  const [result, setResult] = useState<{
+    days: number;
+    data: ReminderEffect | null;
+    error: ApiError | null;
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<ReminderEffect>(`/analytics/appointments/reminder-effect?days=${days}`)
+      .then((data) => {
+        if (!cancelled) setResult({ days, data, error: null });
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        const error = err instanceof ApiError ? err : new ApiError(String(err), 0, "unknown");
+        setResult({ days, data: null, error });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [days]);
+
+  const current = result?.days === days ? result : null;
+  return { data: current?.data ?? null, error: current?.error ?? null, loading: current === null };
 }
 
 // ---------------------------------------------------------------------------

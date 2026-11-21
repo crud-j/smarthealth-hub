@@ -10,6 +10,7 @@ import {
   Avatar, Chip, DashboardHeader, EmptyRow, IconBadge, Panel, RowList, StatCard, StatGrid,
   TwoColumns, dueLabel, formatDay, formatTime, humanize, rise, text,
 } from "./shared";
+import { ReminderEffectPanel } from "./ReminderEffect";
 
 const NO_SITIO = "No sitio/purok recorded";
 
@@ -175,6 +176,8 @@ export default function BhwDashboard({ data }: { data: BhwDashboardData }) {
           </RowList>
         </Panel>
       </TwoColumns>
+
+      {data.reminder_effect && <ReminderEffectPanel data={data.reminder_effect} index={10} />}
 
       <section aria-label="More" className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard index={10} label="Pre-visit forms waiting" value={data.previsit_forms_waiting} sub="filled in at home" icon={FileClock} tone="sky" href="/registrations" />

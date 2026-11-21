@@ -93,6 +93,8 @@ export interface BhwDashboardData extends DashboardBase {
   previsit_forms_waiting: number;
   visits_logged_by_me_week: number;
   patients_without_active_card: number;
+  /** Absent while the server still runs a backend from before this field. */
+  reminder_effect?: ReminderEffect;
 }
 
 export type CheckStatus = "ok" | "warning" | "error" | "unknown";
@@ -140,6 +142,32 @@ export interface AdminDashboardData extends DashboardBase {
   staff: { active: number; inactive: number; not_signed_in_30d: number };
   active_patients: number;
   security_alerts: { check_name: string; detail: string; severity: string }[];
+  /** Absent while the server still runs a backend from before this field. */
+  reminder_effect?: ReminderEffect;
+}
+
+/**
+ * Return rate after SMS reminders (GET /analytics/appointments/reminder-effect,
+ * also inside the BHW and Admin dashboards). Counts only.
+ *
+ * came     = status completed, or a visit logged for the patient that day.
+ * reminded = an SMS for the appointment was sent before its time.
+ * came_pct is null when the group has fewer than min_group_size appointments.
+ */
+export interface ReminderGroup {
+  total: number;
+  came: number;
+  came_pct: number | null;
+}
+
+export interface ReminderEffect {
+  from_date: string;
+  to_date: string;
+  with_reminder: ReminderGroup;
+  without_reminder: ReminderGroup;
+  difference_points: number | null;
+  confirmed_by_reply: number;
+  min_group_size: number;
 }
 
 export interface AdminStaffDashboardData extends DashboardBase {
