@@ -95,6 +95,22 @@ def _test_redis_url(base_url: str) -> str:
 
 settings.REDIS_URL = _test_redis_url(settings.REDIS_URL)
 
+# Never send real email or SMS from the tests. A developer's backend/.env may
+# hold the real Gmail sender and SMS gateway keys; without this, every local
+# run emailed OTPs to @test.example.com addresses through that Gmail account.
+# With the credentials empty, email_service and every SMS provider use their
+# built-in "not configured" path, exactly as in CI (which has no secrets).
+for _credential in (
+    "EMAIL_HOST_USER",
+    "EMAIL_HOST_PASSWORD",
+    "SEMAPHORE_API_KEY",
+    "ITEXMO_API_KEY",
+    "PHILSMS_TOKEN",
+    "TEXTBEE_API_KEY",
+    "TEXTBEE_DEVICE_ID",
+):
+    setattr(settings, _credential, "")
+
 from app.db.session import get_db
 from app.main import app
 from app.workers.db import set_test_session
