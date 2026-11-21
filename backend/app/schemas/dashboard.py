@@ -113,6 +113,10 @@ class FailedSmsRow(BaseModel):
     kind: Literal["appointment", "immunization", "other"]
     created_at: datetime
     reason: str | None
+    resent: bool = Field(False, description="A resend of this SMS was already queued")
+    can_resend: bool = Field(
+        False, description="POST /sms/logs/{id}/resend would be accepted right now"
+    )
 
 
 class BhwDashboard(_DashboardBase):

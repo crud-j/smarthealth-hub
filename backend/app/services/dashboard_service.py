@@ -65,7 +65,12 @@ from app.schemas.dashboard import (
     StaffAccounts,
     WaitingVisit,
 )
-from app.services import analytics_service, audit_anomaly_service, intake_service
+from app.services import (
+    analytics_service,
+    audit_anomaly_service,
+    intake_service,
+    sms_resend_service,
+)
 from app.services.system_status_service import collect_system_status
 
 MANILA = ZoneInfo("Asia/Manila")
@@ -457,6 +462,24 @@ async def build_bhw(db: AsyncSession, user: User, clock: _Clock) -> BhwDashboard
     )
     appointments_today_count, _rows = await _appointments_on(db, clock.day_start, clock.day_end, 0)
 
+    # Resend state per failed SMS (same rules as POST /sms/logs/{id}/resend).
+    already_resent = await sms_resend_service.resent_ids(db, [log.id for log, _p in failed_rows])
+    failed_sms: list[FailedSmsRow] = []
+    for log, p in failed_rows:
+        resent = log.id in already_resent
+        problem = await sms_resend_service.resend_problem(db, log, now=clock.now, resent=resent)
+        failed_sms.append(
+            FailedSmsRow(
+                id=str(log.id),
+                patient=_ref(p) if p is not None else None,
+                kind=_sms_kind(log),
+                created_at=log.created_at,
+                reason=log.error_detail[:120] if log.error_detail else None,
+                resent=resent,
+                can_resend=problem is None,
+            )
+        )
+
     return BhwDashboard(
         first_name=_first_name(user),
         today=clock.today,
@@ -476,16 +499,7 @@ async def build_bhw(db: AsyncSession, user: User, clock: _Clock) -> BhwDashboard
         ],
         sms_today_sent=sms_sent,
         sms_today_failed=sms_failed,
-        failed_sms=[
-            FailedSmsRow(
-                id=str(log.id),
-                patient=_ref(p) if p is not None else None,
-                kind=_sms_kind(log),
-                created_at=log.created_at,
-                reason=log.error_detail[:120] if log.error_detail else None,
-            )
-            for log, p in failed_rows
-        ],
+        failed_sms=failed_sms,
         appointments_today_count=appointments_today_count,
         previsit_forms_waiting=await _previsit_drafts_waiting(db),
         visits_logged_by_me_week=visits_mine,
