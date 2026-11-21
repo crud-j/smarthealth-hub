@@ -12,10 +12,9 @@
  * Security invariant: QR encodes only patient_id + card_version + HMAC.
  */
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { HealthCardData } from "@/types/healthCard";
 import type { Patient } from "@/types/patient";
-import { generateQrDataUri } from "@/lib/qr";
 import { effectiveAddress } from "@/lib/schemas/patient";
 
 // ---------------------------------------------------------------------------
@@ -59,22 +58,10 @@ interface HealthCardPreviewProps {
 
 export default function HealthCardPreview({ patient, card }: HealthCardPreviewProps) {
   const [side, setSide] = useState<"front" | "back">("front");
-  const [qrDataUri, setQrDataUri] = useState<string | null>(null);
-  const [qrError, setQrError] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    async function buildQr() {
-      const url = `https://smarthealthhub.local/verify?pid=${encodeURIComponent(patient.id)}&v=${card.card_version}`;
-      try {
-        const uri = await generateQrDataUri(url);
-        if (!cancelled) setQrDataUri(uri);
-      } catch { if (!cancelled) setQrError(true); }
-    }
-    if (card.qr_data_uri) setQrDataUri(card.qr_data_uri);
-    else void buildQr();
-    return () => { cancelled = true; };
-  }, [patient.id, card.card_version, card.qr_data_uri]);
+  // Only the server can sign the QR (the HMAC secret never reaches the
+  // browser), so show its QR or none. Never draw one here: an unsigned QR
+  // printed from the screen would never verify.
+  const qrDataUri = card.qr_data_uri ?? null;
 
   // Derived
   const fullName = [patient.firstName, patient.middleName, patient.lastName]
@@ -250,11 +237,9 @@ export default function HealthCardPreview({ patient, card }: HealthCardPreviewPr
                   width: mm(13), height: mm(13), background: "#fff",
                   padding: mm(0.3), border: "0.3px solid #e2e8f0", display: "block",
                 }} />
-              ) : qrError ? (
-                <div style={{ ...qrPlaceholderStyle }}>QR unavailable</div>
               ) : (
-                <div style={{ ...qrPlaceholderStyle }} role="status">
-                  <span style={{ fontSize: pt(3.5), color: "#94a3b8" }}>…</span>
+                <div style={{ ...qrPlaceholderStyle }} title="Download the PDF to print the card with its QR code">
+                  QR on PDF
                 </div>
               )}
               <span style={{ fontSize: pt(3.8), color: "#111111", fontWeight: 400, lineHeight: 1 }}>

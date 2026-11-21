@@ -1945,8 +1945,11 @@ async def get_nfc_batch(
         "Pass ``?allow_missing=true`` to receive ``{card_found: false, card: null}`` "
         "with HTTP 200 instead — this suppresses browser console network errors "
         "when polling card status for patients who may not have a card yet.  "
-        "Does NOT return the QR image — the frontend regenerates the QR "
-        "preview client-side from patient_id + card_version."
+        "Pass ``?include_qr=true`` (Print page preview) to also receive "
+        "``qr_data_uri``: the same HMAC-signed QR the PDF prints.  It is only "
+        "returned for an ACTIVE card; other statuses get null because their QR "
+        "would not verify.  The browser cannot build this QR itself (the HMAC "
+        "secret stays on the server)."
     ),
 )
 async def get_health_card(
@@ -1959,6 +1962,13 @@ async def get_health_card(
             "When true, return HTTP 200 with {card_found: false, card: null} "
             "instead of HTTP 404 when the patient has no health card.  "
             "Use this from list-view callers to avoid browser console network errors."
+        ),
+    ),
+    include_qr: bool = Query(
+        False,
+        description=(
+            "When true and the card is active, include qr_data_uri: the signed "
+            "QR image (patient_id + card_version + HMAC, no PHI) for the preview."
         ),
     ),
 ) -> HealthCardResponse | HealthCardMaybeResponse:
@@ -1992,6 +2002,12 @@ async def get_health_card(
             return HealthCardMaybeResponse(card_found=False, card=None)
         raise NotFoundError(f"No health card found for patient {patient_id}.")
 
+    qr_data_uri: str | None = None
+    if include_qr and card.status == "active":
+        _signed_url, qr_data_uri = qr_service.encode_qr_payload(
+            str(card.patient_id), card.card_version
+        )
+
     card_data = HealthCardResponse(
         id=str(card.id),
         patient_id=str(card.patient_id),
@@ -2001,7 +2017,7 @@ async def get_health_card(
         issued_at=card.issued_at,
         expires_at=card.expires_at,
         nfc_uid=card.nfc_uid,
-        qr_data_uri=None,  # intentionally omitted on GET metadata
+        qr_data_uri=qr_data_uri,  # only with ?include_qr=true on an active card
     )
 
     if allow_missing:

@@ -22,7 +22,7 @@ const qrGeneratorApi = {
    *
    * Args:
    *   text — The full HMAC-signed verification URL
-   *          (e.g. "https://smarthealthhub.local/verify?pid=...&v=1&sig=...")
+   *          (e.g. "{QR_BASE_URL}/verify?pid=...&v=1&sig=...", signed by the server)
    *          Only the URL string is encoded — no PHI in the payload.
    *
    * Returns: A "data:image/svg+xml,..." string ready for use in <img src>.
