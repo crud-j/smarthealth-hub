@@ -7,7 +7,8 @@ Task:
     Queries audit_logs for three anomaly patterns:
       - PHI_VIEW burst (>50 views in 60 min by same user)
       - After-hours DELETE on patient records (outside 08:00-18:00 PHT)
-      - Login failure burst (>10 failures from same IP in 5 min)
+      - Sign-in failure burst (>20 wrong passwords / OTP codes from same IP
+        in the last hour)
     Logs every finding at WARNING level.
     Sends a summary SMS to ADMIN_ALERT_PHONE when anomalies are found
     (no-op if ADMIN_ALERT_PHONE is not configured).

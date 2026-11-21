@@ -22,6 +22,7 @@ Dev mode:
 from __future__ import annotations
 
 import asyncio
+import html
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -36,32 +37,85 @@ logger = get_logger(__name__)
 # Templates (Plain Text & HTML)
 # ---------------------------------------------------------------------------
 
+# Rose palette of the sign-in pages (frontend/web/app/globals.css,
+# [data-theme="rose"]: derived from the BHC logo seal).
+_ROSE = "#b5343e"
+_INK = "#1a0808"
+_MUTED = "#7a5252"
+_PANEL = "#fdf0eb"
+_LINE = "#e5d4cc"
+_PAGE = "#f5efe9"
+_SANS = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+_SERIF = "Georgia, 'Times New Roman', serif"
+
+
+def _otp_subject(purpose: str) -> str:
+    """Email subject. Names the code but never contains it (lock-screen previews)."""
+    if purpose == "password_reset":
+        return "Your SmartHealth Hub password reset code"
+    return "Your SmartHealth Hub sign-in code"
+
+
+def _otp_wording(purpose: str) -> tuple[str, str, str]:
+    """(heading, panel label, what the code is for)."""
+    if purpose == "password_reset":
+        return (
+            "Your password reset code",
+            "Password reset code requested",
+            "reset your SmartHealth Hub password",
+        )
+    return (
+        "Your sign-in code",
+        "Sign-in code requested",
+        "finish signing in to SmartHealth Hub",
+    )
+
 
 def _build_otp_text(otp_code: str, purpose: str) -> str:
     """Return a plain text fallback email body for non-HTML clients."""
-    action = "Password Reset" if purpose == "password_reset" else "Account Login"
-    return f"""SmartHealth Hub — Verification Code
+    heading, _, use = _otp_wording(purpose)
+    return f"""{heading}
 
-Your authentication code for {action} is: {otp_code}
+{otp_code}
 
-This code is valid for 10 minutes. For security reasons, do not share this code with anyone.
+Enter this code to {use}. It is valid for 10 minutes.
+Never share this code with anyone, including health center staff.
 
-If you did not request this verification code, please ignore this email or contact your Barangay Health Center administrator immediately.
+If you did not ask for this code, ignore this email. If it keeps happening,
+tell your Barangay Health Center administrator.
 
 ---
-SmartHealth Hub — Barangay Health Center Management
-This is an automated system message. Please do not reply to this email.
+SmartHealth Hub · Barangay Health Center
+Automated message. Please do not reply.
 """
 
 
+def _digit_boxes(otp_code: str) -> str:
+    """One white box per digit. Spacer cells, not margins (Outlook ignores margins)."""
+    cells: list[str] = []
+    for i, digit in enumerate(html.escape(otp_code)):
+        if i:
+            cells.append('<td width="8" style="width:8px;font-size:0;line-height:0;">&nbsp;</td>')
+        cells.append(
+            f'<td class="otp-digit" align="center" valign="middle" width="44" height="56" '
+            f'style="width:44px;height:56px;background-color:#ffffff;border:1px solid {_LINE};'
+            f"border-radius:10px;font-family:{_SANS};font-size:30px;font-weight:600;"
+            f'color:{_INK};text-align:center;">{digit}</td>'
+        )
+    return "".join(cells)
+
+
 def _build_otp_html(otp_code: str, purpose: str) -> str:
-    """Return a responsive, professionally styled HTML email body containing the OTP."""
-    action_title = (
-        "Password Reset Request" if purpose == "password_reset" else "Identity Verification"
-    )
-    action_desc = (
-        "reset your account password" if purpose == "password_reset" else "sign in to your account"
-    )
+    """HTML email: big heading, panel with one box per digit, short notes.
+
+    Inline styles and tables only (email clients drop <style> and flexbox).
+    No images, scripts or remote content. The code appears once as plain text
+    under the boxes: easy to long-press on a phone, and lets Gmail offer its
+    own "Copy code" button. A real copy button is impossible in email (no
+    JavaScript).
+    """
+    heading, label, use = _otp_wording(purpose)
+    code = html.escape(otp_code)
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -69,90 +123,64 @@ def _build_otp_html(otp_code: str, purpose: str) -> str:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="x-apple-disable-message-reformatting">
-  <title>SmartHealth Hub — Verification Code</title>
+  <meta name="color-scheme" content="light">
+  <title>{heading}</title>
 </head>
-<body style="margin: 0; padding: 0; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased;">
-  <!-- Canvas Outer Container -->
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f1f5f9; padding: 40px 16px;">
+<body style="margin:0;padding:0;background-color:{_PAGE};">
+  <div class="preheader" style="display:none;max-height:0;overflow:hidden;opacity:0;color:{_PAGE};">Valid for 10 minutes. Never share it with anyone.</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:{_PAGE};">
     <tr>
-      <td align="center">
-        <!-- Main Email Card -->
-        <table role="presentation" width="100%" style="max-width: 520px; background-color: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; border-collapse: separate; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
-
-          <!-- Header Banner -->
+      <td align="center" style="padding:32px 12px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background-color:#ffffff;border:1px solid {_LINE};border-radius:16px;">
           <tr>
-            <td style="background-color: #0f766e; background: linear-gradient(135deg, #0d9488 0%, #0f766e 100%); padding: 32px 32px 28px; text-align: center;">
-              <table role="presentation" align="center" style="margin: 0 auto;">
+            <td style="padding:28px 24px 8px;font-family:{_SANS};">
+              <table role="presentation" cellpadding="0" cellspacing="0">
                 <tr>
-                  <td style="background-color: rgba(255, 255, 255, 0.15); border-radius: 12px; padding: 8px 14px; text-align: center;">
-                    <span style="color: #ffffff; font-size: 20px; font-weight: 700; letter-spacing: -0.3px; vertical-align: middle;">
-                      &#10010; SmartHealth Hub
-                    </span>
+                  <td width="28" height="28" align="center" valign="middle" style="width:28px;height:28px;background-color:{_ROSE};border-radius:8px;color:#ffffff;font-size:16px;font-weight:700;line-height:28px;text-align:center;">&#10010;</td>
+                  <td style="padding-left:10px;font-size:14px;font-weight:600;color:{_INK};">SmartHealth Hub</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:16px 24px 0;">
+              <h1 style="margin:0;font-family:{_SERIF};font-size:28px;line-height:1.25;font-weight:400;color:{_INK};">{heading}</h1>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:20px 24px 0;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:{_PANEL};border-radius:16px;">
+                <tr>
+                  <td style="padding:22px 18px 20px;font-family:{_SANS};">
+                    <p style="margin:0 0 14px;font-size:15px;color:{_MUTED};">{label}</p>
+                    <table role="presentation" cellpadding="0" cellspacing="0">
+                      <tr>{_digit_boxes(otp_code)}</tr>
+                    </table>
+                    <p style="margin:14px 0 0;font-size:13px;color:{_MUTED};">or copy: <span class="otp-copy" style="font-family:Consolas,Menlo,'Courier New',monospace;font-size:15px;font-weight:600;color:{_INK};letter-spacing:1px;-webkit-user-select:all;user-select:all;">{code}</span></p>
                   </td>
                 </tr>
               </table>
-              <p style="color: #ccfbf1; font-size: 13px; font-weight: 500; margin: 12px 0 0 0; letter-spacing: 0.2px;">
-                Barangay Health Center Portal
-              </p>
             </td>
           </tr>
-
-          <!-- Primary Body -->
           <tr>
-            <td style="padding: 36px 32px 28px;">
-              <h1 style="margin: 0 0 12px; font-size: 20px; font-weight: 700; color: #0f172a; text-align: center;">
-                {action_title}
-              </h1>
-              <p style="margin: 0 0 24px; font-size: 14px; line-height: 1.6; color: #475569; text-align: center;">
-                Use the verification code below to {action_desc}. This code is valid for <strong>10 minutes</strong>.
-              </p>
-
-              <!-- OTP Container -->
-              <div style="margin: 28px 0; text-align: center;">
-                <div style="display: inline-block; background-color: #f0fdf4; border: 2px dashed #16a34a; border-radius: 12px; padding: 18px 36px;">
-                  <span style="font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace; font-size: 38px; font-weight: 800; letter-spacing: 12px; color: #15803d; margin-right: -12px; text-align: center; display: block;">
-                    {otp_code}
-                  </span>
-                </div>
-              </div>
-
-              <!-- Security Callout Box -->
-              <table role="presentation" width="100%" style="background-color: #fffbe0; border-left: 4px solid #f59e0b; border-radius: 6px; margin: 24px 0 16px;">
-                <tr>
-                  <td style="padding: 12px 16px;">
-                    <p style="margin: 0; font-size: 12px; line-height: 1.5; color: #b45309;">
-                      <strong>Security Notice:</strong> Never share this code with anyone, including health center staff or administrators.
-                    </p>
-                  </td>
-                </tr>
-              </table>
-
-              <p style="margin: 16px 0 0; font-size: 13px; line-height: 1.5; color: #64748b; text-align: center;">
-                If you did not make this request, you can safely ignore this email or contact your portal system administrator.
-              </p>
+            <td style="padding:20px 24px 0;font-family:{_SANS};font-size:15px;line-height:1.55;color:{_INK};">
+              Enter this code to {use}. It is valid for <strong>10 minutes</strong>.
             </td>
           </tr>
-
-          <!-- Divider -->
           <tr>
-            <td style="padding: 0 32px;">
-              <div style="border-top: 1px solid #f1f5f9;"></div>
+            <td style="padding:12px 24px 0;font-family:{_SANS};font-size:14px;line-height:1.55;color:{_ROSE};">
+              <strong>Never share this code</strong> with anyone, including health center staff.
             </td>
           </tr>
-
-          <!-- Footer -->
           <tr>
-            <td style="padding: 24px 32px 32px; text-align: center;">
-              <p style="margin: 0 0 6px; font-size: 12px; font-weight: 600; color: #64748b;">
-                SmartHealth Hub System
-              </p>
-              <p style="margin: 0; font-size: 11px; line-height: 1.4; color: #94a3b8;">
-                This is an automated operational notification. Please do not reply directly to this email message.
-              </p>
+            <td style="padding:12px 24px 28px;font-family:{_SANS};font-size:13px;line-height:1.55;color:{_MUTED};">
+              Didn't ask for this code? Ignore this email. If it keeps happening, tell your Barangay Health Center administrator.
             </td>
           </tr>
-
         </table>
+        <p style="margin:16px 0 0;font-family:{_SANS};font-size:12px;line-height:1.5;color:{_MUTED};text-align:center;">
+          SmartHealth Hub &middot; Barangay Health Center<br>Automated message. Please do not reply.
+        </p>
       </td>
     </tr>
   </table>
@@ -230,11 +258,7 @@ class EmailService:
             )
             return False
 
-        subject = (
-            "SmartHealth Hub — Password Reset Code"
-            if purpose == "password_reset"
-            else "SmartHealth Hub — Your Verification Code"
-        )
+        subject = _otp_subject(purpose)
 
         text_body = _build_otp_text(otp_code, purpose)
         html_body = _build_otp_html(otp_code, purpose)

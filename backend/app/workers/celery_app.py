@@ -86,9 +86,13 @@ celery_app.config_from_object(
 # Celery Beat schedule
 #
 # All times are Asia/Manila (``timezone`` above). The production VM is switched
-# OFF at 23:00 by Azure auto-shutdown and started by hand in the morning, and
-# Celery Beat never re-runs a job whose time passed while it was down. So every
-# daily job must fire between ~10:00 and 22:59, or it silently never runs.
+# OFF at 23:00 by Azure auto-shutdown and started by hand in the morning.
+# Beat stores each job's last run in /tmp/celerybeat-schedule inside the beat
+# container (docker-compose.server.yml). That file survives a VM stop/start,
+# so after start-up Beat runs each job it missed ONCE, straight away (seen on
+# 2026-11-21: the 10:00 immunization run happened at 10:49). A deploy
+# recreates the container and loses the file: missed jobs then wait for their
+# next time. So keep daily jobs between ~10:00 and 22:59 anyway.
 # (The backup at 22:30 is a separate container with its own catch-up.)
 # ---------------------------------------------------------------------------
 celery_app.conf.beat_schedule = {
@@ -107,10 +111,9 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(minute=0),
     },
     # Daily 10:00 — immunization reminders. The task picks every dose due
-    # within SMS_IMMUNIZATION_LEAD_DAYS that has no reminder yet, so a day the
-    # VM was off at 10:00 is caught up at the next run (that reminder then
-    # arrives with fewer days' notice). Still keep this at a time the VM is
-    # usually running.
+    # within SMS_IMMUNIZATION_LEAD_DAYS that has no reminder yet, so days the
+    # job did not run (VM off all day, or a deploy after 10:00) are caught up
+    # at the next run, with fewer days' notice.
     "dispatch-immunization-reminders": {
         "task": "reminders.dispatch_immunization_reminders",
         "schedule": crontab(hour=10, minute=0),
