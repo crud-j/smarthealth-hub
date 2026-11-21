@@ -27,8 +27,9 @@ import csv
 import io
 import json
 import logging
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any, Literal
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,6 +40,7 @@ from app.models.appointment import Appointment
 from app.models.immunization import Immunization
 from app.models.medical_history import MedicalHistory
 from app.models.patient import Patient
+from app.models.sms_log import SmsLog
 from app.models.visit import Visit
 
 logger = logging.getLogger(__name__)
@@ -778,3 +780,135 @@ def rows_to_csv(rows: list[dict[str, Any]]) -> str:
     writer.writeheader()
     writer.writerows(rows)
     return output.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Return rate after SMS reminders
+# ---------------------------------------------------------------------------
+
+MANILA = ZoneInfo("Asia/Manila")
+REMINDER_MIN_GROUP = 10
+_REMINDER_SENT_STATUSES = ("sent", "delivered", "replied")
+_POST_MISS_TRIGGER = "post_miss_followup"
+
+
+def _manila_day(column: Any) -> Any:
+    """SQL: the Manila calendar date of a timestamptz column."""
+    return func.date(func.timezone("Asia/Manila", column))
+
+
+def _group(total: int, came: int) -> dict[str, Any]:
+    pct = round(came / total * 100, 1) if total >= REMINDER_MIN_GROUP else None
+    return {"total": total, "came": came, "came_pct": pct}
+
+
+async def get_reminder_effect(
+    db: AsyncSession,
+    *,
+    from_date: date,
+    to_date: date,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """
+    Compare finished appointments that got a reminder SMS with those that did not.
+
+    Window: appointments scheduled from ``from_date`` 00:00 to ``to_date``
+    24:00 Manila time, and before ``now``.
+
+    came      status 'completed', OR the patient has a visit logged on the
+              appointment's Manila calendar day.  Completion is a manual
+              button and the 18:00 job marks everything still open as
+              'missed', so status alone under-counts patients who came.
+    reminded  at least one SMS linked to the appointment with status sent /
+              delivered / replied, created before the appointment time.
+              Failed or still-queued texts and the after-miss follow-up
+              (metadata trigger 'post_miss_followup') don't count.  The text
+              sent at booking counts like the 24-hour reminder.
+    left out  cancelled appointments, and pending/confirmed ones with no
+              visit that day (outcome not known yet).
+
+    A group with fewer than REMINDER_MIN_GROUP appointments gets no
+    percentage.  Counts only; no patient names are read.
+    """
+    now = now or datetime.now(tz=UTC)
+    start = datetime.combine(from_date, time.min, tzinfo=MANILA)
+    end = min(datetime.combine(to_date + timedelta(days=1), time.min, tzinfo=MANILA), now)
+
+    visit_that_day = (
+        select(Visit.id)
+        .where(
+            Visit.patient_id == Appointment.patient_id,
+            _manila_day(Visit.visit_date) == _manila_day(Appointment.scheduled_at),
+        )
+        .exists()
+    )
+    reminded = (
+        select(SmsLog.id)
+        .where(
+            SmsLog.appointment_id == Appointment.id,
+            SmsLog.status.in_(_REMINDER_SENT_STATUSES),
+            SmsLog.created_at < Appointment.scheduled_at,
+            func.coalesce(SmsLog.sms_metadata["trigger"].astext, "") != _POST_MISS_TRIGGER,
+        )
+        .exists()
+    )
+    replied = (
+        select(SmsLog.id)
+        .where(SmsLog.appointment_id == Appointment.id, SmsLog.status == "replied")
+        .exists()
+    )
+
+    rows = (
+        await db.execute(
+            select(
+                Appointment.status,
+                visit_that_day.label("visit_that_day"),
+                reminded.label("reminded"),
+                replied.label("replied"),
+            ).where(
+                Appointment.scheduled_at >= start,
+                Appointment.scheduled_at < end,
+                Appointment.status != "cancelled",
+            )
+        )
+    ).all()
+
+    counts = {True: [0, 0], False: [0, 0]}  # reminded -> [total, came]
+    confirmed_by_reply = 0
+    for row in rows:
+        came = row.status == "completed" or bool(row.visit_that_day)
+        if not came and row.status != "missed":
+            continue  # still open: outcome not known yet
+        group = counts[bool(row.reminded)]
+        group[0] += 1
+        group[1] += int(came)
+        confirmed_by_reply += int(bool(row.replied))
+
+    with_reminder = _group(*counts[True])
+    without_reminder = _group(*counts[False])
+    difference = None
+    if with_reminder["came_pct"] is not None and without_reminder["came_pct"] is not None:
+        with_total, with_came = counts[True]
+        without_total, without_came = counts[False]
+        difference = round((with_came / with_total - without_came / without_total) * 100, 1)
+
+    return {
+        "from_date": from_date,
+        "to_date": to_date,
+        "with_reminder": with_reminder,
+        "without_reminder": without_reminder,
+        "difference_points": difference,
+        "confirmed_by_reply": confirmed_by_reply,
+        "min_group_size": REMINDER_MIN_GROUP,
+    }
+
+
+async def get_reminder_effect_last_days(
+    db: AsyncSession, days: int, now: datetime | None = None
+) -> dict[str, Any]:
+    """Reminder effect for the last ``days`` Manila calendar days, today included."""
+    now = now or datetime.now(tz=UTC)
+    today = now.astimezone(MANILA).date()
+    return await get_reminder_effect(
+        db, from_date=today - timedelta(days=days - 1), to_date=today, now=now
+    )

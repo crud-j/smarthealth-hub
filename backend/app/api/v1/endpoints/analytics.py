@@ -25,6 +25,11 @@ Routes:
       Query params: from_date, to_date.
       Any authenticated role.
 
+  GET /analytics/appointments/reminder-effect
+      Return rate after SMS reminders: finished appointments with vs
+      without a reminder SMS, and how many of each the patient came to.
+      Query param: days (default 30).  Any authenticated role.
+
   GET /analytics/export
       Exportable tabular data for patients / visits / immunizations /
       appointments.  Returns text/csv (default) or application/json.
@@ -55,6 +60,7 @@ from app.schemas.analytics import (
     DashboardOverview,
     IllnessTrendsResponse,
     NoShowRateResponse,
+    ReminderEffectResponse,
     VaccinationCoverageResponse,
     VisitTrendPoint,
     VisitTrendsResponse,
@@ -262,6 +268,34 @@ async def appointments_no_show_rate(
             "to_date": resolved_to,
         }
     )
+
+
+@router.get(
+    "/appointments/reminder-effect",
+    response_model=ReminderEffectResponse,
+    summary="Return rate after SMS reminders",
+    description=(
+        "Finished appointments in the last N Manila days (today included) that "
+        "got a reminder SMS vs those that did not, and how many of each the "
+        "patient came to (status completed, or a visit logged that day).  "
+        "Groups under min_group_size get no percentage.  Counts only."
+    ),
+)
+async def reminder_effect(
+    db: DbDep,
+    _current_user: CurrentUser,
+    days: Annotated[
+        int,
+        Query(ge=1, le=365, description="Window length in days, today included.  Default 30."),
+    ] = 30,
+) -> ReminderEffectResponse:
+    """
+    Return rate after SMS reminders (thesis objective: SMS notifications).
+
+    Auth: Any authenticated user.
+    """
+    data = await analytics_service.get_reminder_effect_last_days(db, days)
+    return ReminderEffectResponse.model_validate(data)
 
 
 @router.get(

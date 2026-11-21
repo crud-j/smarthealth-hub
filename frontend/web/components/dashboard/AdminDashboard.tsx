@@ -13,6 +13,7 @@ import {
   formatDay, formatTime, rise, text,
 } from "./shared";
 import type { Tone } from "./shared";
+import { ReminderEffectPanel } from "./ReminderEffect";
 
 // Admin model B: system, registrations and accounts only. Nothing clinical.
 
@@ -241,6 +242,8 @@ export default function AdminDashboard({ data }: { data: AdminDashboardData }) {
           </RowList>
         </Panel>
       </TwoColumns>
+
+      {data.reminder_effect && <ReminderEffectPanel data={data.reminder_effect} index={16} />}
     </>
   );
 }
