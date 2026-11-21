@@ -9,6 +9,21 @@ import NfcScanButton from "@/components/cards/NfcScanButton";
 import type { PatientVerifySummaryFull, NfcPayload, CardVerifyRequest } from "@/types/healthCard";
 import type { QrScannerApi } from "@/workers/qrScanner.worker";
 
+// The QR camera chosen on this computer (per browser). Storage can be
+// unavailable (private mode, blocked site data): then nothing is remembered.
+const CAMERA_KEY = "shh.qrCameraId";
+
+function savedCameraId(): string | null {
+  try { return window.localStorage.getItem(CAMERA_KEY); } catch { return null; }
+}
+
+function saveCameraId(id: string | null): void {
+  try {
+    if (id) window.localStorage.setItem(CAMERA_KEY, id);
+    else window.localStorage.removeItem(CAMERA_KEY);
+  } catch { /* nothing to remember with */ }
+}
+
 const API_HOST = (() => {
   const base = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api/v1";
   return base.replace(/\/api\/v1\/?$/, "");
@@ -187,6 +202,8 @@ export default function HealthCardVerifyPage() {
   const [state, setState] = useState<VerifyState>({ phase: "idle" });
   const [nfcSupported] = useState<boolean>(() => typeof window !== "undefined" && "NDEFReader" in window);
   const [nfcNoticeDismissed, setNfcNoticeDismissed] = useState(false);
+  const [cameras, setCameras] = useState<{ id: string; label: string }[]>([]);
+  const [cameraId, setCameraId] = useState("");
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -211,18 +228,45 @@ export default function HealthCardVerifyPage() {
     }
   }, []);
 
-  const startCamera = useCallback(async () => {
+  // Opens `deviceId`, else the camera chosen last time on this computer, else
+  // the browser's default (back camera on phones). Then lists the cameras so
+  // staff can switch away from e.g. a phone-as-webcam camera with no phone.
+  const startCamera = useCallback(async (deviceId?: string) => {
     if (!navigator.mediaDevices?.getUserMedia) {
       setState({ phase: "error", message: "Camera access is not available on this browser. Use the NFC tab or contact IT support." });
       return;
     }
+    const wanted = deviceId ?? savedCameraId();
+    const byDefault: MediaStreamConstraints = { video: { facingMode: "environment" }, audio: false };
+    let stream: MediaStream;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
-      streamRef.current = stream;
-      if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play(); setState({ phase: "scanning" }); }
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(
+          wanted ? { video: { deviceId: { exact: wanted } }, audio: false } : byDefault,
+        );
+      } catch (err) {
+        if (!wanted) throw err;
+        saveCameraId(null); // the remembered camera is gone: use the default one
+        stream = await navigator.mediaDevices.getUserMedia(byDefault);
+      }
     } catch {
       setState({ phase: "error", message: "Camera permission denied. Please allow camera access and try again." });
+      return;
     }
+    streamRef.current = stream;
+    setCameraId(stream.getVideoTracks?.()[0]?.getSettings?.().deviceId ?? "");
+    try {
+      // Labels are only filled in after camera permission, i.e. now.
+      const all = (await navigator.mediaDevices.enumerateDevices?.()) ?? [];
+      setCameras(
+        all
+          .filter((d) => d.kind === "videoinput")
+          .map((d, i) => ({ id: d.deviceId, label: d.label || `Camera ${i + 1}` })),
+      );
+    } catch {
+      setCameras([]);
+    }
+    if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play(); setState({ phase: "scanning" }); }
   }, []);
 
   const stopCamera = useCallback(() => {
@@ -269,6 +313,12 @@ export default function HealthCardVerifyPage() {
 
   const handleNfcResult = useCallback((payload: NfcPayload) => { void callVerifyApi({ nfc_uid: payload.patient_id }); }, [callVerifyApi]);
   const resetScan = useCallback(() => { setState({ phase: "idle" }); if (tab === "qr") void startCamera(); }, [tab, startCamera]);
+  const switchCamera = useCallback((id: string) => {
+    stopCamera();
+    saveCameraId(id);
+    setState({ phase: "idle" });
+    void startCamera(id);
+  }, [stopCamera, startCamera]);
   const isLoading = state.phase === "loading";
 
   if (state.phase === "success") {
@@ -335,6 +385,22 @@ export default function HealthCardVerifyPage() {
           </div>
           <canvas ref={canvasRef} className="hidden" />
           <p className="text-center text-sm text-[#9b6e6e]">Hold the QR code in front of the camera</p>
+          {cameras.length > 1 && (
+            <div className="mx-auto w-full max-w-[400px]">
+              <label htmlFor="qr-camera" className="mb-1 block text-xs font-semibold uppercase tracking-wider text-[#9b6e6e]">Camera</label>
+              <select
+                id="qr-camera"
+                value={cameraId}
+                onChange={(e) => switchCamera(e.target.value)}
+                className="w-full rounded-lg border border-[#e5d4cc] bg-white px-3 py-2 text-sm text-[#1a0808] focus-visible:outline-2 focus-visible:outline-[#b5343e]"
+              >
+                {cameras.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+              </select>
+              <p className="mt-1 text-xs text-[#9b6e6e]">
+                Seeing a crossed-out phone or a black picture? That camera is not sending video. Pick another one.
+              </p>
+            </div>
+          )}
         </div>
       )}
 
