@@ -19,6 +19,11 @@ vi.mock("@/lib/api-client", async (importOriginal) => {
 });
 const apiFetchMock = vi.mocked(apiFetch);
 
+let currentUser: { id: string; full_name: string; role: string } | null = null;
+vi.mock("@/hooks/useAuth", () => ({
+  useCurrentUser: () => ({ user: currentUser, isLoading: false, isAuthenticated: true, refetch: () => {} }),
+}));
+
 const ref = (id: string, full_name: string) => ({ id, patient_code: `BHC-${id}`, full_name });
 const TODAY = "2026-11-22";
 
@@ -43,6 +48,7 @@ function serve(dashboard: unknown) {
 
 beforeEach(() => {
   apiFetchMock.mockReset();
+  currentUser = null;
 });
 
 const physician: PhysicianDashboardData = {
@@ -119,15 +125,19 @@ describe("Dashboard page", () => {
       role: "admin", first_name: "Admin", today: TODAY,
       system: {
         overall: "ok",
+        checked_at: "2026-11-22T13:45:00Z",
         version: { commit: "a1b2c3d", environment: "production" },
-        database: { status: "ok" },
+        database: { status: "ok", message: "Database is reachable." },
+        redis: { status: "ok", message: "Redis is reachable." },
         workers: { status: "ok", message: "Workers running" },
-        disk: { status: "ok", used_percent: 26 },
+        disk: { status: "ok", message: "Plenty of space.", used_percent: 26 },
+        media: { status: "ok", message: "Media folder OK." },
         backup: { status: "ok", message: "Backup OK", last_success_at: "2026-11-21T18:00:00Z" },
+        alerts: { status: "ok", message: "Admin alerts configured." },
         reliability: {
-          sms: { status: "ok", last_24h: { sent: 3, failed: 0 } },
-          sign_in: { status: "ok", last_24h: { successful: 9, failed_password: 2, failed_otp: 0 } },
-          reminders: { runs: [{ job: "immunization", last_run_at: "2026-11-22T02:00:00Z", queued: 5 }] },
+          sms: { status: "ok", message: "SMS OK.", last_24h: { sent: 3, failed: 0 } },
+          sign_in: { status: "ok", message: "Sign-ins OK.", last_24h: { successful: 9, failed_password: 2, failed_otp: 0 } },
+          reminders: { status: "ok", message: "", runs: [{ job: "immunization", last_run_at: "2026-11-22T02:00:00Z", queued: 5 }] },
         },
       },
       online_applications_pending: 3, previsit_forms_waiting: 1,
@@ -138,7 +148,8 @@ describe("Dashboard page", () => {
     serve(admin);
     render(<DashboardPage />);
 
-    expect(await screen.findByText(/a1b2c3d/)).toBeInTheDocument();
+    expect((await screen.findAllByText(/a1b2c3d/)).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/All systems healthy/).length).toBeGreaterThan(0);
     expect(screen.getByText("Online Applicant")).toBeInTheDocument();
     expect(screen.getByText(/No security alerts/)).toBeInTheDocument();
     expect(screen.queryByText(/Waiting to be seen/)).not.toBeInTheDocument();
@@ -162,7 +173,7 @@ describe("Dashboard page", () => {
     const missing = within(list).getByText("Form Missing").closest("li");
     expect(done).toHaveTextContent(/Form ✓/);
     expect(missing).toHaveTextContent(/No form yet/);
-    expect(screen.getByText(/Tomorrow: 7 appointments/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Tomorrow: 7 appointments/ })).toHaveAttribute("href", "/appointments");
   });
 
   it("falls back to the older dashboard while the backend has no /dashboard/me (404)", async () => {
@@ -179,5 +190,67 @@ describe("Dashboard page", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/Server error/);
     expect(screen.queryByText("Total Active Patients")).not.toBeInTheDocument();
+  });
+});
+
+describe("Dashboard details", () => {
+  it("greets with the signed-in user's full name, not just the first word", async () => {
+    currentUser = { id: "u1", full_name: "Dr. Rosa Cruz", role: "physician" };
+    serve(physician);
+    render(<DashboardPage />);
+
+    expect(await screen.findByRole("heading", { level: 1, name: /Dr\. Rosa Cruz/ })).toBeInTheDocument();
+  });
+
+  it("labels doses due today and tomorrow instead of repeating the date", async () => {
+    const bhw: BhwDashboardData = {
+      role: "bhw", first_name: "Lito", today: TODAY,
+      immunizations_due_7d: 2, immunizations_overdue: 0,
+      immunizations_due: [
+        { id: "i1", patient: ref("p1", "Today Baby"), sitio_purok: null, vaccine_name: "BCG", dose_number: 1, next_due_date: TODAY, overdue: false },
+        { id: "i2", patient: ref("p2", "Tomorrow Baby"), sitio_purok: null, vaccine_name: "BCG", dose_number: 1, next_due_date: "2026-11-23", overdue: false },
+      ],
+      missed_appointments_7d: 0, missed_appointments: [], sms_today_sent: 0, sms_today_failed: 0,
+      failed_sms: [], appointments_today_count: 0, previsit_forms_waiting: 0,
+      visits_logged_by_me_week: 0, patients_without_active_card: 0,
+    };
+    serve(bhw);
+    render(<DashboardPage />);
+
+    const panel = await screen.findByRole("region", { name: /Immunizations due/ });
+    expect(within(panel).getByText("Today Baby").closest("li")).toHaveTextContent(/Due today/);
+    expect(within(panel).getByText("Tomorrow Baby").closest("li")).toHaveTextContent(/Tomorrow/);
+  });
+
+  it("says which system check needs attention, with its reason", async () => {
+    const admin: AdminDashboardData = {
+      role: "admin", first_name: "Admin", today: TODAY,
+      system: {
+        overall: "warning", checked_at: "2026-11-22T13:45:00Z",
+        version: { commit: "7ef9537", environment: "production" },
+        database: { status: "ok", message: "Database is reachable." },
+        redis: { status: "ok", message: "Redis is reachable." },
+        workers: { status: "ok", message: "Worker and scheduler are running." },
+        disk: { status: "ok", message: "Plenty of space.", used_percent: 26 },
+        media: { status: "ok", message: "Media folder OK." },
+        backup: { status: "ok", message: "Backups are up to date.", last_success_at: null },
+        alerts: { status: "ok", message: "Admin alerts configured." },
+        reliability: {
+          sms: { status: "warning", message: "The SMS gateway has not confirmed recent messages.", last_24h: { sent: 3, failed: 0 } },
+          sign_in: { status: "ok", message: "Sign-ins look normal.", last_24h: { successful: 11, failed_password: 12, failed_otp: 0 } },
+          reminders: { status: "ok", message: "", runs: [] },
+        },
+      },
+      online_applications_pending: 0, previsit_forms_waiting: 0, recent_applications: [],
+      staff: { active: 3, inactive: 0, not_signed_in_30d: 0 }, active_patients: 61, security_alerts: [],
+    };
+    serve(admin);
+    render(<DashboardPage />);
+
+    expect((await screen.findAllByText(/SMS needs attention/)).length).toBeGreaterThan(0);
+    const sms = screen.getByRole("group", { name: /SMS/ });
+    expect(sms).toHaveTextContent(/Needs attention/);
+    expect(sms).toHaveTextContent(/has not confirmed recent messages/);
+    expect(screen.getByRole("group", { name: /Database/ })).toHaveTextContent(/Healthy/);
   });
 });
