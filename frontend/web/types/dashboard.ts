@@ -77,6 +77,10 @@ export interface FailedSmsRow {
   kind: "appointment" | "immunization" | "other";
   created_at: string;
   reason: string | null;
+  /** A resend was already queued (absent on a backend from before resend). */
+  resent?: boolean;
+  /** POST /sms/logs/{id}/resend would be accepted now (absent on an older backend). */
+  can_resend?: boolean;
 }
 
 export interface BhwDashboardData extends DashboardBase {
