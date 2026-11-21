@@ -49,11 +49,19 @@ _SANS = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial
 _SERIF = "Georgia, 'Times New Roman', serif"
 
 
-def _otp_subject(purpose: str) -> str:
-    """Email subject. Names the code but never contains it (lock-screen previews)."""
+def _otp_subject(otp_code: str, purpose: str) -> str:
+    """Email subject, code first ("286526 is your SmartHealth Hub sign-in code").
+
+    Like Google's and banks' code emails: Android then puts a one-tap "Copy"
+    button on the new-mail notification and Gmail adds its "Copy code"
+    button; a real copy button inside the email is impossible (no
+    JavaScript in email).  Trade-off accepted by the user (2026-11-22): the
+    code shows in notification previews; it expires in 10 minutes and is
+    useless without the password.  The subject is never logged.
+    """
     if purpose == "password_reset":
-        return "Your SmartHealth Hub password reset code"
-    return "Your SmartHealth Hub sign-in code"
+        return f"{otp_code} is your SmartHealth Hub password reset code"
+    return f"{otp_code} is your SmartHealth Hub sign-in code"
 
 
 def _otp_wording(purpose: str) -> tuple[str, str, str]:
@@ -276,7 +284,7 @@ class EmailService:
             )
             return False
 
-        subject = _otp_subject(purpose)
+        subject = _otp_subject(otp_code, purpose)
 
         text_body = _build_otp_text(otp_code, purpose)
         html_body = _build_otp_html(otp_code, purpose)
