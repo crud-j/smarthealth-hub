@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { isPublicPath } from "./lib/public-paths";
 
 /**
  * Route protection proxy — Phase 1.
@@ -16,30 +17,15 @@ import type { NextRequest } from "next/server";
  *      security reasons unless stored in edge secrets).
  *   b) A short-lived session token pattern (Phase 6 hardening concern).
  *
- * Public paths (no redirect):
+ * Public paths (no redirect) are listed in lib/public-paths.ts:
  *   /login, /verify-otp, /forgot-password, /verify (QR scan target),
- *   /api/*, /_next/*, /favicon.ico
+ *   /register and /intake (patient self-registration), /api/*, /_next/*,
+ *   /, /favicon.ico and static files.
  */
 export function proxy(request: NextRequest): NextResponse {
   const { pathname } = request.nextUrl;
 
-  // Public paths that do not require authentication.
-  const isStaticAsset = /\.(?:png|svg|jpe?g|gif|webp|ico|woff2?|ttf|otf|eot|mp4|pdf)$/i.test(pathname);
-
-  const isPublic =
-    isStaticAsset ||
-    pathname.startsWith("/login") ||
-    pathname.startsWith("/verify-otp") ||
-    pathname.startsWith("/forgot-password") ||
-    pathname.startsWith("/verify") ||        // QR code scan landing page (mobile)
-    pathname.startsWith("/intake/") ||       // Public pre-visit patient intake form (token-gated, no JWT)
-    // /nfc-monitor is NOT public: it shows the last scanned patient's details.
-    pathname.startsWith("/api/") ||
-    pathname.startsWith("/_next/") ||
-    pathname === "/favicon.ico" ||
-    pathname === "/";
-
-  if (isPublic) {
+  if (isPublicPath(pathname)) {
     return NextResponse.next();
   }
 
