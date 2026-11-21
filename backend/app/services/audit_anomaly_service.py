@@ -8,8 +8,9 @@ Checks performed (all query the last N minutes/hours of audit_logs):
   check_after_hours_deletes   — DELETE actions on patient entity_type outside
                                 08:00–18:00 Philippine Standard Time (UTC+8)
                                 in the last 24 hours.
-  check_login_failure_burst   — same IP had >10 LOGIN_FAILED events in the
-                                last 5 minutes (brute-force indicator).
+  check_login_failure_burst   — same IP had >20 failed sign-ins (wrong
+                                password or wrong OTP code) in the last hour
+                                (brute-force indicator).
 
 All checks are read-only — they never write to the database.
 Called from app.workers.audit_tasks (Celery Beat, hourly).
@@ -31,6 +32,14 @@ logger = logging.getLogger(__name__)
 # Philippine Standard Time = UTC+8
 _PHT_OFFSET = timedelta(hours=8)
 _PHT = timezone(_PHT_OFFSET)
+
+# The scan runs once an hour, so it looks at the whole hour (a shorter window
+# would miss failures between scans). The login rate limit holds one person
+# on one account to 5 wrong passwords per 15 minutes (20 an hour); more than
+# that from one IP means several accounts or password + OTP guessing.
+LOGIN_BURST_WINDOW = timedelta(hours=1)
+LOGIN_BURST_THRESHOLD = 20
+_SIGNIN_FAILURE_ACTIONS = ("LOGIN_FAILED", "OTP_FAILED")
 
 
 class AnomalyEvent(BaseModel):
@@ -156,8 +165,9 @@ async def check_after_hours_deletes(db: AsyncSession) -> list[AnomalyEvent]:
 
 async def check_login_failure_burst(db: AsyncSession) -> list[AnomalyEvent]:
     """
-    Detect: same IP address had >10 LOGIN_FAILED audit events in the last
-    5 minutes (brute-force / credential-stuffing indicator).
+    Detect: same IP address had more than LOGIN_BURST_THRESHOLD failed
+    sign-ins (LOGIN_FAILED + OTP_FAILED) in the last LOGIN_BURST_WINDOW
+    (brute-force / credential-stuffing / OTP-guessing indicator).
 
     Only IPs where ip_address IS NOT NULL are considered — NULL means the
     request came through a proxy that stripped the header.
@@ -169,7 +179,7 @@ async def check_login_failure_burst(db: AsyncSession) -> list[AnomalyEvent]:
         List of AnomalyEvent — one per offending IP address.  Empty list when
         no violations are found.
     """
-    cutoff = datetime.now(UTC) - timedelta(minutes=5)
+    cutoff = datetime.now(UTC) - LOGIN_BURST_WINDOW
 
     rows = (
         await db.execute(
@@ -178,19 +188,19 @@ async def check_login_failure_burst(db: AsyncSession) -> list[AnomalyEvent]:
                 sa.func.count().label("cnt"),
             )
             .where(
-                AuditLog.action == "LOGIN_FAILED",
+                AuditLog.action.in_(_SIGNIN_FAILURE_ACTIONS),
                 AuditLog.created_at >= cutoff,
                 AuditLog.ip_address.isnot(None),
             )
             .group_by(AuditLog.ip_address)
-            .having(sa.func.count() > 10)
+            .having(sa.func.count() > LOGIN_BURST_THRESHOLD)
         )
     ).all()
 
     return [
         AnomalyEvent(
             check_name="login_failure_burst",
-            detail=(f"IP {row.ip} had {row.cnt} failed login attempts in the last 5 minutes"),
+            detail=f"IP {row.ip} had {row.cnt} failed sign-ins in the last hour",
             severity="HIGH",
         )
         for row in rows
