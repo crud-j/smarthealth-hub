@@ -231,6 +231,7 @@ export default function HealthCardVerifyPage() {
   }, []);
 
   const scanFrame = useCallback(async () => {
+    if (!streamRef.current) return; // camera stopped (tab switch, result shown): end the loop
     const video = videoRef.current; const canvas = canvasRef.current;
     if (!video || !canvas || video.readyState < 2) { scanLoopRef.current = requestAnimationFrame(() => void scanFrame()); return; }
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
@@ -250,13 +251,13 @@ export default function HealthCardVerifyPage() {
     scanLoopRef.current = requestAnimationFrame(() => void scanFrame());
   }, [qrWorker, stopCamera, callVerifyApi]);
 
+  // "scanning" is only set after `video.play()` resolved, so the camera is
+  // already playing: start the frame loop now. (Waiting for the "play" event
+  // here never worked: browsers fire it before play() resolves.)
   useEffect(() => {
-    if (state.phase === "scanning" && videoRef.current) {
-      const video = videoRef.current;
-      const onPlay = () => { scanLoopRef.current = requestAnimationFrame(() => void scanFrame()); };
-      video.addEventListener("play", onPlay);
-      return () => { video.removeEventListener("play", onPlay); if (scanLoopRef.current !== null) { cancelAnimationFrame(scanLoopRef.current); } };
-    }
+    if (state.phase !== "scanning") return;
+    scanLoopRef.current = requestAnimationFrame(() => void scanFrame());
+    return () => { if (scanLoopRef.current !== null) { cancelAnimationFrame(scanLoopRef.current); scanLoopRef.current = null; } };
   }, [state.phase, scanFrame]);
 
   useEffect(() => { return () => stopCamera(); }, [stopCamera]);
