@@ -268,20 +268,23 @@ All on the server, in `/opt/smarthealth-hub`:
 Virtual machines → `smarthealth-server` → **Stop** when nobody needs it, and
 **Start** before use (~1 minute). The DNS name, data and settings survive a
 stop. The website on Vercel stays up, but logins fail while the server is stopped.
-**Auto-shutdown is ON at 11:00 PM (Manila)**: VM → Operations → Auto-shutdown.
+**Auto-shutdown is ON at 2:00 AM (Manila)**: VM → Operations → Auto-shutdown
+(was 11:00 PM until 2026-11-21; moved for late-night development).
 It only stops the VM, so **Start** it each morning / before a demo.
 
 **Scheduled jobs (Asia/Manila)** are timed for a VM that is on from ~10:00 to
-23:00. A job whose time passes while the VM is off is **skipped**, not run
-later (except the backup, which catches up). Start the VM **before 10:00** on
-clinic days. Defined in `backend/app/workers/celery_app.py`.
+02:00. After the VM is stopped and started, Celery Beat runs each job whose
+time passed **once**, right after start-up (it keeps its last-run times in the
+beat container). A deploy recreates that container, so jobs missed before a
+deploy wait for their next time. The backup has its own catch-up. Start the VM
+**before 10:00** on clinic days. Defined in `backend/app/workers/celery_app.py`.
 
 | Time | Job |
 |---|---|
 | every minute | heartbeat for the System Health page |
 | every hour :00 | appointment reminder SMS |
 | every hour :30 | SMS failure-rate check, audit-log anomaly scan |
-| 10:00 | immunization reminder SMS (only doses due in exactly N days, so a skipped day is never sent) |
+| 10:00 | immunization reminder SMS (every scheduled dose due within N days that has had no reminder yet, so skipped days are caught up) |
 | 18:00 | mark past appointments as missed + "you missed your appointment" SMS |
 | 21:00 / 21:30 | AI no-show risk scoring / illness anomaly detection |
 | 22:30 | database + media backup (separate `backup` container, §10) |
@@ -293,7 +296,7 @@ clinic days. Defined in `backend/app/workers/celery_app.py`.
 
 | What | Detail |
 |---|---|
-| Schedule | Every day at **22:30 Manila**, before the 23:00 auto-shutdown. If the VM was off at 22:30, a catch-up backup runs ~2 minutes after the next start |
+| Schedule | Every day at **22:30 Manila**, before the 02:00 auto-shutdown. If the VM was off at 22:30, a catch-up backup runs ~2 minutes after the next start |
 | Where | Server folder `/var/backups/smarthealth` (outside Docker volumes, so `dc down -v` can't delete it) |
 | Files | `db-YYYYMMDD-HHMMSS.dump` (database), `media-YYYYMMDD-HHMMSS.tar.gz` (photos, PDFs), `status.json` (last result) |
 | Kept | 14 days. Older files are deleted automatically, but only after a successful backup |
