@@ -477,6 +477,8 @@ async def export_report_data(
     report_type: Literal["patients", "visits", "immunizations", "appointments"],
     from_date: date,
     to_date: date,
+    *,
+    include_chief_complaint: bool = True,
 ) -> list[dict[str, Any]]:
     """
     Return raw tabular data for CSV/PDF export.
@@ -486,6 +488,9 @@ async def export_report_data(
         report_type: One of 'patients', 'visits', 'immunizations', 'appointments'.
         from_date:   Inclusive start date (applied to the primary date column).
         to_date:     Inclusive end date.
+        include_chief_complaint: Visits only.  False leaves the
+                     ``chief_complaint`` column out entirely (Admin model B:
+                     the admin never reads clinical text).
 
     Returns:
         List of dicts suitable for CSV serialization.  Column names match the
@@ -496,8 +501,9 @@ async def export_report_data(
       appointments.scheduled_at    (not scheduled_date)
       immunizations.date_administered (not administered_at)
 
-    No encrypted PHI fields (diagnosis, treatment_notes, notes) are included
-    in export data — only non-sensitive columns are exported.
+    No encrypted fields (diagnosis, treatment_notes, notes) are ever exported.
+    Rows DO identify patients (names, codes, ages) and visits carry the chief
+    complaint, so the endpoint restricts who may export and audits each export.
     """
     from_dt = datetime(from_date.year, from_date.month, from_date.day, tzinfo=UTC)
     to_dt = datetime(to_date.year, to_date.month, to_date.day, 23, 59, 59, tzinfo=UTC)
@@ -544,16 +550,18 @@ async def export_report_data(
             )
 
     elif report_type == "visits":
+        visit_columns: list[Any] = [
+            Patient.patient_code,
+            Patient.first_name,
+            Patient.middle_name,
+            Patient.last_name,
+            Visit.visit_date,
+            Visit.visit_type,
+        ]
+        if include_chief_complaint:
+            visit_columns.append(Visit.chief_complaint)
         q = await db.execute(
-            select(
-                Patient.patient_code,
-                Patient.first_name,
-                Patient.middle_name,
-                Patient.last_name,
-                Visit.visit_date,
-                Visit.visit_type,
-                Visit.chief_complaint,
-            )
+            select(*visit_columns)
             .join(Patient, Visit.patient_id == Patient.id)
             .where(
                 and_(
@@ -566,15 +574,15 @@ async def export_report_data(
         for row in q.fetchall():
             middle = f" {row.middle_name}" if row.middle_name else ""
             full_name = f"{row.first_name}{middle} {row.last_name}"
-            rows.append(
-                {
-                    "patient_code": row.patient_code,
-                    "full_name": full_name,
-                    "visited_at": row.visit_date.isoformat(),
-                    "visit_type": row.visit_type,
-                    "chief_complaint": row.chief_complaint or "",
-                }
-            )
+            visit_row: dict[str, Any] = {
+                "patient_code": row.patient_code,
+                "full_name": full_name,
+                "visited_at": row.visit_date.isoformat(),
+                "visit_type": row.visit_type,
+            }
+            if include_chief_complaint:
+                visit_row["chief_complaint"] = row.chief_complaint or ""
+            rows.append(visit_row)
 
     elif report_type == "immunizations":
         q = await db.execute(

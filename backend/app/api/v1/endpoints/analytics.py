@@ -1,9 +1,10 @@
 """
 Analytics and reporting endpoints — Phase 5 implementation.
 
-All analytics responses are pre-aggregated — no raw PHI rows are returned.
-The export endpoint streams CSV content; JSON is used for PDF (the frontend
-renders the PDF from the JSON payload using a client-side renderer).
+All analytics responses except /export are pre-aggregated counts.  /export
+returns patient-level rows (names, codes, ages; visits also carry the chief
+complaint), so it is role-restricted and every export is audited.  It returns
+CSV, or JSON that the frontend turns into a file in the browser.
 
 Routes:
   GET /analytics/overview
@@ -26,12 +27,15 @@ Routes:
 
   GET /analytics/export
       Exportable tabular data for patients / visits / immunizations /
-      appointments.  Returns text/csv (default) or application/json (for
-      PDF rendering by the frontend).
-      Restricted to Admin and BHW roles.
+      appointments.  Returns text/csv (default) or application/json.
+      Admin, BHW and Physician.  Admin's visits export leaves out
+      chief_complaint (Admin model B: no clinical text).
 
 Auth: JWT required on all routes (get_current_user dependency).
-RBAC: /analytics/export restricted to 'admin' and 'bhw' roles.
+RBAC: /analytics/export restricted to 'admin', 'bhw' and 'physician'
+      (admin_staff has no reporting duty).
+Audit: one EXPORT_REPORT row per export (report type, dates, format, row
+       count, role; never the rows themselves).
 
 SDP Reference: Section 6.7
 """
@@ -41,10 +45,12 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Query, Response
+from fastapi import APIRouter, Query, Request, Response
+from fastapi.responses import JSONResponse
 
 from app.core.security import CurrentUser, require_role
 from app.db.session import DbDep
+from app.models.user import User
 from app.schemas.analytics import (
     DashboardOverview,
     IllnessTrendsResponse,
@@ -56,14 +62,24 @@ from app.schemas.analytics import (
     VisitTypeBreakdownResponse,
 )
 from app.services import analytics_service
+from app.services.audit_service import write_audit_log
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
-# RBAC dependency — export endpoint is restricted to admin + bhw only.
-# require_role() returns a Depends(...) object; it is passed directly into
-# the route decorator's ``dependencies=[...]`` parameter (see SDP usage pattern
-# in patients.py — same approach).
-_ADMIN_OR_BHW = require_role("admin", "bhw")
+# Export releases patient-level rows: admin, BHW and physician only.
+# Admin staff (front desk) has no reporting duty.
+_EXPORT_ROLES = require_role("admin", "bhw", "physician")
+
+
+def _get_client_ip(request: Request) -> str | None:
+    """Extract the real client IP, respecting the X-Forwarded-For header."""
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    if request.client:
+        return request.client.host
+    return None
+
 
 # Default date range helpers (used as Query default_factory cannot be a lambda
 # in older Pydantic/FastAPI combinations, so we use explicit sentinel defaults
@@ -345,13 +361,15 @@ async def visit_type_breakdown(
     description=(
         "Generates a downloadable report for the chosen report_type.  "
         "Returns text/csv by default (format=csv), or application/json "
-        "when format=json (for frontend PDF rendering).  "
-        "Restricted to Admin and BHW roles."
+        "when format=json.  Admin, BHW and Physician only.  Admin's visits "
+        "export leaves out chief_complaint.  Every export writes one "
+        "EXPORT_REPORT audit row (report type, dates, format, row count)."
     ),
-    dependencies=[_ADMIN_OR_BHW],
 )
 async def export_report(
+    request: Request,
     db: DbDep,
+    current_user: User = _EXPORT_ROLES,
     report_type: Annotated[
         Literal["patients", "visits", "immunizations", "appointments"],
         Query(
@@ -394,26 +412,42 @@ async def export_report(
     For CSV: returns a streaming text/csv response with a
     Content-Disposition: attachment header so browsers download the file.
 
-    For JSON: returns a standard JSON array (200 OK) suitable for the
-    frontend PDF renderer (WeasyPrint call is done server-side in a
-    separate /health-cards/ endpoint; this endpoint provides the raw data).
+    For JSON: returns a standard JSON array (200 OK); the Reports page
+    builds the CSV/JSON file from it in the browser.
 
-    Auth: Admin or BHW role required.
+    Auth: Admin, BHW or Physician.
+    Audit: one EXPORT_REPORT row describing the export, never its rows.
     """
     resolved_from = from_date or _default_from_date()
     resolved_to = to_date or _default_to_date()
+    role = current_user.role.name
 
     rows = await analytics_service.export_report_data(
         db,
         report_type=report_type,
         from_date=resolved_from,
         to_date=resolved_to,
+        include_chief_complaint=role != "admin",
     )
 
-    if format == "json":
-        # Return as JSON for the frontend PDF renderer.
-        from fastapi.responses import JSONResponse
+    await write_audit_log(
+        db=db,
+        user_id=current_user.id,
+        action="EXPORT_REPORT",
+        entity_type="report",
+        metadata={
+            "report_type": report_type,
+            "from_date": resolved_from.isoformat(),
+            "to_date": resolved_to.isoformat(),
+            "format": format,
+            "row_count": len(rows),
+            "role": role,
+        },
+        ip_address=_get_client_ip(request),
+    )
+    await db.commit()
 
+    if format == "json":
         return JSONResponse(content=rows)
 
     # -- CSV export ------------------------------------------------------------

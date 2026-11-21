@@ -16,7 +16,8 @@ Covers:
     - GET /api/v1/analytics/appointments/no-show-rate returns 200 + NoShowRateResponse schema
     - GET /api/v1/analytics/export returns 200 CSV with correct headers
     - GET /api/v1/analytics/export with format=json returns 200 JSON list
-    - /analytics/export requires Admin or BHW role (physician gets 403)
+    - /analytics/export allows Admin, BHW and Physician (admin_staff gets 403);
+      audit + Admin model B rules are in test_export_audit.py
     - Unauthenticated request to /analytics/overview returns 401
 
 Async mode: asyncio_mode = "auto" in pyproject.toml — no @pytest.mark.asyncio needed.
@@ -892,14 +893,14 @@ class TestAnalyticsHTTPEndpoints:
         data = response.json()
         assert isinstance(data, list)
 
-    async def test_export_requires_admin_or_bhw(
+    async def test_export_rejects_admin_staff(
         self,
         client: AsyncClient,
         make_user,
     ) -> None:
-        """Physician role is rejected from the export endpoint (403)."""
-        physician = await make_user("physician")
-        token = create_access_token(subject=str(physician.id), role="physician")
+        """Admin staff is rejected from the export endpoint (403)."""
+        front_desk = await make_user("admin_staff")
+        token = create_access_token(subject=str(front_desk.id), role="admin_staff")
 
         response = await client.get(
             EXPORT_URL,

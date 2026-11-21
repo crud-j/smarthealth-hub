@@ -10,7 +10,7 @@ SECURITY NOTE: This table MUST be append-only.
   - The service layer must NEVER expose an update/delete method for audit logs.
 
 ``action`` standard values (extend as needed):
-  CREATE, UPDATE, DELETE, VIEW_PHI, LOGIN, LOGOUT, LOGIN_FAILED,
+  CREATE, UPDATE, DELETE, VIEW_PHI, EXPORT_REPORT, LOGIN, LOGOUT, LOGIN_FAILED,
   CARD_ISSUE, CARD_VERIFY, CARD_REVOKE, OTP_SENT, OTP_VERIFIED, OTP_FAILED
 
 ``entity_type`` examples: "patient", "user", "health_card", "medical_history",
