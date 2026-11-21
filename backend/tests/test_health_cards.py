@@ -538,3 +538,103 @@ class TestHealthCardEndpoints:
             json={"qr_payload": "https://smarthealthhub.local/verify?pid=x&v=1&sig=y"},
         )
         assert resp.status_code == 401
+
+
+class TestCardPreviewQr:
+    """
+    GET /health-cards/{patient_id}?include_qr=true: the Print page preview.
+
+    The preview used to draw its own QR from a hard-coded development address
+    without the HMAC signature (the browser has no secret), so cards printed
+    from the screen pointed at an unreachable host and could never verify.
+    The server now returns the same signed QR the PDF uses.
+    """
+
+    @staticmethod
+    async def _card_with_qr(
+        client: AsyncClient, token: str, patient_id: str, **params: str
+    ) -> dict:
+        resp = await client.get(
+            f"/api/v1/health-cards/{patient_id}",
+            params={"include_qr": "true", **params},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200, resp.text
+        return resp.json()
+
+    async def test_active_card_returns_the_signed_pdf_qr(
+        self, client: AsyncClient, bhw_token: str
+    ) -> None:
+        patient = await _register_patient(client, bhw_token)
+        await client.post(
+            f"/api/v1/health-cards/{patient['id']}/generate",
+            headers={"Authorization": f"Bearer {bhw_token}"},
+        )
+
+        card = await self._card_with_qr(client, bhw_token, patient["id"])
+
+        _signed_url, expected_qr = encode_qr_payload(patient["id"], 1)
+        assert card["qr_data_uri"] == expected_qr
+
+    async def test_qr_follows_the_reissued_version(
+        self, client: AsyncClient, bhw_token: str
+    ) -> None:
+        patient = await _register_patient(client, bhw_token)
+        headers = {"Authorization": f"Bearer {bhw_token}"}
+        await client.post(f"/api/v1/health-cards/{patient['id']}/generate", headers=headers)
+        reissue = await client.post(
+            f"/api/v1/health-cards/{patient['id']}/reissue", headers=headers
+        )
+        assert reissue.status_code == 201, reissue.text
+
+        card = await self._card_with_qr(client, bhw_token, patient["id"])
+
+        assert card["card_version"] == 2
+        assert card["qr_data_uri"] == encode_qr_payload(patient["id"], 2)[1]
+        assert card["qr_data_uri"] != encode_qr_payload(patient["id"], 1)[1]
+
+    async def test_allow_missing_envelope_carries_the_qr(
+        self, client: AsyncClient, bhw_token: str
+    ) -> None:
+        patient = await _register_patient(client, bhw_token)
+        await client.post(
+            f"/api/v1/health-cards/{patient['id']}/generate",
+            headers={"Authorization": f"Bearer {bhw_token}"},
+        )
+
+        body = await self._card_with_qr(
+            client, bhw_token, patient["id"], allow_missing="true"
+        )
+
+        assert body["card_found"] is True
+        assert body["card"]["qr_data_uri"] == encode_qr_payload(patient["id"], 1)[1]
+
+    async def test_no_qr_for_a_card_that_is_not_active(
+        self, client: AsyncClient, bhw_token: str, db_session
+    ) -> None:
+        """A lost/revoked card's QR would never verify: don't print one."""
+        from sqlalchemy import update
+
+        from app.models.health_card import HealthCard
+
+        patient = await _register_patient(client, bhw_token)
+        await client.post(
+            f"/api/v1/health-cards/{patient['id']}/generate",
+            headers={"Authorization": f"Bearer {bhw_token}"},
+        )
+        await db_session.execute(
+            update(HealthCard)
+            .where(HealthCard.patient_id == uuid.UUID(patient["id"]))
+            .values(status="lost")
+        )
+        await db_session.flush()
+
+        card = await self._card_with_qr(client, bhw_token, patient["id"])
+
+        assert card["status"] == "lost"
+        assert card["qr_data_uri"] is None
+
+    async def test_signed_qr_url_uses_the_configured_base_not_a_dev_host(self) -> None:
+        url = build_qr_url(str(uuid.uuid4()), 1)
+        assert url.startswith(settings.QR_BASE_URL.rstrip("/") + "/verify?")
+        assert "&sig=" in url

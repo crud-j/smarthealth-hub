@@ -29,7 +29,7 @@ export interface QrPayloadParams {
  * Parse the HMAC-signed QR payload URL and extract the three required fields.
  *
  * Expected URL format:
- *   https://smarthealthhub.local/verify?pid={uuid}&v={int}&sig={hmac_hex}
+ *   {QR_BASE_URL}/verify?pid={uuid}&v={int}&sig={hmac_hex}   (built and signed by the server)
  *
  * Returns null if the URL is malformed or any required param is missing.
  * The caller should treat null as a scan failure and continue scanning.

@@ -107,7 +107,8 @@ export default function HealthCardPrintPage({
 
         let card: HealthCardData | null = null;
         try {
-          card = await apiFetch<HealthCardData>(`/health-cards/${patientId}`);
+          // include_qr: the server's signed QR for the preview (same as the PDF).
+          card = await apiFetch<HealthCardData>(`/health-cards/${patientId}?include_qr=true`);
         } catch (err) {
           if (!(err instanceof ApiError && err.status === 404)) throw err;
         }
