@@ -232,7 +232,7 @@ export function useIllnessTrends(
     setLoading(true);
     setError(null);
     try {
-      const qs = new URLSearchParams({ from, to, group_by: groupBy });
+      const qs = new URLSearchParams({ from_date: from, to_date: to, group_by: groupBy });
       const raw = await apiFetch<IllnessTrendsApiResponse>(
         `/analytics/illness-trends?${qs.toString()}`
       );
@@ -279,7 +279,7 @@ export function useNoShowRate(from: string, to: string) {
     setLoading(true);
     setError(null);
     try {
-      const qs = new URLSearchParams({ from, to });
+      const qs = new URLSearchParams({ from_date: from, to_date: to });
       const raw = await apiFetch<NoShowRateApiResponse>(
         `/analytics/appointments/no-show-rate?${qs.toString()}`
       );
@@ -432,16 +432,18 @@ export function useAnalyticsExport() {
   /**
    * Returns raw rows (array of plain objects) suitable for CSV export.
    * The caller is responsible for CSV formatting (via csvExport.worker.ts).
+   *
+   * Always requests `format=json`: with `format=csv` the API answers text/csv,
+   * which apiFetch does not parse, so the rows would come back undefined.
    */
   const fetchExportData = useCallback(
     async (params: ExportParams): Promise<Record<string, unknown>[]> => {
       setLoading(true);
       setError(null);
       try {
-        const qs = new URLSearchParams({ report_type: params.reportType });
-        if (params.from) qs.set("from", params.from);
-        if (params.to) qs.set("to", params.to);
-        if (params.format) qs.set("format", params.format);
+        const qs = new URLSearchParams({ report_type: params.reportType, format: "json" });
+        if (params.from) qs.set("from_date", params.from);
+        if (params.to) qs.set("to_date", params.to);
         const raw = await apiFetch<Record<string, unknown>[]>(
           `/analytics/export?${qs.toString()}`
         );

@@ -145,9 +145,9 @@ export type ExportReportType =
 
 export type ExportFormat = "csv" | "json";
 
+/** The download format (CSV/JSON) is chosen on the page; the API always sends JSON rows. */
 export interface ExportParams {
   reportType: ExportReportType;
   from?: string;
   to?: string;
-  format?: ExportFormat;
 }

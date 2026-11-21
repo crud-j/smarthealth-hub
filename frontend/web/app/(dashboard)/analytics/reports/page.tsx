@@ -64,7 +64,7 @@ export default function ReportsPage() {
   async function handleExport() {
     setExportError(""); setProcessing(true);
     try {
-      const rows = await fetchExportData({ reportType, from: fromDate || undefined, to: toDate || undefined, format });
+      const rows = await fetchExportData({ reportType, from: fromDate || undefined, to: toDate || undefined });
       if (rows.length === 0) { setExportError("No data found for the selected filters."); return; }
       const timestamp = new Date().toISOString().split("T")[0];
       const filename = `smarthealthhub_${reportType}_${timestamp}`;
