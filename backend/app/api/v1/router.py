@@ -23,6 +23,7 @@ from app.api.v1.endpoints import (
     appointments,
     audit,
     auth,
+    dashboard,
     health_cards,
     immunizations,
     intake,
@@ -71,6 +72,10 @@ api_router.include_router(health_cards.router)
 # ── Analytics ─────────────────────────────────────────────────────────────────
 # analytics.router already carries prefix="/analytics"
 api_router.include_router(analytics.router)
+
+# ── Role-based dashboard ──────────────────────────────────────────────────────
+# dashboard.router carries prefix="/dashboard" — GET /dashboard/me
+api_router.include_router(dashboard.router)
 
 # ── AI Analytics ──────────────────────────────────────────────────────────────
 # ai_analytics.router carries prefix="/analytics" — routes are at /analytics/ai/*
