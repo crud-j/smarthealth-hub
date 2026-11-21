@@ -247,3 +247,43 @@ class VisitTypeBreakdownResponse(BaseSchema):
     )
     from_date: date = Field(description="Start of the requested date range (inclusive).")
     to_date: date = Field(description="End of the requested date range (inclusive).")
+
+
+class ReminderGroup(BaseSchema):
+    """Finished appointments in one group (with or without a reminder SMS)."""
+
+    total: int = Field(description="Finished appointments in this group.", ge=0)
+    came: int = Field(description="Of those, how many the patient came to.", ge=0)
+    came_pct: float | None = Field(
+        description=(
+            "came / total × 100 (1 decimal).  Null when the group has fewer than "
+            "min_group_size appointments (not enough data for a percentage)."
+        )
+    )
+
+
+class ReminderEffectResponse(BaseSchema):
+    """
+    Return rate after SMS reminders: finished appointments that got a reminder
+    SMS vs those that did not, and how many of each the patient came to.
+
+    came      status 'completed', or a visit logged for the patient on the
+              appointment's Manila calendar day.
+    reminded  an SMS for the appointment with status sent / delivered /
+              replied, created before the appointment time (not the
+              after-miss follow-up).
+    Cancelled appointments and ones still open (no outcome yet) are left out.
+    Counts only: no patient names.
+    """
+
+    from_date: date = Field(description="First Manila day of the window (inclusive).")
+    to_date: date = Field(description="Last Manila day of the window (inclusive).")
+    with_reminder: ReminderGroup
+    without_reminder: ReminderGroup
+    difference_points: float | None = Field(
+        description="with_reminder.came_pct minus without_reminder.came_pct; null unless both exist."
+    )
+    confirmed_by_reply: int = Field(
+        description="Appointments in the window confirmed by replying CONFIRM to the SMS.", ge=0
+    )
+    min_group_size: int = Field(description="Smallest group size that gets a percentage.")

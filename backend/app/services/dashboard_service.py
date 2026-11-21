@@ -9,10 +9,11 @@ renders it), so the rules live here next to the queries:
                 appointments, top conditions this month
   bhw         — immunizations due/overdue (with sitio/purok), missed
                 appointments, today's SMS, failed reminders, pre-visit
-                drafts, own visits this week, patients without a card
+                drafts, own visits this week, patients without a card,
+                return rate after SMS reminders (last 30 days)
   admin       — system status, registrations to review, staff accounts,
-                security alerts.  Admin model B: no visits, vital signs or
-                conditions.
+                security alerts, return rate after SMS reminders (counts
+                only).  Admin model B: no visits, vital signs or conditions.
   admin_staff — today's appointments with pre-visit form status, drafts
 
 PHI: encrypted columns (visits.diagnosis / treatment_notes, medical-history
@@ -47,6 +48,7 @@ from app.models.patient import Patient
 from app.models.sms_log import SmsLog
 from app.models.user import User
 from app.models.visit import Visit
+from app.schemas.analytics import ReminderEffectResponse
 from app.schemas.dashboard import (
     AdminDashboard,
     AdminStaffDashboard,
@@ -63,7 +65,7 @@ from app.schemas.dashboard import (
     StaffAccounts,
     WaitingVisit,
 )
-from app.services import audit_anomaly_service, intake_service
+from app.services import analytics_service, audit_anomaly_service, intake_service
 from app.services.system_status_service import collect_system_status
 
 MANILA = ZoneInfo("Asia/Manila")
@@ -74,6 +76,7 @@ FOLLOW_UP_DAYS = 7
 MISSED_LOOKBACK_DAYS = 7
 FAILED_SMS_LOOKBACK_DAYS = 7
 INACTIVE_STAFF_DAYS = 30
+REMINDER_EFFECT_DAYS = 30
 
 #: Appointment types a physician follows up (plus scheduled immunizations).
 FOLLOW_UP_TYPES = ("prenatal", "follow_up")
@@ -149,6 +152,14 @@ async def _count(db: AsyncSession, stmt: sa.Select[Any]) -> int:
 
 def _active_patient() -> sa.ColumnElement[bool]:
     return Patient.is_active.is_(True)
+
+
+async def _reminder_effect(db: AsyncSession, clock: _Clock) -> ReminderEffectResponse:
+    """Return rate after SMS reminders, last 30 Manila days (counts only)."""
+    data = await analytics_service.get_reminder_effect_last_days(
+        db, REMINDER_EFFECT_DAYS, now=clock.now
+    )
+    return ReminderEffectResponse.model_validate(data)
 
 
 async def _previsit_drafts_waiting(db: AsyncSession) -> int:
@@ -479,6 +490,7 @@ async def build_bhw(db: AsyncSession, user: User, clock: _Clock) -> BhwDashboard
         previsit_forms_waiting=await _previsit_drafts_waiting(db),
         visits_logged_by_me_week=visits_mine,
         patients_without_active_card=without_card,
+        reminder_effect=await _reminder_effect(db, clock),
     )
 
 
@@ -556,6 +568,7 @@ async def build_admin(db: AsyncSession, user: User, clock: _Clock) -> AdminDashb
             SecurityAlert(check_name=a.check_name, detail=a.detail, severity=a.severity)
             for a in alerts
         ],
+        reminder_effect=await _reminder_effect(db, clock),
     )
 
 

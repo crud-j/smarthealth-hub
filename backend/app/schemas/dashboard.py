@@ -18,6 +18,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
+from app.schemas.analytics import ReminderEffectResponse
 from app.schemas.system_config import SystemStatusResponse
 
 # ---------------------------------------------------------------------------
@@ -128,6 +129,9 @@ class BhwDashboard(_DashboardBase):
     previsit_forms_waiting: int
     visits_logged_by_me_week: int
     patients_without_active_card: int
+    reminder_effect: ReminderEffectResponse = Field(
+        ..., description="Return rate after SMS reminders, last 30 days (counts only)"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +167,9 @@ class AdminDashboard(_DashboardBase):
     staff: StaffAccounts
     active_patients: int
     security_alerts: list[SecurityAlert]
+    reminder_effect: ReminderEffectResponse = Field(
+        ..., description="Return rate after SMS reminders, last 30 days (counts only)"
+    )
 
 
 # ---------------------------------------------------------------------------
