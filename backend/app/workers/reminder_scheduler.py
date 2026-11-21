@@ -10,9 +10,11 @@ Tasks:
     Creates sms_logs row (status='queued'), enqueues send_reminder_task.
 
   dispatch_immunization_reminders — runs daily at 10:00 Asia/Manila
-    Finds immunizations with next_due_date == today + lead_days,
-    status != 'completed', patient has mobile_number, no sms_log already
-    created today for that patient with an immunization message.
+    Finds scheduled immunizations with next_due_date from today (Manila) up
+    to today + lead_days, patient has mobile_number and has not opted out,
+    and no reminder for that dose was ever queued / sent / delivered /
+    replied. The window (not one exact date) catches up days the job did not
+    run: the VM is off at night and Beat never re-runs a missed job.
     Creates sms_logs row (status='queued'), enqueues send_reminder_task.
 
 Both tasks are idempotent: the NOT EXISTS guard prevents double-queuing if
@@ -34,6 +36,7 @@ import random
 import uuid
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, cast
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.engine import CursorResult
 
@@ -47,6 +50,11 @@ logger = get_logger(__name__)
 from app.workers.sms_tasks import send_reminder_task as _celery_send_reminder_task  # noqa: E402
 
 send_reminder_task = _celery_send_reminder_task
+
+_MANILA_TZ = ZoneInfo("Asia/Manila")
+# An immunization reminder in one of these states counts as done (a "failed"
+# one is tried again at the next run).
+_REMINDED_STATUSES = ("queued", "sent", "delivered", "replied")
 
 
 def _build_full_name(first: str, middle: str | None, last: str) -> str:
@@ -176,13 +184,24 @@ async def _dispatch_appointment_reminders_async() -> int:
     return queued_count
 
 
-async def _dispatch_immunization_reminders_async() -> int:
+def manila_today(now: datetime | None = None) -> date:
+    """Today's calendar date in Manila (``next_due_date`` is a local date)."""
+    return (now or datetime.now(tz=UTC)).astimezone(_MANILA_TZ).date()
+
+
+async def _dispatch_immunization_reminders_async(today: date | None = None) -> int:
     """
     Core async logic for immunization reminder dispatch.
 
+    Picks every scheduled dose due from ``today`` up to ``today + lead days``
+    that has never had a reminder queued / sent / delivered / replied. A day
+    the job did not run (VM off at 10:00) is therefore caught up at the next
+    run, and a reminder the gateway reported as failed is tried again.
+
+    ``today`` defaults to the Manila date; tests pass a fixed date.
     Returns the number of sms_log rows newly created.
     """
-    from sqlalchemy import exists, func, not_, select
+    from sqlalchemy import exists, not_, select
 
     from app.models.immunization import Immunization
     from app.models.patient import Patient
@@ -194,18 +213,16 @@ async def _dispatch_immunization_reminders_async() -> int:
     async with CelerySessionLocal() as db:
         runtime = await load_runtime_settings(db)
         lead_days = runtime.sms_immunization_lead_days
-        target_date: date = (datetime.now(tz=UTC) + timedelta(days=lead_days)).date()
-        today: date = datetime.now(tz=UTC).date()
+        if today is None:
+            today = manila_today()
+        last_due_date: date = today + timedelta(days=lead_days)
 
-        # Idempotency: skip if there's already an sms_log for this patient
-        # today whose message contains the word "immunization".
-        existing_today_subq = (
+        # One reminder per dose: skip doses that already have one (any day).
+        already_reminded_subq = (
             select(SmsLog.id)
             .where(
-                SmsLog.patient_id == Immunization.patient_id,
                 SmsLog.immunization_id == Immunization.id,
-                SmsLog.status.in_(["queued", "sent", "delivered"]),
-                func.date(SmsLog.created_at) == today,
+                SmsLog.status.in_(_REMINDED_STATUSES),
             )
             .correlate(Immunization)
         )
@@ -214,11 +231,12 @@ async def _dispatch_immunization_reminders_async() -> int:
             select(Immunization, Patient)
             .join(Patient, Patient.id == Immunization.patient_id)
             .where(
-                Immunization.next_due_date == target_date,
-                Immunization.status != "completed",
+                Immunization.next_due_date >= today,
+                Immunization.next_due_date <= last_due_date,
+                Immunization.status == "scheduled",
                 Patient.mobile_number.isnot(None),
                 Patient.sms_opt_out.is_(False),
-                not_(exists(existing_today_subq)),
+                not_(exists(already_reminded_subq)),
             )
         )
 
@@ -263,7 +281,7 @@ async def _dispatch_immunization_reminders_async() -> int:
                         "immunization_id": str(immunization.id),
                         "sms_log_id": str(sms_log.id),
                         "patient_id": str(patient.id),
-                        "target_date": str(target_date),
+                        "due_date": str(immunization.next_due_date),
                     },
                 )
             except Exception as exc:  # noqa: BLE001
@@ -305,10 +323,11 @@ def dispatch_immunization_reminders() -> dict:  # type: ignore[type-arg]
     """
     Daily periodic task (Celery Beat, runs at 10:00 Asia/Manila).
 
-    Finds immunizations with next_due_date == today + immunization lead days (admin setting),
-    creates sms_logs rows, and enqueues send_reminder_task for each.
-    Idempotent: will not create a second log if one was already created today
-    for the same immunization row.
+    Finds scheduled immunizations due from today up to today + immunization
+    lead days (admin setting) that never had a reminder, creates sms_logs
+    rows, and enqueues send_reminder_task for each. A skipped day is caught
+    up at the next run; a dose is never reminded twice (unless the earlier
+    reminder failed).
     """
     logger.info("dispatch_immunization_reminders: starting")
     queued = asyncio.run(_dispatch_immunization_reminders_async())

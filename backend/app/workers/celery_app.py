@@ -106,9 +106,11 @@ celery_app.conf.beat_schedule = {
         "task": "reminders.dispatch_appointment_reminders",
         "schedule": crontab(minute=0),
     },
-    # Daily 10:00 — immunization reminders. The task only picks doses due in
-    # exactly SMS_IMMUNIZATION_LEAD_DAYS, so a skipped day means those patients
-    # never get a reminder: keep this at a time the VM is surely running.
+    # Daily 10:00 — immunization reminders. The task picks every dose due
+    # within SMS_IMMUNIZATION_LEAD_DAYS that has no reminder yet, so a day the
+    # VM was off at 10:00 is caught up at the next run (that reminder then
+    # arrives with fewer days' notice). Still keep this at a time the VM is
+    # usually running.
     "dispatch-immunization-reminders": {
         "task": "reminders.dispatch_immunization_reminders",
         "schedule": crontab(hour=10, minute=0),

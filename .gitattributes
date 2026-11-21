@@ -1,0 +1,4 @@
+# Shell scripts run on Linux (server, containers): always check them out with
+# LF line endings, even on Windows. With CRLF, bash fails on the first line
+# ("set: pipefail: invalid option name").
+*.sh text eol=lf
