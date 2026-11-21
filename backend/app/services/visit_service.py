@@ -57,12 +57,18 @@ async def _next_case_no(db: AsyncSession) -> str:
     number for the current calendar year.
 
     Pattern: BHC-VISIT-{YEAR}-{6-digit-seq}
+
+    Only well-formed numbers count.  scripts/seed_db.py writes demo case
+    numbers with 8 random hex characters (BHC-VISIT-2026-9F3A1C0B); they sort
+    above every 6-digit number, so a plain MAX picked one, failed the pattern
+    and restarted at 000001 — every visit after the first then hit the unique
+    case_no constraint.
     """
     year = date.today().year
     prefix = f"BHC-VISIT-{year}-"
 
     result = await db.execute(
-        select(func.max(Visit.case_no)).where(Visit.case_no.like(f"{prefix}%"))
+        select(func.max(Visit.case_no)).where(Visit.case_no.op("~")(f"^{prefix}[0-9]{{6}}$"))
     )
     max_code: str | None = result.scalar_one_or_none()
 

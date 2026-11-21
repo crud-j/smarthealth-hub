@@ -16,13 +16,13 @@ export default function ReminderEffectCard() {
   const { data, loading, error } = useReminderEffect(days);
 
   return (
-    <section aria-label="SMS reminders" className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 bg-slate-50 px-5 py-4">
+    <section aria-label="SMS reminders" className="overflow-hidden rounded-2xl border border-[#eadbd3] bg-white shadow-[0_1px_2px_rgba(60,20,20,0.04),0_8px_24px_-12px_rgba(120,40,40,0.12)]">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#f1e6e0] px-5 py-4">
         <div>
-          <h2 className="text-base font-semibold text-slate-900">SMS Reminders</h2>
-          <p className="mt-0.5 text-sm text-slate-500">Did patients come more often after a reminder SMS?</p>
+          <h3 className="text-base font-semibold text-[#2a1414]">SMS reminders</h3>
+          <p className="mt-0.5 text-sm text-[#8a6a6a]">Did patients come more often after a reminder SMS?</p>
         </div>
-        <div role="group" aria-label="Period" className="inline-flex shrink-0 rounded-lg border border-slate-200 bg-white p-0.5">
+        <div role="group" aria-label="Period" className="inline-flex shrink-0 rounded-lg border border-[#eadbd3] bg-white p-0.5">
           {WINDOWS.map((w) => (
             <button
               key={w}
@@ -30,7 +30,7 @@ export default function ReminderEffectCard() {
               aria-pressed={days === w}
               onClick={() => setDays(w)}
               className={`min-h-[36px] rounded-md px-3 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-rose-500 ${
-                days === w ? "bg-rose-600 text-white" : "text-slate-600 hover:bg-slate-100"
+                days === w ? "bg-[#b5343e] text-white" : "text-[#8a6a6a] hover:bg-[#fdf7f3]"
               }`}
             >
               {w} days

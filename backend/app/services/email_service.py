@@ -110,9 +110,9 @@ def _build_otp_html(otp_code: str, purpose: str) -> str:
 
     Inline styles and tables only (email clients drop <style> and flexbox).
     No images, scripts or remote content. The code appears once as plain text
-    under the boxes: easy to long-press on a phone, and lets Gmail offer its
-    own "Copy code" button. A real copy button is impossible in email (no
-    JavaScript).
+    under the boxes, in a "Tap and hold to copy" box (a tap selects the whole
+    code). A real copy button is impossible in email (no JavaScript); Gmail
+    adds its own "Copy code" chip only when it decides to.
     """
     heading, label, use = _otp_wording(purpose)
     code = html.escape(otp_code)
@@ -156,7 +156,14 @@ def _build_otp_html(otp_code: str, purpose: str) -> str:
                     <table role="presentation" cellpadding="0" cellspacing="0">
                       <tr>{_digit_boxes(otp_code)}</tr>
                     </table>
-                    <p style="margin:14px 0 0;font-size:13px;color:{_MUTED};">or copy: <span class="otp-copy" style="font-family:Consolas,Menlo,'Courier New',monospace;font-size:15px;font-weight:600;color:{_INK};letter-spacing:1px;-webkit-user-select:all;user-select:all;">{code}</span></p>
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:16px;">
+                      <tr>
+                        <td class="otp-copy-box" style="padding:12px 14px;background-color:#ffffff;border:1px dashed {_ROSE};border-radius:12px;font-family:{_SANS};">
+                          <p style="margin:0 0 6px;font-size:12px;font-weight:600;color:{_ROSE};">Tap and hold the code below to copy it</p>
+                          <span class="otp-copy" style="display:inline-block;font-family:Consolas,Menlo,'Courier New',monospace;font-size:22px;font-weight:700;color:{_INK};letter-spacing:3px;-webkit-user-select:all;user-select:all;">{code}</span>
+                        </td>
+                      </tr>
+                    </table>
                   </td>
                 </tr>
               </table>
