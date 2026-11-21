@@ -5,7 +5,8 @@ Responsibilities
 ----------------
 - list_visits    Return visit summaries for a patient (no PHI — VisitSummary)
 - create_visit   Log a new visit: auto-generate case_no, AES-encrypt PHI fields,
-                 write CREATE audit log
+                 write CREATE audit log, and complete the patient's
+                 appointment(s) on the visit's Manila day (UPDATE audit each)
 - get_visit      Fetch a single visit with decrypted PHI; write VIEW_PHI audit log
 
 PHI encryption
@@ -26,7 +27,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,6 +36,7 @@ from app.core.exceptions import NotFoundError
 from app.core.logging import get_logger
 from app.models.visit import Visit
 from app.schemas.visit import VisitCreate, VisitResponse, VisitSummary, VisitUpdate
+from app.services import appointment_service
 from app.services.analytics_service import _invalidate_analytics_cache
 from app.services.audit_service import write_audit_log
 from app.utils.encryption import decrypt_text, encrypt_text
@@ -164,7 +166,9 @@ async def create_visit(
     2. AES-256-GCM encrypt ``diagnosis`` and ``treatment_notes``.
     3. Persist the Visit row.
     4. Write a CREATE audit log entry.
-    5. Return VisitResponse (with decrypted PHI for the immediate response).
+    5. Complete the patient's pending/confirmed/missed appointments on the
+       visit's Manila day (appointment_service.complete_appointments_for_visit).
+    6. Return VisitResponse (with decrypted PHI for the immediate response).
 
     Args:
         db:             Active async database session.
@@ -176,7 +180,9 @@ async def create_visit(
     case_no = data.case_no or await _next_case_no(db)
 
     vs = data.vital_signs
-    visit_date = data.visit_date or datetime.utcnow()
+    # Timezone-aware: a naive utcnow() is read by the DB driver in the host's
+    # local zone, which shifts the visit by 8 hours on a Manila-time machine.
+    visit_date = data.visit_date or datetime.now(tz=UTC)
 
     # Encrypt PHI fields before storage
     encrypted_diagnosis: str | None = encrypt_text(data.diagnosis) if data.diagnosis else None
@@ -221,6 +227,16 @@ async def create_visit(
             "case_no": case_no,
             "visit_type": data.visit_type,
         },
+        ip_address=ip_address,
+    )
+
+    # The patient came: complete their appointment(s) on the visit's day so the
+    # 18:00 job does not mark them missed (or, if it already did, correct it).
+    await appointment_service.complete_appointments_for_visit(
+        db,
+        patient_id=patient_id,
+        visit_id=visit.id,
+        user_id=recorded_by_id,
         ip_address=ip_address,
     )
 

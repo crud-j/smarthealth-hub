@@ -11,6 +11,10 @@ Responsibilities
                        from_date, to_date.
 - update_appointment   Partial-update fields; write UPDATE audit log.
 - cancel_appointment   Set status='cancelled'; write DELETE audit log.
+- complete_appointments_for_visit
+                       Called when a visit is logged: the patient's
+                       pending/confirmed/missed appointments on the visit's
+                       Manila day become 'completed'; UPDATE audit log each.
 
 SMS reminder contract (fire-and-forget):
   After a successful INSERT, the service tries to enqueue a Celery task.
@@ -37,6 +41,7 @@ from app.core.logging import get_logger
 from app.models.appointment import Appointment
 from app.models.intake_token import PatientIntakeToken
 from app.models.patient import Patient
+from app.models.visit import Visit
 from app.schemas.appointment import (
     AppointmentCreate,
     AppointmentIntakeSummary,
@@ -455,6 +460,84 @@ async def update_appointment(
     await db.commit()
 
     return _appointment_to_response(appt, patient)
+
+
+# Statuses a logged visit turns into 'completed'.  'missed' is included so a
+# visit logged after the 18:00 mark-missed job corrects the record.
+VISIT_COMPLETES_STATUSES = ("pending", "confirmed", "missed")
+
+
+def _manila_day(column: Any) -> Any:
+    """SQL: the Manila calendar date of a timestamptz column."""
+    return func.date(func.timezone("Asia/Manila", column))
+
+
+async def complete_appointments_for_visit(
+    db: AsyncSession,
+    *,
+    patient_id: uuid.UUID,
+    visit_id: uuid.UUID,
+    user_id: uuid.UUID,
+    ip_address: str | None = None,
+) -> list[uuid.UUID]:
+    """
+    Mark the patient's appointments on the visit's day as completed.
+
+    "Completed" was only a manual button, and the 18:00 job marks every
+    appointment still pending/confirmed as missed (and texts the patient),
+    so a patient who came was recorded as a no-show unless someone clicked.
+    A logged visit is proof the patient came.
+
+    Matches appointments of ``patient_id`` scheduled on the visit's Manila
+    calendar day (computed in SQL from the stored visit row, so a naive
+    default ``visit_date`` is read the same way as a client-supplied one)
+    with status pending / confirmed / missed.  Cancelled and completed ones
+    are left alone.  Writes one UPDATE audit row per appointment.  Does not
+    commit: runs inside the caller's visit transaction.
+
+    Returns the ids of the appointments it completed.
+    """
+    visit_day = select(_manila_day(Visit.visit_date)).where(Visit.id == visit_id).scalar_subquery()
+    appointments = (
+        (
+            await db.execute(
+                select(Appointment).where(
+                    Appointment.patient_id == patient_id,
+                    Appointment.status.in_(VISIT_COMPLETES_STATUSES),
+                    _manila_day(Appointment.scheduled_at) == visit_day,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    completed: list[uuid.UUID] = []
+    for appt in appointments:
+        previous = appt.status
+        appt.status = "completed"
+        await write_audit_log(
+            db=db,
+            user_id=user_id,
+            action="UPDATE",
+            entity_type="appointment",
+            entity_id=appt.id,
+            metadata={
+                "changed_fields": {"status": "completed"},
+                "previous_status": previous,
+                "trigger": "visit_logged",
+                "visit_id": str(visit_id),
+            },
+            ip_address=ip_address,
+        )
+        completed.append(appt.id)
+
+    if completed:
+        logger.info(
+            "Appointments completed by a logged visit",
+            extra={"visit_id": str(visit_id), "appointment_ids": [str(i) for i in completed]},
+        )
+    return completed
 
 
 async def confirm_appointment(
