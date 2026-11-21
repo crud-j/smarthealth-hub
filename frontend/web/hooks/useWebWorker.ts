@@ -50,7 +50,11 @@ export function useWebWorker<T>(createWorker: () => Worker): Comlink.Remote<T> |
     if (typeof Worker === "undefined") return;
     const worker = createWorkerRef.current();
     workerRef.current = worker;
-    setApi(Comlink.wrap<T>(worker));
+    // Wrap in an updater: a Comlink proxy is itself callable, so passing it
+    // straight to setApi makes React call it as `updater(prev)`, which sends
+    // an RPC and stores the resulting Promise instead of the proxy.
+    const proxy = Comlink.wrap<T>(worker);
+    setApi(() => proxy);
     return () => {
       worker.terminate();
       workerRef.current = null;
