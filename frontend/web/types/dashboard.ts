@@ -97,21 +97,30 @@ export interface BhwDashboardData extends DashboardBase {
 
 export type CheckStatus = "ok" | "warning" | "error" | "unknown";
 
-/** The parts of the System Health payload the admin dashboard shows. */
+/** One System Health check: a status and one plain-language sentence. */
+export interface HealthCheck {
+  status: CheckStatus;
+  message: string;
+}
+
+/** The parts of the System Health payload (GET /system/status) the admin dashboard shows. */
 export interface SystemSummary {
   overall: CheckStatus;
+  checked_at: string;
   version: { commit: string; environment: string };
-  database: { status: CheckStatus };
-  workers: { status: CheckStatus; message: string };
-  disk: { status: CheckStatus; used_percent: number | null };
-  backup: { status: CheckStatus; message: string; last_success_at: string | null };
+  database: HealthCheck;
+  redis: HealthCheck;
+  workers: HealthCheck;
+  disk: HealthCheck & { used_percent: number | null };
+  media: HealthCheck;
+  backup: HealthCheck & { last_success_at: string | null };
+  alerts: HealthCheck;
   reliability: {
-    sms: { status: CheckStatus; last_24h: { sent: number; failed: number } };
-    sign_in: {
-      status: CheckStatus;
+    sms: HealthCheck & { last_24h: { sent: number; failed: number } };
+    sign_in: HealthCheck & {
       last_24h: { successful: number; failed_password: number; failed_otp: number };
     };
-    reminders: {
+    reminders: HealthCheck & {
       runs: { job: "appointment" | "immunization"; last_run_at: string | null; queued: number | null }[];
     };
   };
