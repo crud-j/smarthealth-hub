@@ -14,7 +14,8 @@ Tasks:
     to today + lead_days, patient has mobile_number and has not opted out,
     and no reminder for that dose was ever queued / sent / delivered /
     replied. The window (not one exact date) catches up days the job did not
-    run: the VM is off at night and Beat never re-runs a missed job.
+    run: Beat runs a missed job only once after start-up (not once per missed
+    day), and not at all after a deploy recreated the beat container.
     Creates sms_logs row (status='queued'), enqueues send_reminder_task.
 
 Both tasks are idempotent: the NOT EXISTS guard prevents double-queuing if
@@ -195,8 +196,9 @@ async def _dispatch_immunization_reminders_async(today: date | None = None) -> i
 
     Picks every scheduled dose due from ``today`` up to ``today + lead days``
     that has never had a reminder queued / sent / delivered / replied. A day
-    the job did not run (VM off at 10:00) is therefore caught up at the next
-    run, and a reminder the gateway reported as failed is tried again.
+    the job did not run (VM off all day, or a deploy after 10:00) is caught
+    up at the next run, and a reminder the gateway reported as failed is
+    tried again.
 
     ``today`` defaults to the Manila date; tests pass a fixed date.
     Returns the number of sms_log rows newly created.
