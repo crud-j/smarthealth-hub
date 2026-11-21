@@ -36,6 +36,7 @@ from app.core.security import create_access_token, hash_password
 from app.models.audit_log import AuditLog
 from app.models.passkey_credential import PasskeyCredential
 from app.models.user import Role, User
+from tests.conftest import unique_mobile
 
 # ---------------------------------------------------------------------------
 # URL constants
@@ -81,12 +82,11 @@ async def _make_passkey_user(
     """
     role = await _ensure_bhw_role(db_session)
     resolved_email = email or f"pk_{uuid.uuid4().hex[:8]}@test.local"
-    mobile_suffix = abs(hash(resolved_email)) % 100000
     user = User(
         id=uuid.uuid4(),
         full_name="Passkey Test User",
         email=resolved_email,
-        mobile_number=f"+6391700{mobile_suffix:05d}",
+        mobile_number=unique_mobile(),
         password_hash=hash_password("Test@2026!"),
         role_id=role.id,
         is_active=True,

@@ -27,6 +27,7 @@ from __future__ import annotations
 # this in production.
 # ---------------------------------------------------------------------------
 import base64
+import itertools
 import os
 
 os.environ.setdefault(
@@ -55,6 +56,17 @@ from app.core.config import settings
 from app.core.security import create_access_token, hash_password
 from app.db.base import Base
 from app.models.user import Role, User
+
+# Test user mobile numbers must be unique (users.mobile_number).  A counter
+# guarantees that within a run; deriving them from hash() did not (str hashes
+# change every run, so two users in one test could collide now and then).
+# The +63998 prefix is used by no fixed number in the tests.
+_mobile_counter = itertools.count()
+
+
+def unique_mobile() -> str:
+    """A mobile number no other test user in this run has."""
+    return f"+63998{next(_mobile_counter):07d}"
 
 
 # ---------------------------------------------------------------------------
@@ -345,9 +357,7 @@ async def make_user(db_session: AsyncSession, make_role):
         # Derive a deterministic but unique email from the role name if not provided.
         resolved_email = email or f"test_{role_name}_{uuid.uuid4().hex[:6]}@test.local"
 
-        # Mobile must be unique — use a pseudo-random suffix.
-        mobile_suffix = abs(hash(resolved_email)) % 100000
-        mobile = f"+6391700{mobile_suffix:05d}"
+        mobile = unique_mobile()
 
         user = User(
             id=uuid.uuid4(),
