@@ -35,7 +35,7 @@ function downloadBlob(content: string, filename: string, mimeType: string) {
 
 const REPORT_TYPES: { value: ExportReportType; label: string; description: string }[] = [
   { value: "patients",       label: "Patients",              description: "Active patient demographics and codes" },
-  { value: "visits",         label: "Visits",                description: "Consultation and diagnosis records" },
+  { value: "visits",         label: "Visits",                description: "Visit dates, types and chief complaints" },
   { value: "immunizations",  label: "Immunizations",         description: "Vaccination schedules and status" },
   { value: "appointments",   label: "Appointments",          description: "Scheduled and historical appointments" },
 ];
@@ -237,7 +237,8 @@ export default function ReportsPage() {
       </div>
 
       <p className="mt-4 text-xs text-slate-400">
-        Large exports are processed client-side for privacy — your data never leaves your browser for formatting.
+        Reports contain patient names and codes. Every export is recorded in the audit log.
+        Files are built in your browser — your data never leaves it for formatting.
       </p>
     </main>
   );

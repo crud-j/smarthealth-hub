@@ -2357,7 +2357,7 @@ async def public_verify_health_card(
         "Returns a minimal patient summary on success.  "
         "Pass ``?full=true`` (authenticated staff only) to receive the extended "
         "``PatientVerifySummaryFull`` response including patient_id, birth_date, "
-        "mobile_number, and photo_url — a PHI_VIEW audit log entry is written.  "
+        "mobile_number, and photo_url — a VIEW_PHI audit log entry is written.  "
         "Returns an identical generic 403 for ALL failure modes — no information "
         "about the reason for failure is disclosed to the caller."
     ),
@@ -2371,7 +2371,7 @@ async def verify_health_card(
         False,
         description=(
             "When true, return PatientVerifySummaryFull (adds patient_id, "
-            "birth_date, mobile_number, photo_url).  A PHI_VIEW audit log "
+            "birth_date, mobile_number, photo_url).  A VIEW_PHI audit log "
             "entry is written.  Only available to authenticated staff."
         ),
     ),
@@ -2549,13 +2549,15 @@ async def verify_health_card(
             ip_address=_get_client_ip(request),
         )
 
-        # When full=True, write a separate PHI_VIEW audit entry because the
+        # When full=True, write a separate VIEW_PHI audit entry because the
         # extended response discloses additional PHI (birth_date, mobile, photo).
+        # Same action name as every other record view, so the mass-viewing
+        # alert (audit_anomaly_service.check_phi_view_burst) counts it.
         if full:
             await write_audit_log(
                 db=db,
                 user_id=current_user.id,  # type: ignore[attr-defined]
-                action="PHI_VIEW",
+                action="VIEW_PHI",
                 entity_type="patient",
                 entity_id=patient_id,
                 metadata={

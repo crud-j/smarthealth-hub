@@ -4,7 +4,7 @@ Audit log anomaly detection service for SmartHealth Hub.
 Checks performed (all query the last N minutes/hours of audit_logs):
 
   check_phi_view_burst        — same user viewed >50 patient records
-                                (PHI_VIEW action) in the last 60 minutes.
+                                (VIEW_PHI action) in the last 60 minutes.
   check_after_hours_deletes   — DELETE actions on patient entity_type outside
                                 08:00–18:00 Philippine Standard Time (UTC+8)
                                 in the last 24 hours.
@@ -41,6 +41,11 @@ LOGIN_BURST_WINDOW = timedelta(hours=1)
 LOGIN_BURST_THRESHOLD = 20
 _SIGNIN_FAILURE_ACTIONS = ("LOGIN_FAILED", "OTP_FAILED")
 
+PHI_VIEW_BURST_THRESHOLD = 50
+# Record views are written as "VIEW_PHI".  The card full-verify wrote
+# "PHI_VIEW" until 2026-11; those stored rows still count.
+_PHI_VIEW_ACTIONS = ("VIEW_PHI", "PHI_VIEW")
+
 
 class AnomalyEvent(BaseModel):
     """Describes a single detected audit anomaly."""
@@ -52,9 +57,9 @@ class AnomalyEvent(BaseModel):
 
 async def check_phi_view_burst(db: AsyncSession) -> list[AnomalyEvent]:
     """
-    Detect: same user performed >50 PHI_VIEW audit actions in the last 60 minutes.
+    Detect: same user performed >50 VIEW_PHI audit actions in the last 60 minutes.
 
-    A PHI_VIEW burst indicates a potentially compromised account performing
+    A burst of record views indicates a potentially compromised account performing
     mass record exfiltration.  Threshold of 50 accommodates legitimate
     clinic-hours batch work while flagging overnight sweeps.
 
@@ -74,21 +79,19 @@ async def check_phi_view_burst(db: AsyncSession) -> list[AnomalyEvent]:
                 sa.func.count().label("cnt"),
             )
             .where(
-                AuditLog.action == "PHI_VIEW",
+                AuditLog.action.in_(_PHI_VIEW_ACTIONS),
                 AuditLog.created_at >= cutoff,
                 AuditLog.user_id.isnot(None),
             )
             .group_by(AuditLog.user_id)
-            .having(sa.func.count() > 50)
+            .having(sa.func.count() > PHI_VIEW_BURST_THRESHOLD)
         )
     ).all()
 
     return [
         AnomalyEvent(
             check_name="phi_view_burst",
-            detail=(
-                f"User {row.user_id} performed {row.cnt} PHI_VIEW actions in the last 60 minutes"
-            ),
+            detail=f"User {row.user_id} viewed {row.cnt} patient records in the last 60 minutes",
             severity="HIGH",
         )
         for row in rows
