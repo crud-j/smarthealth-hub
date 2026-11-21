@@ -34,6 +34,21 @@ def test_code_appears_once_as_copyable_text(purpose):
     assert re.search(rf'class="otp-copy"[^>]*>\s*{CODE}\s*<', html)
 
 
+@pytest.mark.parametrize("purpose", ["login", "password_reset"])
+def test_copy_box_says_how_to_copy(purpose):
+    """No email can have a real copy button (no JavaScript), so the copyable
+    code sits in its own box with a plain instruction right above it, and a
+    tap selects the whole code (user-select: all)."""
+    html = _build_otp_html(CODE, purpose)
+    box = re.search(r'<td class="otp-copy-box"[^>]*>(.*?)</td>', html, re.S)
+    assert box is not None
+    assert re.search(r"Tap and hold[^<]*to copy", box.group(1))
+    copy = re.search(r'class="otp-copy"([^>]*)>', box.group(1))
+    assert copy is not None
+    assert "user-select:all" in copy.group(1)
+    assert "or copy:" not in html
+
+
 def test_preview_text_does_not_contain_the_code():
     html = _build_otp_html(CODE, "login")
     preheader = re.search(r'<div class="preheader"[^>]*>(.*?)</div>', html, re.S)
