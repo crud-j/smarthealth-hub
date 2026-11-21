@@ -4,6 +4,7 @@ SMS-related endpoints — Phase 4.
 Routes:
   GET  /sms/logs                    — paginated SMS dispatch log (Admin, BHW)
   POST /sms/send-manual             — ad-hoc SMS to patient (BHW+ roles)
+  POST /sms/logs/{id}/resend        — queue a copy of a failed SMS (Admin, BHW)
   POST /sms/webhook/delivery-status — Semaphore delivery callback (PUBLIC, no JWT)
 
 RELIABILITY NOTE (SDP Section 1.5):
@@ -262,6 +263,69 @@ async def send_manual_sms(
         )
 
     return ManualSMSSentResponse(sms_log_id=sms_log_id, status="queued")
+
+
+# ---------------------------------------------------------------------------
+# POST /sms/logs/{id}/resend
+# ---------------------------------------------------------------------------
+
+
+def _get_client_ip(request: Request) -> str | None:
+    """Extract the real client IP, respecting the X-Forwarded-For header."""
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    if request.client:
+        return request.client.host
+    return None
+
+
+@router.post(
+    "/logs/{sms_log_id}/resend",
+    summary="Resend a failed SMS",
+    response_model=ManualSMSSentResponse,
+    status_code=202,
+    dependencies=[_logs_role],
+)
+async def resend_failed_sms(
+    sms_log_id: uuid.UUID,
+    request: Request,
+    db: DbDep,
+    current_user: CurrentUser,
+) -> ManualSMSSentResponse:
+    """
+    Queue a new copy of a failed SMS to the patient's current mobile number.
+
+    The failed row is left as it was; the new row has metadata
+    ``resend_of``.  Appointment reminders get a fresh CONFIRM code.
+
+    **Required roles:** admin, bhw.  Rate limit: 10 / minute per user.
+
+    **Raises:** 404 unknown SMS; 409 with the reason when it cannot be resent
+    (not failed, already resent, no number / opted out / archived patient,
+    appointment passed / cancelled / completed, dose no longer scheduled).
+    """
+    from app.services import sms_resend_service
+
+    await limiter.check_rate_limit(
+        key=f"sms_resend:{current_user.id}",
+        max_attempts=10,
+        window_seconds=60,
+    )
+    new = await sms_resend_service.resend(
+        db,
+        sms_log_id=sms_log_id,
+        user_id=current_user.id,
+        ip_address=_get_client_ip(request),
+    )
+    try:
+        send_reminder_task.delay(str(new.id))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Failed to enqueue resent SMS — Celery/Redis may be unavailable",
+            extra={"sms_log_id": str(new.id), "error": str(exc)},
+        )
+    return ManualSMSSentResponse(sms_log_id=new.id, status="queued")
 
 
 # ---------------------------------------------------------------------------

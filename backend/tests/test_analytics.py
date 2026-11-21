@@ -48,6 +48,7 @@ from app.models.patient import Patient
 from app.models.user import Role, User
 from app.models.visit import Visit
 from app.services import analytics_service
+from tests.conftest import unique_mobile
 
 # ---------------------------------------------------------------------------
 # URL constants
@@ -83,7 +84,7 @@ async def _create_user(
 
     uid = uuid.uuid4()
     resolved_email = email or f"user_{uid.hex[:6]}@test.local"
-    resolved_mobile = mobile or f"+6391700{abs(hash(resolved_email)) % 100000:05d}"
+    resolved_mobile = mobile or unique_mobile()
 
     user = User(
         id=uid,

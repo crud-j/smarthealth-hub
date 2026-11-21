@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import {
-  CalendarCheck, CalendarX2, ClipboardPen, CreditCard, FileClock, HeartHandshake, MapPin,
-  MessageSquareText, MessageSquareWarning, Phone, ScanLine, Syringe, UserPlus, PartyPopper,
+  CalendarCheck, CalendarX2, Check, ClipboardPen, CreditCard, FileClock, HeartHandshake, MapPin,
+  MessageSquareText, MessageSquareWarning, Phone, RotateCw, ScanLine, Syringe, UserPlus, PartyPopper,
 } from "lucide-react";
-import type { BhwDashboardData, ImmunizationDueRow } from "@/types/dashboard";
+import { apiFetch, ApiError } from "@/lib/api-client";
+import type { BhwDashboardData, FailedSmsRow, ImmunizationDueRow } from "@/types/dashboard";
 import {
   Avatar, Chip, DashboardHeader, EmptyRow, IconBadge, Panel, RowList, StatCard, StatGrid,
   TwoColumns, dueLabel, formatDay, formatTime, humanize, rise, text,
@@ -29,6 +31,68 @@ const SMS_KIND: Record<string, string> = {
   immunization: "Immunization reminder",
   other: "SMS",
 };
+
+/**
+ * One failed SMS: who, what, why it failed, and what to do next.
+ * "Fix number" opens the patient record; "Resend" queues a new copy to the
+ * patient's current number (POST /sms/logs/{id}/resend). The server says
+ * whether a resend is possible (can_resend) or already happened (resent);
+ * on an older backend neither is sent and no button shows.
+ */
+function FailedSmsItem({ sms }: { sms: FailedSmsRow }) {
+  const [state, setState] = useState<"idle" | "sending" | "queued">("idle");
+  const [error, setError] = useState("");
+  const name = sms.patient ? sms.patient.full_name : "Unknown patient";
+
+  async function resend() {
+    setState("sending");
+    setError("");
+    try {
+      await apiFetch(`/sms/logs/${sms.id}/resend`, { method: "POST" });
+      setState("queued");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not resend. Please try again.");
+      setState("idle");
+    }
+  }
+
+  return (
+    <li className="flex items-start gap-3 px-5 py-3">
+      <IconBadge icon={MessageSquareWarning} tone="amber" size="sm" />
+      <div className="min-w-0 flex-1 text-sm">
+        <p className={text.ink}>
+          <span className="font-semibold">{name}</span>
+          <span className={`text-xs ${text.muted}`}> · {SMS_KIND[sms.kind]} · {formatDay(sms.created_at)} {formatTime(sms.created_at)}</span>
+        </p>
+        {sms.reason && <p className="mt-0.5 text-xs text-red-700">{sms.reason}</p>}
+        {error && <p role="alert" className="mt-1 text-xs font-medium text-amber-800">{error}</p>}
+      </div>
+      <div className="flex shrink-0 flex-col items-end gap-1 sm:flex-row sm:items-center">
+        {sms.patient && (
+          <Link href={`/patients/${sms.patient.id}/edit`} className="rounded-lg px-2 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50">
+            Fix number
+          </Link>
+        )}
+        {state === "queued" ? (
+          <Chip icon={Check} tone="teal">Resend queued</Chip>
+        ) : sms.resent ? (
+          <Chip icon={Check} tone="slate">Resent</Chip>
+        ) : sms.can_resend ? (
+          <button
+            type="button"
+            onClick={() => void resend()}
+            disabled={state === "sending"}
+            aria-label={`Resend SMS to ${name}`}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-teal-200 bg-teal-50 px-2.5 py-1 text-xs font-semibold text-teal-700 hover:bg-teal-100 focus-visible:outline-2 focus-visible:outline-teal-500 disabled:opacity-60"
+          >
+            <RotateCw size={12} className={state === "sending" ? "animate-spin" : ""} aria-hidden="true" />
+            {state === "sending" ? "Sending…" : "Resend"}
+          </button>
+        ) : null}
+      </div>
+    </li>
+  );
+}
 
 function summary(d: BhwDashboardData): string {
   const parts: string[] = [];
@@ -155,23 +219,7 @@ export default function BhwDashboard({ data }: { data: BhwDashboardData }) {
             {data.failed_sms.length === 0 ? (
               <EmptyRow icon={MessageSquareText}>No failed SMS in the last 7 days.</EmptyRow>
             ) : (
-              data.failed_sms.map((s) => (
-                <li key={s.id} className="flex items-start gap-3 px-5 py-3">
-                  <IconBadge icon={MessageSquareWarning} tone="amber" size="sm" />
-                  <div className="min-w-0 flex-1 text-sm">
-                    <p className={text.ink}>
-                      <span className="font-semibold">{s.patient ? s.patient.full_name : "Unknown patient"}</span>
-                      <span className={`text-xs ${text.muted}`}> · {SMS_KIND[s.kind]} · {formatDay(s.created_at)} {formatTime(s.created_at)}</span>
-                    </p>
-                    {s.reason && <p className="mt-0.5 text-xs text-red-700">{s.reason}</p>}
-                  </div>
-                  {s.patient && (
-                    <Link href={`/patients/${s.patient.id}/edit`} className="shrink-0 rounded-lg px-2 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-50">
-                      Fix number
-                    </Link>
-                  )}
-                </li>
-              ))
+              data.failed_sms.map((s) => <FailedSmsItem key={s.id} sms={s} />)
             )}
           </RowList>
         </Panel>
