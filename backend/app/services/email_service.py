@@ -230,6 +230,18 @@ def _send_email_sync(to_address: str, subject: str, text_body: str, html_body: s
 # ---------------------------------------------------------------------------
 
 
+def otp_log_fields(otp_code: str) -> dict[str, str]:
+    """Log fields for an OTP that was not emailed.
+
+    Outside production the code is included so local development works
+    without Gmail. In production it never is: server logs are readable by
+    anyone with server access, and a logged code is a live sign-in code.
+    """
+    if settings.ENVIRONMENT == "production":
+        return {}
+    return {"otp_code": otp_code}
+
+
 class EmailService:
     """Async email sender backed by Gmail SMTP."""
 
@@ -252,9 +264,8 @@ class EmailService:
         """
         if not settings.EMAIL_HOST_USER or not settings.EMAIL_HOST_PASSWORD:
             logger.warning(
-                "EMAIL_HOST_USER or EMAIL_HOST_PASSWORD missing — "
-                "OTP printed to console (dev mode).",
-                extra={"to_address": to_address, "otp_code": otp_code, "purpose": purpose},
+                "EMAIL_HOST_USER or EMAIL_HOST_PASSWORD missing — OTP email not sent.",
+                extra={"to_address": to_address, "purpose": purpose, **otp_log_fields(otp_code)},
             )
             return False
 
@@ -272,12 +283,12 @@ class EmailService:
             return True
         except Exception as exc:
             logger.error(
-                "Failed to send OTP email — falling back to console log",
+                "Failed to send OTP email",
                 extra={
                     "to_address": to_address,
                     "purpose": purpose,
                     "error": str(exc),
-                    "otp_code": otp_code,
+                    **otp_log_fields(otp_code),
                 },
             )
             return False

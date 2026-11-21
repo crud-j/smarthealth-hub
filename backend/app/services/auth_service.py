@@ -46,7 +46,7 @@ from app.core.security import (
     verify_password,
 )
 from app.services import audit_service, mfa_service
-from app.services.email_service import email_service
+from app.services.email_service import email_service, otp_log_fields
 
 if TYPE_CHECKING:
     from app.models.user import User
@@ -227,8 +227,8 @@ async def login(
         purpose="login",
     )
 
-    # Send OTP via Gmail SMTP.  Falls back to console log if email is not
-    # configured (EMAIL_HOST_USER empty) so dev still works without Gmail.
+    # Send OTP via Gmail SMTP. If it is not sent, the code is logged (never in
+    # production) so local dev still works without Gmail.
     sent = await email_service.send_otp_email(
         to_address=user.email,
         otp_code=plain_otp,
@@ -236,8 +236,8 @@ async def login(
     )
     if not sent:
         logger.info(
-            "OTP (email not configured — console fallback)",
-            extra={"event": "OTP_CONSOLE", "user_email": user.email, "otp_code": plain_otp},
+            "OTP email not sent (code logged outside production only)",
+            extra={"event": "OTP_CONSOLE", "user_email": user.email, **otp_log_fields(plain_otp)},
         )
 
     await audit_service.write_audit_log(
@@ -504,8 +504,8 @@ async def resend_otp(
     )
     if not sent:
         logger.info(
-            "OTP resent (email not configured — console fallback)",
-            extra={"event": "OTP_CONSOLE", "user_email": user.email, "otp_code": plain_otp},
+            "Resent OTP email not sent (code logged outside production only)",
+            extra={"event": "OTP_CONSOLE", "user_email": user.email, **otp_log_fields(plain_otp)},
         )
 
     await audit_service.write_audit_log(
@@ -562,8 +562,8 @@ async def initiate_password_reset(
     )
     if not sent:
         logger.info(
-            "Password-reset OTP (email not configured — console fallback)",
-            extra={"event": "OTP_CONSOLE", "user_email": user.email, "otp_code": plain_otp},
+            "Password-reset OTP email not sent (code logged outside production only)",
+            extra={"event": "OTP_CONSOLE", "user_email": user.email, **otp_log_fields(plain_otp)},
         )
 
     await audit_service.write_audit_log(
