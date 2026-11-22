@@ -116,10 +116,10 @@ async def list_appointments(
         Query(description="Filter by status: pending | confirmed | completed | missed | cancelled"),
     ] = None,
     from_date: Annotated[
-        date | None, Query(description="Lower bound on scheduled_at (YYYY-MM-DD)")
+        date | None, Query(description="First Manila day of scheduled_at, inclusive (YYYY-MM-DD)")
     ] = None,
     to_date: Annotated[
-        date | None, Query(description="Upper bound on scheduled_at (YYYY-MM-DD)")
+        date | None, Query(description="Last Manila day of scheduled_at, inclusive (YYYY-MM-DD)")
     ] = None,
     page: Annotated[int, Query(ge=1, description="Page number (1-based)")] = 1,
     page_size: Annotated[int, Query(ge=1, le=100, description="Records per page (max 100)")] = 20,

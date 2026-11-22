@@ -130,6 +130,9 @@ class BhwDashboard(_DashboardBase):
     sms_today_failed: int
     failed_sms: list[FailedSmsRow]
     appointments_today_count: int
+    appointments_today: list[AppointmentRow] = Field(
+        ..., description="Today's appointments, earliest first (for Start visit)"
+    )
     previsit_forms_waiting: int
     visits_logged_by_me_week: int
     patients_without_active_card: int
