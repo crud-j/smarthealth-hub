@@ -157,7 +157,14 @@ async def _count(db: AsyncSession, stmt: sa.Select[Any]) -> int:
 
 
 def _active_patient() -> sa.ColumnElement[bool]:
-    return Patient.is_active.is_(True)
+    """
+    A patient in daily work: not deactivated and not archived.
+
+    Both take no new visits, doses or bookings (patient_service.
+    require_patient_in_use) and the Patients page hides archived ones, so
+    dashboard lists and counts leave both out.
+    """
+    return and_(Patient.is_active.is_(True), Patient.archived_at.is_(None))
 
 
 async def _reminder_effect(db: AsyncSession, clock: _Clock) -> ReminderEffectResponse:

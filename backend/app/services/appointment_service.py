@@ -109,6 +109,7 @@ def _appointment_to_response(appt: Appointment, patient: Patient) -> Appointment
         updated_at=appt.created_at,  # no updated_at column on Appointment yet
         intake_completed=appt.intake_completed,
         intake_submitted_at=appt.intake_submitted_at,
+        patient_not_in_use_reason=patient_service.not_in_use_reason(patient),
     )
 
 
