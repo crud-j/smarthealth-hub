@@ -32,6 +32,7 @@ from app.schemas.appointment import (
     AppointmentCreate,
     AppointmentResponse,
     AppointmentUpdate,
+    ClinicHoursResponse,
     PaginatedAppointments,
 )
 from app.services import appointment_service, system_settings_service
@@ -154,6 +155,27 @@ async def list_appointments(
         total=total,
         page=page,
         page_size=page_size,
+    )
+
+
+# Registered before "/{appointment_id}" so "clinic-hours" is not read as an id.
+@router.get(
+    "/clinic-hours",
+    summary="Clinic hours for booking (Manila time)",
+    response_model=ClinicHoursResponse,
+    dependencies=[_read_roles],
+)
+async def get_clinic_hours(db: DbDep) -> ClinicHoursResponse:
+    """
+    When appointments can be booked: ``open_time`` up to (not including)
+    ``close_time``, Manila time, "HH:MM". An Admin changes them on Settings.
+
+    **Required roles:** admin, bhw, physician, admin_staff. No PHI.
+    """
+    runtime = await system_settings_service.load_runtime_settings(db)
+    return ClinicHoursResponse(
+        open_time=runtime.clinic_open_time.strftime("%H:%M"),
+        close_time=runtime.clinic_close_time.strftime("%H:%M"),
     )
 
 

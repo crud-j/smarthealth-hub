@@ -32,6 +32,7 @@ from app.core.security import create_access_token
 from app.models.appointment import Appointment
 from app.models.patient import Patient
 from app.models.sms_log import SmsLog
+from app.models.system_setting import SystemSetting
 from app.services.sms_service import SMSService
 from app.workers.reminder_scheduler import _dispatch_appointment_reminders_async
 from tests.conftest import unique_mobile
@@ -100,20 +101,21 @@ class TestBookingTimes:
     ):
         tomorrow = _manila_now().date() + timedelta(days=1)
         resp = await _book(
-            client, await _headers(make_user), await _patient(db_session), _naive(tomorrow, 21)
+            client, await _headers(make_user), await _patient(db_session), _naive(tomorrow, 10)
         )
         assert resp.status_code == 201, resp.text
 
-        expected = datetime.combine(tomorrow, time(21, 0), tzinfo=MANILA)
+        expected = datetime.combine(tomorrow, time(10, 0), tzinfo=MANILA)
         assert datetime.fromisoformat(resp.json()["scheduled_at"]) == expected
         assert await _stored(db_session, resp.json()["id"]) == expected
 
-    @pytest.mark.parametrize("suffix", ["+08:00", "Z"])
+    # Both are 9:00 AM Manila (inside clinic hours).
+    @pytest.mark.parametrize(("hour", "suffix"), [(9, "+08:00"), (1, "Z")])
     async def test_explicit_timezone_is_kept(
-        self, client: AsyncClient, db_session, make_user, suffix
+        self, client: AsyncClient, db_session, make_user, hour, suffix
     ):
         tomorrow = _manila_now().date() + timedelta(days=1)
-        when = _naive(tomorrow, 9) + suffix
+        when = _naive(tomorrow, hour) + suffix
         resp = await _book(client, await _headers(make_user), await _patient(db_session), when)
         assert resp.status_code == 201, resp.text
         expected = datetime.fromisoformat(when.replace("Z", "+00:00"))
@@ -155,6 +157,11 @@ class TestBookingTimes:
         now = _manila_now()
         if now.hour >= 23:
             pytest.skip("Too late in Manila to book a later time today.")
+        # The bug shows for times from 4:00 PM on (8 h later is the next day),
+        # so open the clinic late for this test (clinic hours are a setting).
+        for key, value in (("clinic_open_time", "00:00"), ("clinic_close_time", "23:59")):
+            db_session.add(SystemSetting(key=key, value=value, updated_at=datetime.now(tz=UTC)))
+        await db_session.commit()
         headers = await _headers(make_user)
         patient = await _patient(db_session)
         resp = await _book(client, headers, patient, _naive(now.date(), 23, 30))

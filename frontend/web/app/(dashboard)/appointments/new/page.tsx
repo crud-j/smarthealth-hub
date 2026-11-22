@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useCreateAppointment } from "@/hooks/useAppointments";
+import { fetchClinicHours, useCreateAppointment } from "@/hooks/useAppointments";
+import { DEFAULT_CLINIC_HOURS, formatClock, outsideClinicHours, type ClinicHours } from "@/lib/clinic-hours";
 import { usePatientList } from "@/hooks/usePatients";
 import { toast } from "@/lib/toast";
 import { manilaIso, manilaToday } from "@/lib/manila-time";
@@ -62,16 +63,31 @@ export default function NewAppointmentPage() {
 
   useEffect(() => {
     if (!bookError) return;
-    // 409 = the patient was deactivated or archived (e.g. in another tab):
-    // the server's message says how to switch them back on.
-    toast.error(bookError.status === 409 ? bookError.message : "Failed to book appointment. Please try again.");
+    // 409 = the patient was deactivated or archived (e.g. in another tab);
+    // 422 with its own message = outside clinic hours or in the past. The
+    // server's message says what to do.
+    const serverSaysWhy =
+      bookError.status === 409 || (bookError.status === 422 && bookError.message !== "Request validation failed");
+    toast.error(serverSaysWhy ? bookError.message : "Failed to book appointment. Please try again.");
   }, [bookError]);
+
+  // Clinic hours (Admin sets them on Settings); defaults until loaded.
+  const [clinicHours, setClinicHours] = useState<ClinicHours>(DEFAULT_CLINIC_HOURS);
+  useEffect(() => {
+    let cancelled = false;
+    void fetchClinicHours().then((hours) => {
+      if (!cancelled && hours) setClinicHours(hours);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const [patientQuery, setPatientQuery] = useState("");
   const [selectedPatientName, setSelectedPatientName] = useState("");
   const [showPatientDropdown, setShowPatientDropdown] = useState(false);
 
-  const { register, handleSubmit, setValue, watch, formState: { errors } } = useForm<AppointmentCreateFormValues>({
+  const { register, handleSubmit, setValue, setError, watch, formState: { errors } } = useForm<AppointmentCreateFormValues>({
     resolver: zodResolver(appointmentCreateSchema),
     mode: "onBlur",
     defaultValues: { patientId: "", appointmentType: "checkup", scheduledDate: "", scheduledTime: "08:00", notes: "" },
@@ -94,7 +110,15 @@ export default function NewAppointmentPage() {
     setShowPatientDropdown(false);
   }, [setValue]);
 
+  // Shown while picking, e.g. 12:00 AM picked when noon was meant.
+  const timeProblem = outsideClinicHours(scheduledTimeValue, clinicHours);
+
   const onSubmit = async (data: AppointmentCreateFormValues) => {
+    const hoursProblem = outsideClinicHours(data.scheduledTime, clinicHours);
+    if (hoursProblem) {
+      setError("scheduledTime", { type: "clinicHours", message: hoursProblem });
+      return;
+    }
     // Manila time, sent with +08:00 (the server runs on UTC).
     const scheduledAt = manilaIso(data.scheduledDate, data.scheduledTime);
     const result = await createAppointment({
@@ -216,8 +240,15 @@ export default function NewAppointmentPage() {
                       Time <span className="text-[#dc2626]" aria-hidden="true">*</span>
                     </label>
                     <input id="appt-time" type="time" {...register("scheduledTime")}
-                      className={`${inputCls} ${errors.scheduledTime ? "border-[#fca5a5]" : ""}`} />
-                    {errors.scheduledTime && <p className="mt-1 text-xs text-[#dc2626]" role="alert">{errors.scheduledTime.message}</p>}
+                      min={clinicHours.openTime} max={clinicHours.closeTime}
+                      aria-describedby="appt-time-hours"
+                      className={`${inputCls} ${errors.scheduledTime || timeProblem ? "border-[#fca5a5]" : ""}`} />
+                    {errors.scheduledTime || timeProblem ? (
+                      <p className="mt-1 text-xs text-[#dc2626]" role="alert">{timeProblem ?? errors.scheduledTime?.message}</p>
+                    ) : null}
+                    <p id="appt-time-hours" className="mt-1 text-xs text-[#9b6e6e]">
+                      Clinic hours: {formatClock(clinicHours.openTime)} to {formatClock(clinicHours.closeTime)}
+                    </p>
                   </div>
                 </div>
               </div>

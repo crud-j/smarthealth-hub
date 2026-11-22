@@ -187,6 +187,8 @@ class SystemSettingsResponse(BaseModel):
     bhc_name: SettingValue
     sms_reminder_lead_hours: SettingValue
     sms_immunization_lead_days: SettingValue
+    clinic_open_time: SettingValue
+    clinic_close_time: SettingValue
     sms_templates: list[SmsTemplateSetting]
     sample_values: dict[str, str] = Field(
         ..., description="Fictional values the page uses for the live preview"
@@ -205,6 +207,9 @@ class SystemSettingsUpdate(BaseModel):
     bhc_name: str | None = Field(None, max_length=120)
     sms_reminder_lead_hours: int | None = Field(None, ge=1, le=168)
     sms_immunization_lead_days: int | None = Field(None, ge=0, le=30)
+    # Clinic hours, Manila time, 24-hour "HH:MM" (e.g. "07:00", "17:00").
+    clinic_open_time: str | None = Field(None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    clinic_close_time: str | None = Field(None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
     sms_templates: dict[str, str | None] | None = None
 
     @field_validator("bhc_name")

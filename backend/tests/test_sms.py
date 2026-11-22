@@ -364,7 +364,10 @@ async def test_send_reminder_task_permanent_failure(db_session, queued_sms_log):
 async def test_create_appointment_success(client, test_patient, bhw_user):
     """POST /appointments with a future datetime returns 201 + AppointmentResponse."""
     _, token = bhw_user
-    scheduled = (datetime.now(tz=UTC) + timedelta(days=2)).isoformat()
+    # 10:00 AM Manila in two days (inside clinic hours, 7 AM - 5 PM).
+    scheduled = (datetime.now(tz=UTC) + timedelta(days=2)).replace(
+        hour=2, minute=0, second=0, microsecond=0
+    ).isoformat()
 
     resp = await client.post(
         "/api/v1/appointments",

@@ -17,6 +17,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch, ApiError } from "@/lib/api-client";
+import type { ClinicHours } from "@/lib/clinic-hours";
 import type {
   Appointment,
   AppointmentCreatePayload,
@@ -214,6 +215,20 @@ export function useAppointment(id: string | null) {
   }, [fetchOne]);
 
   return { data, loading, error, refetch: fetchOne };
+}
+
+// ---------------------------------------------------------------------------
+// fetchClinicHours — when appointments can be booked
+// ---------------------------------------------------------------------------
+
+/** Clinic hours from the server, or `null` on any error (callers keep defaults). */
+export async function fetchClinicHours(): Promise<ClinicHours | null> {
+  try {
+    const raw = await apiFetch<{ open_time: string; close_time: string }>("/appointments/clinic-hours");
+    return { openTime: raw.open_time, closeTime: raw.close_time };
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------

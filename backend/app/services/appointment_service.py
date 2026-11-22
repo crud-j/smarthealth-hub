@@ -48,11 +48,31 @@ from app.schemas.appointment import (
     AppointmentResponse,
     AppointmentUpdate,
 )
-from app.services import patient_service
+from app.services import patient_service, system_settings_service
 from app.services.analytics_service import _invalidate_analytics_cache
 from app.services.audit_service import write_audit_log
+from app.utils.manila_time import to_manila
 
 logger = get_logger(__name__)
+
+
+async def _require_clinic_hours(db: AsyncSession, scheduled_at: datetime) -> None:
+    """
+    Refuse a time outside clinic hours (Manila time, Admin-editable on
+    Settings; default 7:00 AM to 5:00 PM). Catches AM/PM slips such as a
+    12:00 AM booking meant for noon.
+    """
+    runtime = await system_settings_service.load_runtime_settings(db)
+    refusal = runtime.outside_clinic_hours(to_manila(scheduled_at).time())
+    if refusal is not None:
+        raise ValidationError(
+            refusal,
+            detail={
+                "scheduled_at": scheduled_at.isoformat(),
+                "clinic_open_time": runtime.clinic_open_time.strftime("%H:%M"),
+                "clinic_close_time": runtime.clinic_close_time.strftime("%H:%M"),
+            },
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -223,6 +243,7 @@ async def create_appointment(
             "scheduled_at must be a future datetime.",
             detail={"scheduled_at": str(data.scheduled_at)},
         )
+    await _require_clinic_hours(db, data.scheduled_at)
 
     appt = Appointment(
         id=uuid.uuid4(),
@@ -424,6 +445,7 @@ async def update_appointment(
                 "scheduled_at must be a future datetime.",
                 detail={"scheduled_at": str(data.scheduled_at)},
             )
+        await _require_clinic_hours(db, data.scheduled_at)
         appt.scheduled_at = data.scheduled_at
         changed_fields["scheduled_at"] = data.scheduled_at.isoformat()
 

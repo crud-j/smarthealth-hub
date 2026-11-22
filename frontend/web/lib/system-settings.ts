@@ -30,6 +30,9 @@ export interface SystemSettings {
   bhc_name: SettingValue<string>
   sms_reminder_lead_hours: SettingValue<number>
   sms_immunization_lead_days: SettingValue<number>
+  /** Clinic hours, Manila time, "HH:MM": appointments only from open up to close. */
+  clinic_open_time: SettingValue<string>
+  clinic_close_time: SettingValue<string>
   sms_templates: SmsTemplateSetting[]
   sample_values: Record<string, string>
 }
@@ -39,6 +42,9 @@ export interface SettingsDraft {
   /** Kept as typed so a half-typed number is not lost; checked by draftProblems. */
   leadHours: string
   leadDays: string
+  /** "HH:MM" from <input type="time"> (some browsers add ":SS"). */
+  openTime: string
+  closeTime: string
   /** Keyed "<kind>.<language>", e.g. "appointment_reminder.fil". */
   templates: Record<string, string>
 }
@@ -47,8 +53,13 @@ export interface SettingsUpdate {
   bhc_name?: string | null
   sms_reminder_lead_hours?: number | null
   sms_immunization_lead_days?: number | null
+  clinic_open_time?: string | null
+  clinic_close_time?: string | null
   sms_templates?: Record<string, string | null>
 }
+
+/** "07:00:00" -> "07:00" */
+const hhmm = (time: string): string => time.trim().slice(0, 5)
 
 export const templateId = (t: { kind: string; language: string }): string => `${t.kind}.${t.language}`
 
@@ -57,6 +68,8 @@ export function draftFrom(s: SystemSettings): SettingsDraft {
     bhcName: s.bhc_name.value,
     leadHours: String(s.sms_reminder_lead_hours.value),
     leadDays: String(s.sms_immunization_lead_days.value),
+    openTime: s.clinic_open_time.value,
+    closeTime: s.clinic_close_time.value,
     templates: Object.fromEntries(s.sms_templates.map((t) => [templateId(t), t.value])),
   }
 }
@@ -76,6 +89,10 @@ export function buildSettingsUpdate(s: SystemSettings, draft: SettingsDraft): Se
   if (hours !== undefined) update.sms_reminder_lead_hours = hours
   const days = change(s.sms_immunization_lead_days, Number(draft.leadDays))
   if (days !== undefined) update.sms_immunization_lead_days = days
+  const opens = change(s.clinic_open_time, hhmm(draft.openTime))
+  if (opens !== undefined) update.clinic_open_time = opens
+  const closes = change(s.clinic_close_time, hhmm(draft.closeTime))
+  if (closes !== undefined) update.clinic_close_time = closes
 
   const templates: Record<string, string | null> = {}
   for (const t of s.sms_templates) {
@@ -91,13 +108,23 @@ function wholeNumberIn(text: string, min: number, max: number): boolean {
   return /^\d+$/.test(text.trim()) && Number(text) >= min && Number(text) <= max
 }
 
-/** Problems by field ("bhcName", "leadHours", "leadDays" or a template id); {} if none. */
+const isClockTime = (time: string): boolean => /^([01]\d|2[0-3]):[0-5]\d$/.test(hhmm(time))
+
+/**
+ * Problems by field ("bhcName", "leadHours", "leadDays", "openTime",
+ * "closeTime" or a template id); {} if none.
+ */
 export function draftProblems(s: SystemSettings, draft: SettingsDraft): Record<string, string[]> {
   const problems: Record<string, string[]> = {}
   const name = draft.bhcName.trim()
   if (name.length < 2 || name.length > 120) problems.bhcName = ["Clinic name must be 2-120 characters"]
   if (!wholeNumberIn(draft.leadHours, 1, 168)) problems.leadHours = ["Whole number from 1 to 168"]
   if (!wholeNumberIn(draft.leadDays, 0, 30)) problems.leadDays = ["Whole number from 0 to 30"]
+  if (!isClockTime(draft.openTime)) problems.openTime = ["Pick an opening time"]
+  if (!isClockTime(draft.closeTime)) problems.closeTime = ["Pick a closing time"]
+  else if (isClockTime(draft.openTime) && hhmm(draft.closeTime) <= hhmm(draft.openTime)) {
+    problems.closeTime = ["Closing time must be after the opening time"]
+  }
   for (const t of s.sms_templates) {
     const id = templateId(t)
     const found = templateProblems((draft.templates[id] ?? t.value).trim(), {
