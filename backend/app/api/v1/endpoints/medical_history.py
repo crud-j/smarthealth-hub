@@ -40,6 +40,7 @@ import uuid
 
 from fastapi import APIRouter, Request, status
 
+from app.core.exceptions import ForbiddenError
 from app.core.security import CurrentUser, require_role
 from app.db.session import DbDep
 from app.schemas.medical_history import (
@@ -47,7 +48,13 @@ from app.schemas.medical_history import (
     MedicalHistoryListResponse,
     MedicalHistoryResponse,
 )
-from app.schemas.visit import VisitCreate, VisitResponse, VisitSummary, VisitUpdate
+from app.schemas.visit import (
+    VisitCreate,
+    VisitPrefill,
+    VisitResponse,
+    VisitSummary,
+    VisitUpdate,
+)
 from app.services import medical_history_service, patient_service, visit_service
 
 router = APIRouter(tags=["medical-history"])
@@ -119,8 +126,19 @@ async def create_visit(
 
     Writes a CREATE audit log entry.
 
-    Auth: BHW, Physician/Nurse/Midwife.
+    Auth: BHW, Physician/Nurse/Midwife. Only a Physician may send
+    ``diagnosis`` / ``treatment_notes`` (admin role model B: only the
+    Physician reads them). A BHW records type, complaint and vital signs; the
+    visit then waits on the Physician's "waiting for diagnosis" list.
     """
+    if current_user.role.name not in _NOTES_ROLES and (
+        (payload.diagnosis or "").strip() or (payload.treatment_notes or "").strip()
+    ):
+        raise ForbiddenError(
+            "Only a Physician can record the diagnosis and treatment notes. "
+            "Save the visit without them; the Physician adds them from their waiting list."
+        )
+
     # The service checks the patient exists (404) and is in use (409).
     ip = _get_client_ip(request)
     return await visit_service.create_visit(
@@ -129,6 +147,38 @@ async def create_visit(
         data=payload,
         recorded_by_id=current_user.id,
         ip_address=ip,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Visit: suggestions for the Add Visit form
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/patients/{patient_id}/visits/prefill",
+    response_model=VisitPrefill,
+    summary="Suggested visit type and chief complaint from today's appointment",
+    dependencies=[_CLINICAL],
+)
+async def visit_prefill(
+    request: Request,
+    patient_id: uuid.UUID,
+    db: DbDep,
+    current_user: CurrentUser,
+) -> VisitPrefill:
+    """
+    Suggest Add Visit values from the patient's appointment today (Manila
+    day) and the intake form submitted for it. All null when there is none.
+    Nothing is saved. Reading intake answers writes a VIEW_PHI audit entry.
+
+    Auth: BHW, Physician/Nurse/Midwife (the roles that log visits).
+    """
+    return await visit_service.visit_prefill(
+        db,
+        patient_id,
+        current_user.id,
+        ip_address=_get_client_ip(request),
     )
 
 

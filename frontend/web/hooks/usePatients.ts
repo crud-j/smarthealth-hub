@@ -35,6 +35,7 @@ import type {
   VisitCreatePayload,
   VisitUpdatePayload,
   Visit,
+  VisitPrefill,
 } from "@/types/patient";
 
 // ---------------------------------------------------------------------------
@@ -658,6 +659,35 @@ export function usePatientVisits(patientId: string | null) {
 // ---------------------------------------------------------------------------
 // useCreateVisit — mutation
 // ---------------------------------------------------------------------------
+
+interface VisitPrefillApiResponse {
+  appointment_id: string | null;
+  appointment_type: string | null;
+  scheduled_at: string | null;
+  visit_type: string | null;
+  chief_complaint: string | null;
+  intake_visit_purpose: string | null;
+}
+
+/**
+ * Add Visit suggestions from today's appointment and its intake form.
+ * Resolves to `null` on any error: the form simply starts empty.
+ */
+export async function fetchVisitPrefill(patientId: string): Promise<VisitPrefill | null> {
+  try {
+    const raw = await apiFetch<VisitPrefillApiResponse>(`/patients/${patientId}/visits/prefill`);
+    return {
+      appointmentId: raw.appointment_id ?? null,
+      appointmentType: raw.appointment_type ?? null,
+      scheduledAt: raw.scheduled_at ?? null,
+      visitType: raw.visit_type ?? null,
+      chiefComplaint: raw.chief_complaint ?? null,
+      intakeVisitPurpose: raw.intake_visit_purpose ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
 
 export function useCreateVisit(patientId: string) {
   const [loading, setLoading] = useState(false);
