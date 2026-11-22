@@ -16,9 +16,11 @@ import pytest
 
 from app.services.sms_templates import (
     APPOINTMENT_TEMPLATE_LIMIT,
+    FIL_APPOINTMENT_TEMPLATE_LIMIT,
     LONG_VALUES,
     TEMPLATE_DEFAULTS,
     TEMPLATE_KINDS,
+    confirmation_suffix,
     render_template,
     template_key,
     template_problems,
@@ -34,10 +36,30 @@ def test_every_default_template_passes_its_own_rules() -> None:
 def test_defaults_fit_without_being_cut() -> None:
     """With long real values: appointment text fits before the CONFIRM code, the rest in one SMS."""
     for kind, by_lang in TEMPLATE_DEFAULTS.items():
-        limit = APPOINTMENT_TEMPLATE_LIMIT if kind == "appointment_reminder" else 160
         for lang, text in by_lang.items():
+            limit = 160
+            if kind == "appointment_reminder":
+                limit = (
+                    FIL_APPOINTMENT_TEMPLATE_LIMIT
+                    if lang == "fil"
+                    else APPOINTMENT_TEMPLATE_LIMIT
+                )
             filled = text.format(**LONG_VALUES)
             assert len(filled) <= limit, (kind, lang, len(filled))
+
+
+def test_filipino_reminders_have_clear_opt_out_instructions() -> None:
+    for kind in TEMPLATE_DEFAULTS:
+        assert "STOP para ihinto ang SMS" in TEMPLATE_DEFAULTS[kind]["fil"], kind
+
+    assert "Paalala" in TEMPLATE_DEFAULTS["appointment_reminder"]["fil"]
+    assert "nakatakda ang {vaccine_name}" in TEMPLATE_DEFAULTS["immunization_reminder"]["fil"]
+    assert "para magpa-iskedyul muli" in TEMPLATE_DEFAULTS["missed_appointment"]["fil"]
+
+
+def test_confirmation_suffix_matches_the_recipient_language() -> None:
+    assert confirmation_suffix("1234", "en") == " CONFIRM 1234 to confirm."
+    assert confirmation_suffix("1234", "fil") == " CONFIRM 1234 para kumpirmahin."
 
 
 def test_kinds_and_languages() -> None:

@@ -44,8 +44,8 @@ TEMPLATE_DEFAULTS: dict[str, dict[str, str]] = {
             "on {scheduled_date} {scheduled_time}. Reply STOP to opt out."
         ),
         "fil": (
-            "Kamusta {patient_name}, paalala: {appointment_type} sa {bhc_name}, "
-            "{scheduled_date} {scheduled_time}. STOP para mag-opt out."
+            "Paalala, {patient_name}: {appointment_type} sa {bhc_name}, "
+            "{scheduled_date} {scheduled_time}. STOP para ihinto ang SMS."
         ),
     },
     "immunization_reminder": {
@@ -54,8 +54,8 @@ TEMPLATE_DEFAULTS: dict[str, dict[str, str]] = {
             "at {bhc_name}. Bring health card. Reply STOP to opt out."
         ),
         "fil": (
-            "Kamusta {patient_name}, ang {vaccine_name} (dose {dose_number}) "
-            "ay dapat ibigay sa {due_date}. Pakidalaw ang {bhc_name}."
+            "{patient_name}, nakatakda ang {vaccine_name} (dosis {dose_number}) "
+            "sa {due_date} sa {bhc_name}. STOP para ihinto ang SMS."
         ),
     },
     "missed_appointment": {
@@ -64,8 +64,8 @@ TEMPLATE_DEFAULTS: dict[str, dict[str, str]] = {
             "Please contact {bhc_name} to reschedule."
         ),
         "fil": (
-            "Kamusta {first_name}, napansin namin na hindi ka dumating sa "
-            "iyong appointment ngayon. Makipag-ugnayan sa {bhc_name} para mag-reschedule."
+            "Kamusta {first_name}, hindi ka nakadalo sa appointment. Tumawag sa "
+            "{bhc_name} para magpa-iskedyul muli. STOP para ihinto ang SMS."
         ),
     },
 }
@@ -94,9 +94,18 @@ TEMPLATE_REQUIRED: dict[str, tuple[str, ...]] = {
     "missed_appointment": (),
 }
 
-# Appointment reminders get " CONFIRM 1234 to confirm." appended and the
-# whole SMS kept to 160 characters, so the template part is cut at 135.
+# Appointment reminders get a language-specific CONFIRM suffix, and the whole
+# SMS is kept to 160 characters.
 APPOINTMENT_TEMPLATE_LIMIT = 135
+FIL_APPOINTMENT_TEMPLATE_LIMIT = 129
+
+
+def confirmation_suffix(token: str, lang: str | None) -> str:
+    """Return the reply instruction in the recipient's configured language."""
+    if lang == "fil":
+        return f" CONFIRM {token} para kumpirmahin."
+    return f" CONFIRM {token} to confirm."
+
 
 # Fictional values for the live preview on the settings page.
 SAMPLE_VALUES: dict[str, str] = {
