@@ -17,6 +17,7 @@ export type NavIcon =
   | "immunization"
   | "cards"
   | "archive"
+  | "inactive"
   | "inbox"
   | "qr"
   | "analytics"
@@ -59,6 +60,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
       { href: "/health-cards", label: "Health Cards", icon: "cards", roles: [] },
       // GET /patients/archived: require_role("admin", "physician")
       { href: "/patients/archived", label: "Patient Archive", icon: "archive", roles: ["admin", "physician"] },
+      // GET /patients/inactive: require_role("admin", "physician")
+      { href: "/patients/inactive", label: "Inactive Patients", icon: "inactive", roles: ["admin", "physician"] },
     ],
   },
   {

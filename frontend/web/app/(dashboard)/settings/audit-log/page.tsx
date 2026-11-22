@@ -21,6 +21,10 @@ const ACTION_BADGE: Record<string, string> = {
   VIEW: "bg-stone-100 text-stone-600 border border-stone-200",
   VIEW_PHI: "bg-amber-100 text-amber-700 border border-amber-200",
   EXPORT_REPORT: "bg-violet-100 text-violet-700 border border-violet-200",
+  DEACTIVATE: "bg-stone-200 text-stone-700 border border-stone-300",
+  REACTIVATE: "bg-teal-100 text-teal-700 border border-teal-200",
+  ARCHIVE: "bg-amber-100 text-amber-800 border border-amber-300",
+  UNARCHIVE: "bg-teal-100 text-teal-700 border border-teal-200",
   LOGIN: "bg-emerald-100 text-emerald-700 border border-emerald-200",
   LOGOUT: "bg-stone-100 text-stone-500 border border-stone-200",
 };
@@ -29,7 +33,7 @@ function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString("en-PH", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-const ACTIONS = ["CREATE", "UPDATE", "DELETE", "VIEW", "VIEW_PHI", "EXPORT_REPORT", "LOGIN", "LOGOUT"];
+const ACTIONS = ["CREATE", "UPDATE", "DELETE", "VIEW", "VIEW_PHI", "EXPORT_REPORT", "DEACTIVATE", "REACTIVATE", "ARCHIVE", "UNARCHIVE", "LOGIN", "LOGOUT"];
 const PAGE_SIZE = 20;
 
 function AuditLog() {

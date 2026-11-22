@@ -2,13 +2,23 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { usePatient, usePatientVisits, useDeactivatePatient, useArchivePatient } from "@/hooks/usePatients";
+import {
+  usePatient,
+  usePatientVisits,
+  useDeactivatePatient,
+  useReactivatePatient,
+  useArchivePatient,
+} from "@/hooks/usePatients";
 import { useCurrentUser } from "@/hooks/useAuth";
 import { canLogVisit } from "@/lib/permissions";
 import { AllergyAlert } from "@/components/ui/AllergyAlert";
 import type { VisitSummary } from "@/types/patient";
 import React, { useEffect, useState } from "react";
 import ProfilePhotoUploader from "@/app/(dashboard)/patients/_components/ProfilePhotoUploader";
+import {
+  DeactivatePatientDialog,
+  InactivePatientBanner,
+} from "@/app/(dashboard)/patients/_components/PatientDeactivation";
 
 // ---------------------------------------------------------------------------
 // Toast
@@ -202,22 +212,38 @@ function ArchiveModal({
 export default function PatientProfilePage({ params }: { params: Promise<{ patientId: string }> }) {
   const { patientId } = React.use(params);
   const router = useRouter();
-  const { data: patient, loading, error } = usePatient(patientId);
+  const { data: patient, loading, error, refetch } = usePatient(patientId);
   const { data: visits, loading: visitsLoading, error: visitsError } = usePatientVisits(patientId);
   const { user: currentUser } = useCurrentUser();
-  const { deactivatePatient, loading: deactivating } = useDeactivatePatient();
+  const { deactivatePatient, loading: deactivating, error: deactivateError } = useDeactivatePatient();
+  const { reactivatePatient, loading: reactivating } = useReactivatePatient();
   const { archivePatient, loading: archiving } = useArchivePatient();
   const [toast, setToast] = useState<ToastState | null>(null);
   const [showArchiveModal, setShowArchiveModal] = useState(false);
+  const [showDeactivateModal, setShowDeactivateModal] = useState(false);
 
   const isAdmin = currentUser?.role === "admin";
   const canAddVisit = canLogVisit(currentUser?.role);
 
-  async function handleDeactivate() {
-    if (!confirm("This will mark the patient as inactive. They will no longer appear in search results. Continue?")) return;
-    const ok = await deactivatePatient(patientId);
-    if (ok) { router.push("/patients"); }
-    else { setToast({ message: "Could not deactivate patient. Please try again.", kind: "error" }); }
+  // Deactivating keeps the admin on this page so the "inactive" banner (with
+  // its Reactivate button) shows that nothing was deleted.
+  async function handleDeactivate(reason: string) {
+    const ok = await deactivatePatient(patientId, reason);
+    if (ok) {
+      setShowDeactivateModal(false);
+      setToast({ message: "Patient deactivated. Nothing was deleted.", kind: "success" });
+      void refetch();
+    }
+  }
+
+  async function handleReactivate() {
+    const ok = await reactivatePatient(patientId);
+    if (ok) {
+      setToast({ message: "Patient is active again.", kind: "success" });
+      void refetch();
+    } else {
+      setToast({ message: "Could not reactivate the patient. Please try again.", kind: "error" });
+    }
   }
 
   async function handleArchive(reason: string) {
@@ -307,7 +333,7 @@ export default function PatientProfilePage({ params }: { params: Promise<{ patie
           {isAdmin && patient.isActive && (
             <button
               type="button"
-              onClick={() => void handleDeactivate()}
+              onClick={() => setShowDeactivateModal(true)}
               disabled={deactivating}
               className="rounded-lg border border-[#fca5a5] px-4 py-2 text-sm font-bold text-[#dc2626] hover:bg-[#fef2f2] disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#dc2626]"
             >
@@ -330,6 +356,27 @@ export default function PatientProfilePage({ params }: { params: Promise<{ patie
       <AllergyAlert status="ready" allergies={patient.allergies} editHref={`/patients/${patientId}/edit`} />
 
       {toast && <Toast toast={toast} onDismiss={() => setToast(null)} />}
+
+      {showDeactivateModal && (
+        <DeactivatePatientDialog
+          patientName={patient.fullName}
+          onConfirm={(reason) => void handleDeactivate(reason)}
+          onCancel={() => setShowDeactivateModal(false)}
+          loading={deactivating}
+          error={deactivateError}
+        />
+      )}
+
+      {!patient.isActive && (
+        <InactivePatientBanner
+          deactivatedAt={patient.deactivatedAt}
+          deactivatedByName={patient.deactivatedByName}
+          deactivationReason={patient.deactivationReason}
+          canReactivate={isAdmin}
+          onReactivate={() => void handleReactivate()}
+          reactivating={reactivating}
+        />
+      )}
 
       {showArchiveModal && patient && (
         <ArchiveModal

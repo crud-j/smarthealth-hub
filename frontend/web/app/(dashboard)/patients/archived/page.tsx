@@ -208,6 +208,12 @@ export default function ArchivedPatientsPage() {
           <p className="mt-1 text-sm text-slate-500">
             Archived patients are hidden from the main patient list. Their records are fully preserved.
           </p>
+          <p className="mt-1 text-sm text-slate-500">
+            Looking for a deactivated patient?{" "}
+            <Link href="/patients/inactive" className="font-semibold text-[#b5343e] hover:underline">
+              Inactive Patients
+            </Link>
+          </p>
         </div>
       </header>
 
