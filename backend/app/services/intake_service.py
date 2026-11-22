@@ -54,6 +54,41 @@ async def generate_intake_token(
     return intake_token
 
 
+# A link shown on the Registration QR page must leave the patient time to
+# fill in the form; one closer to expiry is replaced by a new one.
+_CURRENT_LINK_MIN_REMAINING = timedelta(hours=1)
+
+
+async def current_walk_in_token(
+    db: AsyncSession,
+    created_by_id: uuid.UUID,
+) -> PatientIntakeToken | None:
+    """
+    The newest walk-in pre-visit link ``created_by_id`` made that a patient
+    can still use, or ``None``.
+
+    Walk-in = not tied to an appointment or a patient. Usable = not used, no
+    form submitted yet, and at least an hour before it expires. Lets the
+    Registration QR page show the same QR code again instead of creating a
+    new link on every visit. Reads only (no PHI: token and expiry).
+    """
+    now = datetime.now(UTC)
+    result = await db.execute(
+        sa.select(PatientIntakeToken)
+        .where(
+            PatientIntakeToken.created_by_id == created_by_id,
+            PatientIntakeToken.appointment_id.is_(None),
+            PatientIntakeToken.patient_id.is_(None),
+            PatientIntakeToken.used_at.is_(None),
+            PatientIntakeToken.draft_data.is_(None),
+            PatientIntakeToken.expires_at > now + _CURRENT_LINK_MIN_REMAINING,
+        )
+        .order_by(PatientIntakeToken.created_at.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
 async def get_intake_token(
     db: AsyncSession,
     token_str: str,
