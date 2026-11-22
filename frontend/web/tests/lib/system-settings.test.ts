@@ -20,6 +20,8 @@ function settings(overrides: Partial<SystemSettings> = {}): SystemSettings {
     bhc_name: { value: "BHC Uno", default: "Barangay Health Center", is_custom: true, updated_at: null, updated_by: "Admin" },
     sms_reminder_lead_hours: { value: 24, default: 24, is_custom: false, updated_at: null, updated_by: null },
     sms_immunization_lead_days: { value: 3, default: 3, is_custom: false, updated_at: null, updated_by: null },
+    clinic_open_time: { value: "07:00", default: "07:00", is_custom: false, updated_at: null, updated_by: null },
+    clinic_close_time: { value: "17:00", default: "17:00", is_custom: false, updated_at: null, updated_by: null },
     sms_templates: [
       template("missed_appointment", "en", "Hi {first_name}"),
       template("missed_appointment", "fil", "Custom {first_name}", "Kamusta {first_name}"),
@@ -85,5 +87,44 @@ describe("draftProblems", () => {
       leadDays: ["Whole number from 0 to 30"],
       "missed_appointment.en": ["Unknown placeholder {nope}. Use: {first_name}, {bhc_name}"],
     })
+  })
+
+  it("needs clinic hours as times with closing after opening", () => {
+    const s = settings()
+    const draft = draftFrom(s)
+    draft.openTime = ""
+    expect(draftProblems(s, draft).openTime).toEqual(["Pick an opening time"])
+
+    draft.openTime = "18:00"
+    expect(draftProblems(s, draft).closeTime).toEqual(["Closing time must be after the opening time"])
+
+    draft.openTime = "08:00"
+    draft.closeTime = "08:00"
+    expect(draftProblems(s, draft).closeTime).toEqual(["Closing time must be after the opening time"])
+  })
+})
+
+describe("clinic hours", () => {
+  it("start from the saved hours", () => {
+    const draft = draftFrom(settings())
+    expect(draft.openTime).toBe("07:00")
+    expect(draft.closeTime).toBe("17:00")
+  })
+
+  it("send only the hours that changed, and null to go back to the default", () => {
+    const s = settings({
+      clinic_close_time: { value: "16:00", default: "17:00", is_custom: true, updated_at: null, updated_by: "Admin" },
+    })
+    const draft = draftFrom(s)
+    draft.openTime = "08:00"
+    draft.closeTime = "17:00"
+    expect(buildSettingsUpdate(s, draft)).toEqual({ clinic_open_time: "08:00", clinic_close_time: null })
+  })
+
+  it("drop seconds some browsers add to time inputs", () => {
+    const s = settings()
+    const draft = draftFrom(s)
+    draft.openTime = "07:00:00"
+    expect(buildSettingsUpdate(s, draft)).toEqual({})
   })
 })

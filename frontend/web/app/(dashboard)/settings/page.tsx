@@ -162,7 +162,7 @@ function SystemConfiguration() {
       <div className="mb-6">
         <h1 className="font-display text-3xl leading-tight text-[#1a0808]">System Configuration</h1>
         <p className="mt-1 text-sm font-medium text-[#7a5252]">
-          Clinic name, reminder timing and SMS text. Every change is recorded in the Audit Log.
+          Clinic name, clinic hours, reminder timing and SMS text. Every change is recorded in the Audit Log.
         </p>
       </div>
 
@@ -177,7 +177,7 @@ function SystemConfiguration() {
       ) : (
         <>
           <Card>
-            <SectionHeader title="Clinic & reminders" />
+            <SectionHeader title="Clinic, hours & reminders" />
             <div className="grid grid-cols-1 gap-5 p-5 md:grid-cols-3">
               <div>
                 <label htmlFor="bhc-name" className="mb-1 block text-sm font-medium text-[#3d2222]">Clinic name</label>
@@ -200,6 +200,21 @@ function SystemConfiguration() {
                   onChange={(e) => setField({ leadDays: e.target.value })}
                   className={`${inputCls} ${problems.leadDays ? "border-red-300" : "border-[#e5d4cc]"}`} />
                 {problems.leadDays ? <p className="mt-1 text-xs text-red-600">{problems.leadDays[0]}</p> : <FieldMeta setting={settings.sms_immunization_lead_days} />}
+              </div>
+              <div>
+                <label htmlFor="clinic-open" className="mb-1 block text-sm font-medium text-[#3d2222]">Clinic opens</label>
+                <input id="clinic-open" type="time" value={draft.openTime}
+                  onChange={(e) => setField({ openTime: e.target.value })}
+                  className={`${inputCls} ${problems.openTime ? "border-red-300" : "border-[#e5d4cc]"}`} />
+                {problems.openTime ? <p className="mt-1 text-xs text-red-600">{problems.openTime[0]}</p> : <FieldMeta setting={settings.clinic_open_time} />}
+              </div>
+              <div>
+                <label htmlFor="clinic-close" className="mb-1 block text-sm font-medium text-[#3d2222]">Clinic closes</label>
+                <input id="clinic-close" type="time" value={draft.closeTime}
+                  onChange={(e) => setField({ closeTime: e.target.value })}
+                  className={`${inputCls} ${problems.closeTime ? "border-red-300" : "border-[#e5d4cc]"}`} />
+                {problems.closeTime ? <p className="mt-1 text-xs text-red-600">{problems.closeTime[0]}</p> : <FieldMeta setting={settings.clinic_close_time} />}
+                <p className="mt-1 text-[11px] text-[#9b6e6e]">Appointments can only be booked from opening time until closing time (Manila time).</p>
               </div>
             </div>
           </Card>
