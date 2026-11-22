@@ -11,7 +11,8 @@ SECURITY NOTE: This table MUST be append-only.
 
 ``action`` standard values (extend as needed):
   CREATE, UPDATE, DELETE, VIEW_PHI, EXPORT_REPORT, LOGIN, LOGOUT, LOGIN_FAILED,
-  CARD_ISSUE, CARD_VERIFY, CARD_REVOKE, OTP_SENT, OTP_VERIFIED, OTP_FAILED
+  CARD_ISSUE, CARD_VERIFY, CARD_REVOKE, OTP_SENT, OTP_VERIFIED, OTP_FAILED,
+  DEACTIVATE, REACTIVATE, ARCHIVE, UNARCHIVE
 
 ``entity_type`` examples: "patient", "user", "health_card", "medical_history",
   "visit", "appointment", "immunization"

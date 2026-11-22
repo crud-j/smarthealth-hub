@@ -67,6 +67,23 @@ def _build_full_name(first: str, middle: str | None, last: str) -> str:
     return " ".join(parts)
 
 
+def _patient_can_be_texted() -> tuple[Any, ...]:
+    """WHERE conditions every reminder SMS job applies to the patient.
+
+    Has a number, did not reply STOP, and is still in daily work: not
+    deactivated (is_active) and not archived. Deactivated and archived
+    patients used to keep getting reminders.
+    """
+    from app.models.patient import Patient
+
+    return (
+        Patient.mobile_number.isnot(None),
+        Patient.sms_opt_out.is_(False),
+        Patient.is_active.is_(True),
+        Patient.archived_at.is_(None),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Async scheduler logic (called via asyncio.run inside Celery tasks)
 # ---------------------------------------------------------------------------
@@ -112,8 +129,7 @@ async def _dispatch_appointment_reminders_async() -> int:
                 Appointment.scheduled_at >= window_start,
                 Appointment.scheduled_at <= window_end,
                 Appointment.status.in_(["pending", "confirmed"]),
-                Patient.mobile_number.isnot(None),
-                Patient.sms_opt_out.is_(False),
+                *_patient_can_be_texted(),
                 not_(exists(existing_sms_subq)),
             )
         )
@@ -237,8 +253,7 @@ async def _dispatch_immunization_reminders_async(today: date | None = None) -> i
                 Immunization.next_due_date >= today,
                 Immunization.next_due_date <= last_due_date,
                 Immunization.status == "scheduled",
-                Patient.mobile_number.isnot(None),
-                Patient.sms_opt_out.is_(False),
+                *_patient_can_be_texted(),
                 not_(exists(already_reminded_subq)),
             )
         )
@@ -401,8 +416,7 @@ async def _mark_missed_appointments_async() -> int:
                 .where(
                     Appointment.status == "missed",
                     func.date(Appointment.scheduled_at) == today,
-                    Patient.mobile_number.isnot(None),
-                    Patient.sms_opt_out.is_(False),
+                    *_patient_can_be_texted(),
                 )
             )
 

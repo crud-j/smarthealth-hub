@@ -46,6 +46,10 @@ PHI_VIEW_BURST_THRESHOLD = 50
 # "PHI_VIEW" until 2026-11; those stored rows still count.
 _PHI_VIEW_ACTIONS = ("VIEW_PHI", "PHI_VIEW")
 
+# Patient deactivations: DEACTIVATE since the Inactive Patients change; older
+# rows say DELETE (the action was always a deactivation, never a deletion).
+_DEACTIVATION_ACTIONS = ("DEACTIVATE", "DELETE")
+
 
 class AnomalyEvent(BaseModel):
     """Describes a single detected audit anomaly."""
@@ -122,7 +126,7 @@ async def check_after_hours_deletes(db: AsyncSession) -> list[AnomalyEvent]:
         (
             await db.execute(
                 sa.select(AuditLog).where(
-                    AuditLog.action == "DELETE",
+                    AuditLog.action.in_(_DEACTIVATION_ACTIONS),
                     AuditLog.entity_type == "patient",
                     AuditLog.created_at >= cutoff,
                     sa.or_(
@@ -156,7 +160,7 @@ async def check_after_hours_deletes(db: AsyncSession) -> list[AnomalyEvent]:
         AnomalyEvent(
             check_name="after_hours_delete",
             detail=(
-                f"DELETE on patient record (entity_id={row.entity_id}) "
+                f"Patient record deactivated (entity_id={row.entity_id}) "
                 f"by user {row.user_id} at "
                 f"{(row.created_at.replace(tzinfo=UTC) + _PHT_OFFSET).strftime('%Y-%m-%d %H:%M')} PHT"
             ),

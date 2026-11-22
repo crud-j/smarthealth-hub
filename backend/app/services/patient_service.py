@@ -9,7 +9,9 @@ Responsibilities
                    is_senior, write CREATE audit log
 - update_patient   Partial-update demographics; re-compute is_senior when
                    birth_date changes; write UPDATE audit log
-- deactivate_patient  Soft-delete (is_active=False); write DELETE audit log
+- deactivate_patient  Switch off (is_active=False, when/who/why kept); DEACTIVATE audit log
+- reactivate_patient  Switch back on; REACTIVATE audit log
+- list_inactive_patients  Paginated deactivated patients
 - verify_patient   Card-scan identity summary; write VIEW_PHI audit log
 
 All audit logs are written within the same database transaction as the
@@ -26,6 +28,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from collections.abc import Iterable
 from datetime import UTC, date, datetime
 from typing import Any
 
@@ -35,6 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import NotFoundError
 from app.core.logging import get_logger
 from app.models.patient import Patient
+from app.models.user import User
 from app.schemas.patient import (
     PatientCreate,
     PatientUpdate,
@@ -526,35 +530,151 @@ async def deactivate_patient(
     db: AsyncSession,
     patient_id: uuid.UUID,
     by_id: uuid.UUID,
+    reason: str | None = None,
     ip_address: str | None = None,
-) -> None:
+) -> Patient:
     """
-    Soft-delete a patient by setting ``is_active=False``.
+    Deactivate a patient: switch the record off for daily work (``is_active=False``).
 
-    Data is never hard-deleted to preserve audit trail integrity.
+    Nothing is deleted. The patient leaves the patient list and search, gets no
+    SMS reminders and cannot be booked, but every record stays and the patient
+    can be switched back on with :func:`reactivate_patient`. When, who and why
+    are kept on the row and in a DEACTIVATE audit entry.
+
+    ``reason`` is required by the API; it is only optional here for the older
+    ``DELETE /patients/{id}`` route, which sends none.
 
     Raises:
         NotFoundError: If the patient does not exist.
+        ValueError:    If the patient is already inactive.
     """
     patient = await get_patient(db, patient_id)
+    if not patient.is_active:
+        raise ValueError(f"Patient {patient.patient_code} is already inactive.")
+
+    now = datetime.now(UTC)
+    clean_reason = reason.strip() if reason and reason.strip() else None
     patient.is_active = False
-    patient.updated_at = datetime.utcnow()  # type: ignore[assignment]
+    patient.deactivated_at = now
+    patient.deactivated_by = by_id
+    patient.deactivation_reason = clean_reason
+    patient.updated_at = now  # type: ignore[assignment]
 
     await write_audit_log(
         db=db,
         user_id=by_id,
-        action="DELETE",
+        action="DEACTIVATE",
         entity_type="patient",
         entity_id=patient_id,
-        metadata={"patient_code": patient.patient_code},
+        metadata={"patient_code": patient.patient_code, "reason": clean_reason},
         ip_address=ip_address,
     )
 
     await db.commit()
+    await db.refresh(patient)
+    await _invalidate_analytics_cache()
     logger.info(
         "Patient deactivated",
         extra={"patient_id": str(patient_id), "by": str(by_id)},
     )
+    return patient
+
+
+async def reactivate_patient(
+    db: AsyncSession,
+    patient_id: uuid.UUID,
+    by_id: uuid.UUID,
+    ip_address: str | None = None,
+) -> Patient:
+    """
+    Switch a deactivated patient back on (``is_active=True``).
+
+    Clears the deactivation details on the row; the DEACTIVATE and REACTIVATE
+    audit entries keep the history (including the old reason).
+
+    Raises:
+        NotFoundError: If the patient does not exist.
+        ValueError:    If the patient is already active.
+    """
+    patient = await get_patient(db, patient_id)
+    if patient.is_active:
+        raise ValueError(f"Patient {patient.patient_code} is already active.")
+
+    previous_reason = patient.deactivation_reason
+    now = datetime.now(UTC)
+    patient.is_active = True
+    patient.deactivated_at = None
+    patient.deactivated_by = None
+    patient.deactivation_reason = None
+    patient.updated_at = now  # type: ignore[assignment]
+
+    await write_audit_log(
+        db=db,
+        user_id=by_id,
+        action="REACTIVATE",
+        entity_type="patient",
+        entity_id=patient_id,
+        metadata={"patient_code": patient.patient_code, "previous_reason": previous_reason},
+        ip_address=ip_address,
+    )
+
+    await db.commit()
+    await db.refresh(patient)
+    await _invalidate_analytics_cache()
+    logger.info(
+        "Patient reactivated",
+        extra={"patient_id": str(patient_id), "by": str(by_id)},
+    )
+    return patient
+
+
+async def list_inactive_patients(
+    db: AsyncSession,
+    *,
+    q: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> tuple[list[Patient], int]:
+    """
+    Return a page of deactivated patients (``is_active=False``), newest first.
+
+    Patients deactivated before the date was recorded come last. Text search
+    matches the same fields as :func:`list_patients`.
+    """
+    base_query = sa.select(Patient).where(Patient.is_active.is_(False))
+
+    if q:
+        term = f"%{q}%"
+        base_query = base_query.where(
+            Patient.last_name.ilike(term)
+            | Patient.first_name.ilike(term)
+            | Patient.patient_code.ilike(term)
+            | Patient.mobile_number.ilike(term)
+        )
+
+    count_result = await db.execute(sa.select(sa.func.count()).select_from(base_query.subquery()))
+    total: int = count_result.scalar_one()
+
+    rows = await db.execute(
+        base_query.order_by(
+            Patient.deactivated_at.desc().nulls_last(),
+            Patient.updated_at.desc(),
+        )
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    return list(rows.scalars().all()), total
+
+
+async def user_names(
+    db: AsyncSession, user_ids: Iterable[uuid.UUID | None]
+) -> dict[uuid.UUID, str]:
+    """Staff full names by id (missing / deleted accounts are left out)."""
+    ids = {uid for uid in user_ids if uid is not None}
+    if not ids:
+        return {}
+    rows = await db.execute(sa.select(User.id, User.full_name).where(User.id.in_(ids)))
+    return {uid: name for uid, name in rows.all()}
 
 
 async def archive_patient(

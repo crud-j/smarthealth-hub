@@ -499,6 +499,12 @@ class PatientResponse(BaseSchema):
     archived_at: datetime | None = None
     archived_by: str | None = None
     archive_reason: str | None = None
+    # Deactivation fields — None while the patient is active (and for
+    # patients deactivated before these were recorded)
+    deactivated_at: datetime | None = None
+    deactivated_by: str | None = None
+    deactivated_by_name: str | None = None
+    deactivation_reason: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -723,6 +729,62 @@ class PatientArchiveRequest(BaseSchema):
         max_length=1000,
         description="Reason for archiving this patient record (required)",
     )
+
+
+class PatientDeactivateRequest(BaseSchema):
+    """Body for POST /patients/{id}/deactivate."""
+
+    reason: str = Field(
+        ...,
+        min_length=5,
+        max_length=1000,
+        description="Why this patient is being deactivated (required)",
+    )
+
+
+class InactivePatientSummary(BaseSchema):
+    """One row in the Inactive Patients list (deactivated, is_active = False)."""
+
+    id: str
+    patient_code: str
+    first_name: str
+    middle_name: str | None
+    last_name: str
+    birth_date: date
+    sex: str
+    mobile_number: str | None
+    is_senior: bool
+    is_pwd: bool
+    archived_at: datetime | None = None
+
+    # NULL for patients deactivated before these were recorded
+    deactivated_at: datetime | None = None
+    deactivated_by_name: str | None = None
+    deactivation_reason: str | None = None
+
+    # Computed
+    age: int = Field(default=0)
+    full_name: str = Field(default="")
+
+    @model_validator(mode="after")
+    def compute_derived_fields(self) -> InactivePatientSummary:
+        today = date.today()
+        bd = self.birth_date
+        years = today.year - bd.year - ((today.month, today.day) < (bd.month, bd.day))
+        self.age = max(0, years)
+        self.full_name = " ".join(
+            part for part in (self.first_name, self.middle_name, self.last_name) if part
+        )
+        return self
+
+
+class PaginatedInactivePatients(BaseSchema):
+    """Paginated list of inactive (deactivated) patients."""
+
+    items: list[InactivePatientSummary]
+    total: int
+    page: int
+    page_size: int
 
 
 class ArchivedPatientSummary(BaseSchema):

@@ -74,8 +74,12 @@ async def resend_problem(
         return "This SMS was already resent."
 
     patient = await db.get(Patient, log.patient_id) if log.patient_id else None
-    if patient is None or not patient.is_active:
-        return "The patient record is missing or archived."
+    if patient is None:
+        return "The patient record is missing."
+    if not patient.is_active:
+        return "The patient is inactive. Reactivate them on the Inactive Patients page first."
+    if patient.archived_at is not None:
+        return "The patient is archived. Restore them from the Patient Archive first."
     if not patient.mobile_number:
         return "The patient has no mobile number. Add one on the patient record first."
     if patient.sms_opt_out:
