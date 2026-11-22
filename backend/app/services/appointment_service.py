@@ -351,8 +351,11 @@ async def list_appointments(
         db:         Active async session.
         patient_id: Filter by patient UUID.
         status:     Filter by appointment status string.
-        from_date:  Lower bound on scheduled_at (date, inclusive).
-        to_date:    Upper bound on scheduled_at (date, inclusive, end-of-day).
+        from_date:  First Manila calendar day to include (inclusive).
+        to_date:    Last Manila calendar day to include (inclusive).
+                    Both compare the Manila date of scheduled_at: the database
+                    runs on UTC, where a 7:30 AM Manila booking falls on the
+                    day before.
         page:       1-based page number.
         page_size:  Records per page (max 100 enforced here).
         sort:       Optional sort key. ``"scheduled_at"`` orders soonest-first
@@ -374,9 +377,9 @@ async def list_appointments(
     if status is not None:
         base_query = base_query.where(Appointment.status == status)
     if from_date is not None:
-        base_query = base_query.where(func.date(Appointment.scheduled_at) >= from_date)
+        base_query = base_query.where(_manila_day(Appointment.scheduled_at) >= from_date)
     if to_date is not None:
-        base_query = base_query.where(func.date(Appointment.scheduled_at) <= to_date)
+        base_query = base_query.where(_manila_day(Appointment.scheduled_at) <= to_date)
 
     # Count total matching rows.
     count_result = await db.execute(select(func.count()).select_from(base_query.subquery()))

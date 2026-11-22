@@ -8,9 +8,10 @@ import {
 import type { LucideIcon } from "lucide-react";
 import type { PhysicianDashboardData, WaitingVisit } from "@/types/dashboard";
 import {
-  Avatar, Chip, DashboardHeader, EmptyRow, Panel, RowList, StatCard, StatGrid, StatusBadge,
+  Avatar, Chip, DashboardHeader, EmptyRow, Panel, RowList, StatCard, StatGrid,
   TwoColumns, formatTime, humanize, text,
 } from "./shared";
+import { TodayAppointmentsPanel } from "./TodayAppointments";
 
 /** Vital signs the BHW recorded, as icon chips. Never clinical notes. */
 function vitalChips(v: WaitingVisit): { icon: LucideIcon; label: string; alert: boolean }[] {
@@ -106,26 +107,13 @@ export default function PhysicianDashboard({ data }: { data: PhysicianDashboardD
       </Panel>
 
       <TwoColumns>
-        <Panel title="Today's appointments" icon={CalendarCheck} tone="sky" count={data.appointments_today_count} href="/appointments" index={6}>
-          <RowList>
-            {data.appointments_today.length === 0 ? (
-              <EmptyRow icon={CalendarCheck}>No appointments today.</EmptyRow>
-            ) : (
-              data.appointments_today.map((a) => (
-                <li key={a.id}>
-                  <Link href={`/appointments/${a.id}`} className="flex items-center gap-4 px-5 py-3 transition-colors hover:bg-rose-50/40 focus-visible:bg-rose-50/40 focus-visible:outline-none">
-                    <span className="w-20 shrink-0 whitespace-nowrap font-display text-lg text-rose-700">{formatTime(a.scheduled_at)}</span>
-                    <span className="min-w-0 flex-1">
-                      <span className={`block truncate text-sm font-semibold ${text.ink}`}>{a.patient.full_name}</span>
-                      <span className={`block text-xs ${text.muted}`}>{humanize(a.appointment_type)}</span>
-                    </span>
-                    <StatusBadge status={a.status} />
-                  </Link>
-                </li>
-              ))
-            )}
-          </RowList>
-        </Panel>
+        <TodayAppointmentsPanel
+          rows={data.appointments_today}
+          count={data.appointments_today_count}
+          today={data.today}
+          role={data.role}
+          index={6}
+        />
 
         <Panel title="Top conditions this month" icon={TrendingUp} tone="amber" href="/analytics/illness-trends" linkLabel="Trends" index={7}>
           {data.top_conditions_month.length === 0 ? (

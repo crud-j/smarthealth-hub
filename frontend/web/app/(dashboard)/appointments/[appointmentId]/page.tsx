@@ -4,7 +4,9 @@ import { use, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAppointment, useUpdateAppointment, useCancelAppointment } from "@/hooks/useAppointments";
+import { useCurrentUser } from "@/hooks/useAuth";
 import { apiFetch, ApiError } from "@/lib/api-client";
+import { canStartVisit, startVisitHref } from "@/lib/start-visit";
 import { toast } from "@/lib/toast";
 import type { AppointmentStatus } from "@/types/appointment";
 import { IntakeDetailsPanel } from "@/components/intake/IntakeDetailsPanel";
@@ -81,6 +83,7 @@ export default function AppointmentDetailPage({ params }: { params: Promise<{ ap
   const { data: appt, loading, error, refetch } = useAppointment(appointmentId);
   const { updateAppointment, loading: updating } = useUpdateAppointment(appointmentId);
   const { cancelAppointment, loading: cancelling } = useCancelAppointment();
+  const { user: currentUser } = useCurrentUser();
   const isBusy = updating || cancelling;
 
   const [sendingIntakeLink, setSendingIntakeLink] = useState(false);
@@ -183,7 +186,8 @@ export default function AppointmentDetailPage({ params }: { params: Promise<{ ap
   const showStatusActions = appt.status !== "cancelled" && appt.status !== "completed";
   const showReminder = appt.status === "pending" || appt.status === "confirmed";
   const showIntake = !appt.intakeCompleted && isUpcoming(appt.scheduledAt);
-  const hasSidebarActions = showStatusActions || showReminder || showIntake;
+  const showStartVisit = Boolean(appt.patientId) && canStartVisit(currentUser?.role, appt);
+  const hasSidebarActions = showStartVisit || showStatusActions || showReminder || showIntake;
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -290,6 +294,22 @@ export default function AppointmentDetailPage({ params }: { params: Promise<{ ap
             <Panel>
               <PanelHeader title="Actions" />
               <div className="space-y-5 p-5">
+                {/* Start visit: Add Visit, filled in from this appointment */}
+                {showStartVisit && (
+                  <div className={showStatusActions ? "border-b border-[#f0e4dd] pb-5" : ""}>
+                    <Link
+                      href={startVisitHref(appt.patientId)}
+                      className="flex min-h-[44px] w-full items-center justify-center rounded-lg px-4 py-2 text-sm font-bold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#b5343e]"
+                      style={{ background: "linear-gradient(135deg, #b5343e, #c94060)" }}
+                    >
+                      Start visit
+                    </Link>
+                    <p className="mt-2 text-xs text-[#9b6e6e]">
+                      Opens Add Visit, filled in from this appointment. Saving the visit marks the appointment completed.
+                    </p>
+                  </div>
+                )}
+
                 {/* Status actions */}
                 {showStatusActions && (
                   <div className="flex flex-col gap-3">

@@ -7,8 +7,9 @@ renders it), so the rules live here next to the queries:
   physician   — visits logged today with no diagnosis yet (the waiting
                 queue), consultations done, follow-ups due, today's
                 appointments, top conditions this month
-  bhw         — immunizations due/overdue (with sitio/purok), missed
-                appointments, today's SMS, failed reminders, pre-visit
+  bhw         — today's appointments, immunizations due/overdue (with
+                sitio/purok), missed appointments, today's SMS, failed
+                reminders, pre-visit
                 drafts, own visits this week, patients without a card,
                 return rate after SMS reminders (last 30 days)
   admin       — system status, registrations to review, staff accounts,
@@ -460,7 +461,9 @@ async def build_bhw(db: AsyncSession, user: User, clock: _Clock) -> BhwDashboard
     without_card = await _count(
         db, select(func.count()).select_from(Patient).where(_active_patient(), ~has_active_card)
     )
-    appointments_today_count, _rows = await _appointments_on(db, clock.day_start, clock.day_end, 0)
+    appointments_today_count, appointments_today = await _appointments_on(
+        db, clock.day_start, clock.day_end, LIST_LIMIT
+    )
 
     # Resend state per failed SMS (same rules as POST /sms/logs/{id}/resend).
     already_resent = await sms_resend_service.resent_ids(db, [log.id for log, _p in failed_rows])
@@ -501,6 +504,7 @@ async def build_bhw(db: AsyncSession, user: User, clock: _Clock) -> BhwDashboard
         sms_today_failed=sms_failed,
         failed_sms=failed_sms,
         appointments_today_count=appointments_today_count,
+        appointments_today=appointments_today,
         previsit_forms_waiting=await _previsit_drafts_waiting(db),
         visits_logged_by_me_week=visits_mine,
         patients_without_active_card=without_card,
