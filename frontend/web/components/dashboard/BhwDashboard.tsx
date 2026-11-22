@@ -13,6 +13,7 @@ import {
   TwoColumns, dueLabel, formatDay, formatTime, humanize, rise, text,
 } from "./shared";
 import { ReminderEffectPanel } from "./ReminderEffect";
+import { TodayAppointmentsPanel } from "./TodayAppointments";
 
 const NO_SITIO = "No sitio/purok recorded";
 
@@ -142,6 +143,17 @@ export default function BhwDashboard({ data }: { data: BhwDashboardData }) {
         />
         <StatCard index={3} label="Today's appointments" value={data.appointments_today_count} sub="on the schedule" icon={CalendarCheck} tone="sky" href="/appointments" />
       </StatGrid>
+
+      {data.appointments_today && (
+        <TodayAppointmentsPanel
+          rows={data.appointments_today}
+          count={data.appointments_today_count}
+          today={data.today}
+          role={data.role}
+          index={4}
+          className="mb-6"
+        />
+      )}
 
       <Panel title="Immunizations due, by sitio/purok" icon={Syringe} count={data.immunizations_due.length} href="/immunizations" className="mb-6" index={5}>
         {groups.length === 0 ? (

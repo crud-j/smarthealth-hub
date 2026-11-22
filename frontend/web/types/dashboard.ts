@@ -94,6 +94,8 @@ export interface BhwDashboardData extends DashboardBase {
   sms_today_failed: number;
   failed_sms: FailedSmsRow[];
   appointments_today_count: number;
+  /** Today's appointments, earliest first (absent on a backend from before "Start visit"). */
+  appointments_today?: AppointmentRow[];
   previsit_forms_waiting: number;
   visits_logged_by_me_week: number;
   patients_without_active_card: number;

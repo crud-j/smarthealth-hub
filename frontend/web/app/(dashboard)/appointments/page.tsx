@@ -3,6 +3,9 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useAppointmentList, useCancelAppointment } from "@/hooks/useAppointments";
+import { useCurrentUser } from "@/hooks/useAuth";
+import { manilaToday } from "@/lib/manila-time";
+import { canStartVisit, startVisitHref } from "@/lib/start-visit";
 import { toast } from "@/lib/toast";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import type { AppointmentStatus, AppointmentListParams } from "@/types/appointment";
@@ -105,12 +108,22 @@ export default function AppointmentsPage() {
 
   const { data, loading, error, refetch } = useAppointmentList(effectiveFilters);
   const { cancelAppointment, loading: cancelling } = useCancelAppointment();
+  const { user: currentUser } = useCurrentUser();
+  const today = manilaToday();
+  const showingToday = fromDate === today && toDate === today;
 
   useEffect(() => {
     if (error) { toast.error(`Failed to load appointments: ${error.message}`); }
   }, [error]);
 
   function applyFilters() { setFilters((f) => ({ ...f, page: 1 })); }
+
+  /** Today's appointments (Manila date), whatever their status. */
+  function showToday() {
+    setFromDate(today);
+    setToDate(today);
+    setFilters((f) => ({ ...f, page: 1 }));
+  }
 
   function handleCancel(id: string) {
     setCancelTargetId(id);
@@ -220,6 +233,18 @@ export default function AppointmentsPage() {
           >
             Apply
           </button>
+          <button
+            type="button"
+            onClick={showToday}
+            aria-pressed={showingToday}
+            className={`rounded-lg border px-4 py-2 text-sm font-semibold shadow-sm transition-all duration-150 active:scale-[0.96] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-600 ${
+              showingToday
+                ? "border-rose-600 bg-rose-50 text-rose-700"
+                : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            Today
+          </button>
         </div>
       </section>
 
@@ -266,6 +291,15 @@ export default function AppointmentsPage() {
                   </td>
                   <td className="px-4 py-3.5">
                     <div className="flex items-center gap-4">
+                      {canStartVisit(currentUser?.role, appt, today) && (
+                        <Link
+                          href={startVisitHref(appt.patientId)}
+                          className="whitespace-nowrap rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-rose-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-600"
+                          aria-label={`Start visit for ${appt.patientName ?? "patient"}`}
+                        >
+                          Start visit
+                        </Link>
+                      )}
                       <Link
                         href={`/appointments/${appt.id}`}
                         className="text-sm font-medium text-rose-600 hover:text-rose-500 transition-colors focus-visible:outline-none focus-visible:underline"
