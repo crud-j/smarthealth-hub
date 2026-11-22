@@ -28,14 +28,24 @@ from __future__ import annotations
 import re
 import uuid
 from datetime import UTC, date, datetime
+from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError
 from app.core.logging import get_logger
+from app.models.appointment import Appointment
+from app.models.intake_token import PatientIntakeToken
 from app.models.visit import Visit
-from app.schemas.visit import VisitCreate, VisitResponse, VisitSummary, VisitUpdate
+from app.schemas.visit import (
+    VisitCreate,
+    VisitPrefill,
+    VisitResponse,
+    VisitSummary,
+    VisitUpdate,
+)
 from app.services import appointment_service, patient_service
 from app.services.analytics_service import _invalidate_analytics_cache
 from app.services.audit_service import write_audit_log
@@ -155,6 +165,156 @@ async def list_visits(
         )
         for v in visits
     ]
+
+
+# ---------------------------------------------------------------------------
+# Add Visit suggestions (today's appointment + its intake form)
+# ---------------------------------------------------------------------------
+
+_MANILA = ZoneInfo("Asia/Manila")
+
+# Appointment type -> Add Visit type. Unknown types leave the form's default.
+_VISIT_TYPE_FOR_APPOINTMENT: dict[str, str] = {
+    "checkup": "consultation",
+    "general_checkup": "consultation",
+    "consultation": "consultation",
+    "dental": "consultation",
+    "prenatal": "prenatal_checkup",
+    "vaccination": "immunization_admin",
+    "immunization": "immunization_admin",
+    "follow_up": "follow_up",
+}
+
+# Intake answers the patient typed in their own words (kept as written).
+_INTAKE_TEXT_KEYS = ("chief_complaint", "chief_dental_complaint", "concern", "reason_for_visit")
+_INTAKE_DURATION_KEYS = ("duration_of_illness", "duration_of_pain")
+
+
+def _clean(value: object) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return value.strip().rstrip(".")
+    return None
+
+
+def intake_chief_complaint(
+    visit_purpose: str | None,
+    purpose_details: dict[str, Any] | None,
+    visit_purpose_other: str | None = None,
+) -> str | None:
+    """
+    A chief-complaint draft from the patient's intake answers, or ``None``.
+
+    Reason for the visit (or the patient's own words for "Others"), their
+    free-text complaint, ticked symptoms (``has_*`` answers), how long, and
+    current medicines, e.g. "Hypertension / BP. Reports: dizziness, headache.
+    Medications: Amlodipine 5 mg."
+    """
+    details = purpose_details or {}
+    parts: list[str] = []
+
+    purpose = _clean(visit_purpose)
+    if purpose == "Others":
+        purpose = _clean(visit_purpose_other)
+    if purpose:
+        parts.append(purpose)
+
+    parts.extend(text for key in _INTAKE_TEXT_KEYS if (text := _clean(details.get(key))))
+
+    symptoms = sorted(
+        key.removeprefix("has_").replace("_", " ")
+        for key, value in details.items()
+        if key.startswith("has_") and value is True
+    )
+    if symptoms:
+        parts.append("Reports: " + ", ".join(symptoms))
+
+    durations = [text for key in _INTAKE_DURATION_KEYS if (text := _clean(details.get(key)))]
+    if durations:
+        parts.append(f"Duration: {durations[0]}")
+
+    medications = _clean(details.get("current_medications"))
+    if medications:
+        parts.append(f"Medications: {medications}")
+
+    return ". ".join(parts) + "." if parts else None
+
+
+async def visit_prefill(
+    db: AsyncSession,
+    patient_id: uuid.UUID,
+    user_id: uuid.UUID,
+    *,
+    today: date | None = None,
+    ip_address: str | None = None,
+) -> VisitPrefill:
+    """
+    Suggest the Add Visit type and chief complaint for ``patient_id``.
+
+    Uses the patient's earliest appointment today (Manila day) that a visit
+    would complete (pending / confirmed / missed), and the intake form the
+    patient submitted for it. Nothing is saved. Reading the intake answers
+    writes a VIEW_PHI audit entry (``entity_type="visit_prefill"``).
+
+    Raises:
+        NotFoundError: If the patient does not exist.
+    """
+    await patient_service.get_patient(db, patient_id)
+    day = today or datetime.now(tz=_MANILA).date()
+
+    appt = (
+        await db.execute(
+            select(Appointment)
+            .where(
+                Appointment.patient_id == patient_id,
+                Appointment.status.in_(appointment_service.VISIT_COMPLETES_STATUSES),
+                func.date(func.timezone("Asia/Manila", Appointment.scheduled_at)) == day,
+            )
+            .order_by(Appointment.scheduled_at.asc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if appt is None:
+        return VisitPrefill()
+
+    intake = (
+        await db.execute(
+            select(PatientIntakeToken)
+            .where(
+                PatientIntakeToken.appointment_id == appt.id,
+                PatientIntakeToken.draft_data.is_not(None),
+            )
+            .order_by(PatientIntakeToken.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    chief_complaint: str | None = None
+    if intake is not None:
+        draft: dict[str, Any] = intake.draft_data or {}
+        chief_complaint = intake_chief_complaint(
+            intake.visit_purpose or draft.get("visit_purpose"),
+            intake.purpose_details,
+            draft.get("visit_purpose_other"),
+        )
+        await write_audit_log(
+            db=db,
+            user_id=user_id,
+            action="VIEW_PHI",
+            entity_type="visit_prefill",
+            entity_id=patient_id,
+            metadata={"appointment_id": str(appt.id)},
+            ip_address=ip_address,
+        )
+        await db.commit()
+
+    return VisitPrefill(
+        appointment_id=str(appt.id),
+        appointment_type=appt.appointment_type,
+        scheduled_at=appt.scheduled_at,
+        visit_type=_VISIT_TYPE_FOR_APPOINTMENT.get(appt.appointment_type),
+        chief_complaint=chief_complaint,
+        intake_visit_purpose=intake.visit_purpose if intake is not None else None,
+    )
 
 
 async def create_visit(

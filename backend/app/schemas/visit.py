@@ -260,3 +260,23 @@ class VisitSummary(BaseSchema):
     temperature: float | None
     pulse_rate: int | None
     created_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# VisitPrefill — suggestions for the Add Visit form
+# ---------------------------------------------------------------------------
+
+
+class VisitPrefill(BaseSchema):
+    """
+    Suggested Add Visit values from the patient's appointment today (Manila
+    day) and the pre-visit intake form linked to it. All fields are null when
+    there is no such appointment. Nothing is saved; staff check and adjust.
+    """
+
+    appointment_id: str | None = None
+    appointment_type: str | None = None
+    scheduled_at: datetime | None = None
+    visit_type: str | None = None
+    chief_complaint: str | None = None
+    intake_visit_purpose: str | None = None
