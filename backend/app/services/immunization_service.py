@@ -31,6 +31,7 @@ from app.core.exceptions import NotFoundError
 from app.core.logging import get_logger
 from app.models.immunization import Immunization
 from app.schemas.immunization import ImmunizationCreate, ImmunizationUpdate
+from app.services import patient_service
 from app.services.audit_service import write_audit_log
 
 logger = get_logger(__name__)
@@ -122,7 +123,13 @@ async def create_immunization(
 
     Returns:
         The newly created Immunization ORM instance.
+
+    Raises:
+        NotFoundError: If the patient does not exist.
+        ConflictError: If the patient is deactivated or archived.
     """
+    await patient_service.require_patient_in_use(db, patient_id)
+
     record = Immunization(
         patient_id=patient_id,
         vaccine_name=data.vaccine_name,

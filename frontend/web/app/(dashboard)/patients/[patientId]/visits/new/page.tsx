@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useCurrentUser } from "@/hooks/useAuth";
 import { useCreateVisit, usePatient } from "@/hooks/usePatients";
 import { canLogVisit } from "@/lib/permissions";
+import { patientNotInUseReason } from "@/lib/patient-status";
 import { toast } from "@/lib/toast";
 import { AllergyAlert } from "@/components/ui/AllergyAlert";
 import type { VisitCreatePayload } from "@/types/patient";
@@ -106,6 +107,23 @@ export default function NewVisitPage({
         <p className="mt-1 text-sm text-[#7a5252]">
           Visits contain clinical information, so your role can view the visit list but not add to it.
         </p>
+        <Link
+          href={`/patients/${patientId}`}
+          className="mt-3 inline-block text-sm font-medium text-[#b5343e] hover:underline"
+        >
+          Back to patient profile
+        </Link>
+      </div>
+    );
+  }
+
+  const notInUse = patientNotInUseReason(patient);
+  if (notInUse) {
+    return (
+      <div role="alert" className="mx-auto max-w-3xl rounded-xl border border-amber-200 bg-amber-50 p-6">
+        <p className="font-bold text-amber-800">No new visits for {patient.fullName}</p>
+        <p className="mt-1 text-sm text-amber-800">{notInUse}</p>
+        <p className="mt-1 text-sm text-[#7a5252]">Their earlier visits are still on the patient record.</p>
         <Link
           href={`/patients/${patientId}`}
           className="mt-3 inline-block text-sm font-medium text-[#b5343e] hover:underline"

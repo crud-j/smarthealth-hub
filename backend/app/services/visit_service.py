@@ -36,7 +36,7 @@ from app.core.exceptions import NotFoundError
 from app.core.logging import get_logger
 from app.models.visit import Visit
 from app.schemas.visit import VisitCreate, VisitResponse, VisitSummary, VisitUpdate
-from app.services import appointment_service
+from app.services import appointment_service, patient_service
 from app.services.analytics_service import _invalidate_analytics_cache
 from app.services.audit_service import write_audit_log
 from app.utils.encryption import decrypt_text, encrypt_text
@@ -183,6 +183,9 @@ async def create_visit(
         recorded_by_id: UUID of the staff member recording the visit (from JWT).
         ip_address:     Client IP for audit log.
     """
+    # Deactivated / archived patients take no new visits (404 if missing).
+    await patient_service.require_patient_in_use(db, patient_id)
+
     case_no = data.case_no or await _next_case_no(db)
 
     vs = data.vital_signs

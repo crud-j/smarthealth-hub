@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
@@ -57,7 +57,14 @@ function PanelHeader({ title, subtitle }: { title: string; subtitle?: string }) 
 
 export default function NewAppointmentPage() {
   const router = useRouter();
-  const { createAppointment, loading } = useCreateAppointment();
+  const { createAppointment, loading, error: bookError } = useCreateAppointment();
+
+  useEffect(() => {
+    if (!bookError) return;
+    // 409 = the patient was deactivated or archived (e.g. in another tab):
+    // the server's message says how to switch them back on.
+    toast.error(bookError.status === 409 ? bookError.message : "Failed to book appointment. Please try again.");
+  }, [bookError]);
 
   const [patientQuery, setPatientQuery] = useState("");
   const [selectedPatientName, setSelectedPatientName] = useState("");
@@ -95,7 +102,6 @@ export default function NewAppointmentPage() {
       notes: data.notes?.trim() || undefined,
     });
     if (result) { toast.success("Appointment booked successfully!"); router.push("/appointments"); }
-    else { toast.error("Failed to book appointment. Please try again."); }
   };
 
   // Human-readable summary of what's currently selected (presentation only)

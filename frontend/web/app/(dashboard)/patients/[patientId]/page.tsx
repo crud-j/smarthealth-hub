@@ -11,6 +11,7 @@ import {
 } from "@/hooks/usePatients";
 import { useCurrentUser } from "@/hooks/useAuth";
 import { canLogVisit } from "@/lib/permissions";
+import { patientNotInUseReason } from "@/lib/patient-status";
 import { AllergyAlert } from "@/components/ui/AllergyAlert";
 import type { VisitSummary } from "@/types/patient";
 import React, { useEffect, useState } from "react";
@@ -286,6 +287,9 @@ export default function PatientProfilePage({ params }: { params: Promise<{ patie
     );
   }
 
+  // Deactivated / archived patients take no new visits (the API refuses too).
+  const notInUse = patientNotInUseReason(patient);
+
   return (
     <div className="mx-auto max-w-[960px]">
       {/* Page header */}
@@ -485,7 +489,11 @@ export default function PatientProfilePage({ params }: { params: Promise<{ patie
         <PanelHeader
           title="Visit History"
           action={
-            canAddVisit ? (
+            canAddVisit && notInUse ? (
+              <span className="text-xs font-semibold text-[#9b6e6e]" title={notInUse}>
+                New visits paused ({patient.isActive ? "archived" : "inactive"})
+              </span>
+            ) : canAddVisit ? (
               <Link
                 href={`/patients/${patientId}/visits/new`}
                 className="rounded-lg px-3 py-1.5 text-xs font-bold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e]"

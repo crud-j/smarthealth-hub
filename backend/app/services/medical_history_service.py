@@ -44,6 +44,7 @@ from app.schemas.medical_history import (
     MedicalHistoryListResponse,
     MedicalHistoryResponse,
 )
+from app.services import patient_service
 from app.services.audit_service import write_audit_log
 from app.utils.encryption import decrypt_text, encrypt_text
 
@@ -183,7 +184,13 @@ async def add_medical_history(
 
     Returns:
         MedicalHistoryResponse with the new entry's data and decrypted notes.
+
+    Raises:
+        NotFoundError: If the patient does not exist.
+        ConflictError: If the patient is deactivated or archived.
     """
+    await patient_service.require_patient_in_use(db, patient_id)
+
     # Encrypt notes before storage — None is preserved as None
     encrypted_notes: str | None = encrypt_text(data.notes) if data.notes else None
 

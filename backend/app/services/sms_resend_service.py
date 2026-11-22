@@ -36,6 +36,7 @@ from app.models.appointment import Appointment
 from app.models.immunization import Immunization
 from app.models.patient import Patient
 from app.models.sms_log import SmsLog
+from app.services import patient_service
 from app.services.audit_service import write_audit_log
 
 _CONFIRM_CODE = re.compile(r"CONFIRM \d{4}")
@@ -76,10 +77,9 @@ async def resend_problem(
     patient = await db.get(Patient, log.patient_id) if log.patient_id else None
     if patient is None:
         return "The patient record is missing."
-    if not patient.is_active:
-        return "The patient is inactive. Reactivate them on the Inactive Patients page first."
-    if patient.archived_at is not None:
-        return "The patient is archived. Restore them from the Patient Archive first."
+    removed = patient_service.not_in_use_reason(patient)
+    if removed is not None:
+        return removed
     if not patient.mobile_number:
         return "The patient has no mobile number. Add one on the patient record first."
     if patient.sms_opt_out:
