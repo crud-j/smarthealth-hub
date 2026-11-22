@@ -42,6 +42,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.engine import CursorResult
 
 from app.core.logging import get_logger
+from app.services.sms_templates import confirmation_suffix
 from app.services.system_settings_service import load_runtime_settings
 from app.workers.celery_app import celery_app
 from app.workers.monitoring_tasks import record_reminder_run
@@ -136,7 +137,7 @@ async def _dispatch_appointment_reminders_async() -> int:
 
             # Generate a 4-digit confirmation token for SMS reply-confirm flow.
             token = str(random.randint(1000, 9999))
-            confirm_suffix = f" CONFIRM {token} to confirm."  # 25 chars
+            confirm_suffix = confirmation_suffix(token, patient.preferred_language)
 
             # Ensure the final SMS body stays within 160 characters.
             # If the base message is too long, truncate it and add an ellipsis

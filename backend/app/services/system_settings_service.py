@@ -38,6 +38,7 @@ from app.schemas.system_config import (
 from app.services.audit_service import write_audit_log
 from app.services.sms_templates import (
     APPOINTMENT_TEMPLATE_LIMIT,
+    FIL_APPOINTMENT_TEMPLATE_LIMIT,
     MAX_TEMPLATE_LENGTH,
     SAMPLE_VALUES,
     TEMPLATE_DEFAULTS,
@@ -142,7 +143,13 @@ async def get_settings_view(db: AsyncSession) -> SystemSettingsResponse:
             placeholders=list(TEMPLATE_PLACEHOLDERS[kind]),
             required=list(TEMPLATE_REQUIRED[kind]),
             max_length=MAX_TEMPLATE_LENGTH,
-            send_limit=APPOINTMENT_TEMPLATE_LIMIT if kind == "appointment_reminder" else None,
+            send_limit=(
+                APPOINTMENT_TEMPLATE_LIMIT
+                if kind == "appointment_reminder" and lang == "en"
+                else FIL_APPOINTMENT_TEMPLATE_LIMIT
+                if kind == "appointment_reminder" and lang == "fil"
+                else None
+            ),
         )
         for kind in TEMPLATE_KINDS
         for lang in TEMPLATE_LANGUAGES

@@ -35,7 +35,7 @@ from app.models.immunization import Immunization
 from app.models.patient import Patient
 from app.models.sms_log import SmsLog
 from app.models.system_setting import SystemSetting
-from app.services.sms_templates import TEMPLATE_DEFAULTS
+from app.services.sms_templates import FIL_APPOINTMENT_TEMPLATE_LIMIT, TEMPLATE_DEFAULTS
 from app.workers.reminder_scheduler import (
     _dispatch_appointment_reminders_async,
     _dispatch_immunization_reminders_async,
@@ -85,6 +85,10 @@ async def test_defaults_when_nothing_is_saved(client: AsyncClient, admin_token: 
     assert appt_en["is_custom"] is False
     assert "scheduled_date" in appt_en["required"]
     assert appt_en["send_limit"] == 135
+    assert (
+        templates[("appointment_reminder", "fil")]["send_limit"]
+        == FIL_APPOINTMENT_TEMPLATE_LIMIT
+    )
     assert templates[("missed_appointment", "fil")]["send_limit"] is None
     assert body["sample_values"]["bhc_name"] == settings.BHC_NAME
 
