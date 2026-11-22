@@ -142,6 +142,15 @@ html {
 }
 .dash-pulse { animation: dash-pulse 2.2s ease-out infinite; }
 
+/* System Health banner: a heartbeat-monitor sweep along the trace
+   (the <path> sets pathLength="1"). */
+@keyframes health-trace {
+  from { stroke-dashoffset: 1; }
+  to   { stroke-dashoffset: 0; }
+}
+.health-trace { stroke-dasharray: 0.4 0.6; animation: health-trace 3.6s linear infinite; }
+
 @media (prefers-reduced-motion: reduce) {
-  .dash-rise, .dash-pulse { animation: none; }
+  .dash-rise, .dash-pulse, .health-trace { animation: none; }
+  .health-trace { stroke-dasharray: none; }
 }
