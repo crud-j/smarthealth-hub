@@ -538,6 +538,42 @@ async def generate_intake_token(
     )
 
 
+# ---------------------------------------------------------------------------
+# GET /patients/intake-token/current
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/intake-token/current",
+    response_model=IntakeTokenResponse | None,
+    summary="The signed-in user's walk-in pre-visit link that is still usable (BHW+)",
+    dependencies=[_BHW_PLUS],
+)
+async def current_intake_token(
+    db: DbDep,
+    current_user: CurrentUser,
+) -> IntakeTokenResponse | None:
+    """
+    The newest walk-in link you created that a patient can still use (not
+    used, no form submitted, at least an hour left), or ``null``.
+
+    The Registration QR page shows it when it opens, and creates a link with
+    POST /patients/intake-token only when this returns ``null``. Creates
+    nothing; no patient data is returned.
+    """
+    from app.core.config import settings as _settings  # noqa: PLC0415
+    from app.services import intake_service as _intake_service  # noqa: PLC0415
+
+    intake_token = await _intake_service.current_walk_in_token(db, current_user.id)
+    if intake_token is None:
+        return None
+    return IntakeTokenResponse(
+        token=str(intake_token.token),
+        intake_url=f"{_settings.QR_BASE_URL}/intake/{intake_token.token}",
+        expires_at=intake_token.expires_at,
+    )
+
+
 async def _patient_response_with_names(db: DbDep, patient: Patient) -> PatientResponse:
     """PatientResponse plus the name of the staff member who deactivated it."""
     names = await patient_service.user_names(db, [patient.deactivated_by])
