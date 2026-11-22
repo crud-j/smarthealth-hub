@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { canStartVisit, manilaDate, startVisitHref } from "@/lib/start-visit";
+import { ARCHIVED_PATIENT_MESSAGE } from "@/lib/patient-status";
+import { canStartVisit, manilaDate, startVisitBlockedReason, startVisitHref } from "@/lib/start-visit";
 
 // "Start visit" shows on today's open appointments for the roles that log
 // visits. "Today" is the Manila date, whatever the browser's timezone.
@@ -38,6 +39,22 @@ describe("canStartVisit", () => {
     expect(canStartVisit("bhw", at("2026-11-21T23:00:00Z"), TODAY)).toBe(true); // 7:00 AM today
     expect(canStartVisit("bhw", at("2026-11-22T23:00:00Z"), TODAY)).toBe(false); // 7:00 AM tomorrow
     expect(canStartVisit("bhw", at("2026-11-21T08:00:00Z"), TODAY)).toBe(false); // 4:00 PM yesterday
+  });
+});
+
+describe("removed patients (deactivated / archived)", () => {
+  const archived = { ...at("2026-11-22T02:00:00Z"), patientNotInUseReason: ARCHIVED_PATIENT_MESSAGE };
+
+  it("get no Start visit", () => {
+    expect(canStartVisit("bhw", archived, TODAY)).toBe(false);
+    expect(canStartVisit("bhw", { ...archived, patientNotInUseReason: null }, TODAY)).toBe(true);
+  });
+
+  it("say why, only where Start visit would otherwise show", () => {
+    expect(startVisitBlockedReason("bhw", archived, TODAY)).toBe(ARCHIVED_PATIENT_MESSAGE);
+    expect(startVisitBlockedReason("admin_staff", archived, TODAY)).toBeNull(); // never had the button
+    expect(startVisitBlockedReason("bhw", { ...archived, status: "completed" }, TODAY)).toBeNull();
+    expect(startVisitBlockedReason("bhw", at("2026-11-22T02:00:00Z"), TODAY)).toBeNull();
   });
 });
 

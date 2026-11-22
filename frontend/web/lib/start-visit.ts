@@ -20,19 +20,36 @@ export function manilaDate(iso: string): string {
 
 /**
  * Show "Start visit" for this appointment: the user may log visits
- * (Physician, BHW), the appointment is on today's Manila date, and no visit
- * has completed it yet (not completed / cancelled).
+ * (Physician, BHW), the appointment is on today's Manila date, no visit
+ * has completed it yet (not completed / cancelled), and the patient still
+ * takes new visits (not deactivated or archived).
  */
 export function canStartVisit(
   role: string | null | undefined,
-  appointment: { status: string; scheduledAt: string },
+  appointment: { status: string; scheduledAt: string; patientNotInUseReason?: string | null },
   today: string = manilaToday(),
 ): boolean {
   return (
     canLogVisit(role) &&
+    !appointment.patientNotInUseReason &&
     OPEN_STATUSES.includes(appointment.status) &&
     manilaDate(appointment.scheduledAt) === today
   );
+}
+
+/**
+ * Why a today's appointment has no "Start visit" although it otherwise
+ * would (the patient was deactivated or archived), or null. Lets the page
+ * say so instead of leaving staff guessing.
+ */
+export function startVisitBlockedReason(
+  role: string | null | undefined,
+  appointment: { status: string; scheduledAt: string; patientNotInUseReason?: string | null },
+  today: string = manilaToday(),
+): string | null {
+  if (!appointment.patientNotInUseReason) return null;
+  const otherwise = canStartVisit(role, { ...appointment, patientNotInUseReason: null }, today);
+  return otherwise ? appointment.patientNotInUseReason : null;
 }
 
 /** Add Visit for the patient. */

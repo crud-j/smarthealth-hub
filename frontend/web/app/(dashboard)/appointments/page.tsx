@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useAppointmentList, useCancelAppointment } from "@/hooks/useAppointments";
 import { useCurrentUser } from "@/hooks/useAuth";
 import { manilaToday } from "@/lib/manila-time";
-import { canStartVisit, startVisitHref } from "@/lib/start-visit";
+import { ARCHIVED_PATIENT_MESSAGE } from "@/lib/patient-status";
+import { canStartVisit, startVisitBlockedReason, startVisitHref } from "@/lib/start-visit";
 import { toast } from "@/lib/toast";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import type { AppointmentStatus, AppointmentListParams } from "@/types/appointment";
@@ -299,6 +300,14 @@ export default function AppointmentsPage() {
                         >
                           Start visit
                         </Link>
+                      )}
+                      {startVisitBlockedReason(currentUser?.role, appt, today) && (
+                        <span
+                          title={appt.patientNotInUseReason ?? undefined}
+                          className="whitespace-nowrap rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600"
+                        >
+                          {appt.patientNotInUseReason === ARCHIVED_PATIENT_MESSAGE ? "Patient archived" : "Patient inactive"}
+                        </span>
                       )}
                       <Link
                         href={`/appointments/${appt.id}`}
