@@ -16,7 +16,8 @@
  *  usePatient(id)           — single patient by ID
  *  useCreatePatient()       — mutation: POST /patients
  *  useUpdatePatient(id)     — mutation: PUT  /patients/{id}
- *  useDeactivatePatient()   — mutation: DELETE /patients/{id} (soft-deactivate, Admin only)
+ *  useDeactivatePatient()   — mutation: POST /patients/{id}/deactivate (reversible, Admin only)
+ *  useReactivatePatient()   — mutation: POST /patients/{id}/reactivate (Admin only)
  *  usePatientVisits(id)     — list of visit summaries for a patient
  */
 
@@ -106,6 +107,10 @@ export interface PatientApiResponse {
   archived_at?: string | null;
   archived_by?: string | null;
   archive_reason?: string | null;
+  /** Deactivation details; absent on older backends. */
+  deactivated_at?: string | null;
+  deactivated_by_name?: string | null;
+  deactivation_reason?: string | null;
 }
 
 interface PatientSummaryApiResponse {
@@ -236,6 +241,9 @@ export function mapPatient(r: PatientApiResponse): Patient {
     archivedAt: r.archived_at ?? null,
     archivedBy: r.archived_by ?? null,
     archiveReason: r.archive_reason ?? null,
+    deactivatedAt: r.deactivated_at ?? null,
+    deactivatedByName: r.deactivated_by_name ?? null,
+    deactivationReason: r.deactivation_reason ?? null,
   };
 }
 
@@ -560,23 +568,27 @@ export function useUpdatePatient(id: string) {
 }
 
 // ---------------------------------------------------------------------------
-// useDeactivatePatient — mutation (soft-delete, Admin only)
+// useDeactivatePatient — mutation: POST /patients/{id}/deactivate (Admin only)
+//
+// Deactivating switches the patient off for now: hidden from the list and
+// search, no SMS reminders. Nothing is deleted; useReactivatePatient undoes it.
 // ---------------------------------------------------------------------------
 
 export function useDeactivatePatient() {
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<ApiError | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const deactivatePatient = useCallback(async (id: string): Promise<boolean> => {
+  const deactivatePatient = useCallback(async (id: string, reason: string): Promise<boolean> => {
     setLoading(true);
     setError(null);
     try {
-      await apiFetch<void>(`/patients/${id}`, { method: "DELETE" });
+      await apiFetch(`/patients/${id}/deactivate`, {
+        method: "POST",
+        body: JSON.stringify({ reason }),
+      });
       return true;
     } catch (err) {
-      const apiErr =
-        err instanceof ApiError ? err : new ApiError(String(err), 0, "unknown");
-      setError(apiErr);
+      setError(err instanceof ApiError ? err.message : "Failed to deactivate patient.");
       return false;
     } finally {
       setLoading(false);
@@ -584,6 +596,31 @@ export function useDeactivatePatient() {
   }, []);
 
   return { deactivatePatient, loading, error };
+}
+
+// ---------------------------------------------------------------------------
+// useReactivatePatient — mutation: POST /patients/{id}/reactivate (Admin only)
+// ---------------------------------------------------------------------------
+
+export function useReactivatePatient() {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const reactivatePatient = useCallback(async (id: string): Promise<boolean> => {
+    setLoading(true);
+    setError(null);
+    try {
+      await apiFetch(`/patients/${id}/reactivate`, { method: "POST" });
+      return true;
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to reactivate patient.");
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  return { reactivatePatient, loading, error };
 }
 
 // ---------------------------------------------------------------------------

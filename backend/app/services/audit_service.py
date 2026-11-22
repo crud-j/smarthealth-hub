@@ -14,6 +14,8 @@ Standard ``action`` values (extend the AuditLog docstring when you add new ones)
   matches VIEW_PHI)
   EXPORT_REPORT (one per /analytics/export; metadata describes the export,
   never its rows)
+  DEACTIVATE, REACTIVATE (patient switched off / back on; nothing is deleted.
+  Older patient deactivations were logged as DELETE), ARCHIVE, UNARCHIVE
   CARD_ISSUE, CARD_VERIFY, CARD_REVOKE
   PASSWORD_CHANGED, PASSWORD_RESET_REQUESTED
 

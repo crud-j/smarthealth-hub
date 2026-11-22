@@ -32,13 +32,16 @@ from app.models.patient import Patient
 from app.schemas.intake import IntakeTokenResponse
 from app.schemas.patient import (
     ArchivedPatientSummary,
+    InactivePatientSummary,
     OcrExtractResponse,
     OcrFieldValue,
     PaginatedArchivedPatients,
+    PaginatedInactivePatients,
     PaginatedPatients,
     PatientArchiveRequest,
     PatientCreate,
     PatientCreateResult,
+    PatientDeactivateRequest,
     PatientDuplicateMatch,
     PatientResponse,
     PatientSummary,
@@ -74,7 +77,9 @@ def _get_client_ip(request: Request) -> str | None:
     return None
 
 
-def _build_patient_response(patient: Patient) -> PatientResponse:
+def _build_patient_response(
+    patient: Patient, *, deactivated_by_name: str | None = None
+) -> PatientResponse:
     """
     Map a Patient ORM instance to a PatientResponse schema.
 
@@ -138,6 +143,10 @@ def _build_patient_response(patient: Patient) -> PatientResponse:
         archived_at=patient.archived_at,
         archived_by=str(patient.archived_by) if patient.archived_by else None,
         archive_reason=patient.archive_reason,
+        deactivated_at=patient.deactivated_at,
+        deactivated_by=str(patient.deactivated_by) if patient.deactivated_by else None,
+        deactivated_by_name=deactivated_by_name,
+        deactivation_reason=patient.deactivation_reason,
         created_at=patient.created_at,
         updated_at=patient.updated_at,
         photo_path=photo_path_url,
@@ -529,6 +538,79 @@ async def generate_intake_token(
     )
 
 
+async def _patient_response_with_names(db: DbDep, patient: Patient) -> PatientResponse:
+    """PatientResponse plus the name of the staff member who deactivated it."""
+    names = await patient_service.user_names(db, [patient.deactivated_by])
+    return _build_patient_response(
+        patient,
+        deactivated_by_name=names.get(patient.deactivated_by) if patient.deactivated_by else None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /patients/inactive  — Admin / Physician only
+# Registered before /{patient_id} for the same reason as /archived below.
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/inactive",
+    response_model=PaginatedInactivePatients,
+    summary="List deactivated patients (Admin / Physician only)",
+    dependencies=[require_role("admin", "physician")],
+)
+async def list_inactive_patients(
+    request: Request,
+    db: DbDep,
+    current_user: CurrentUser,
+    q: str | None = Query(None, description="Search by name, patient code, or mobile"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+) -> PaginatedInactivePatients:
+    """
+    Return a page of deactivated patients, newest first.
+
+    Deactivated patients are hidden from the patient list, search and SMS
+    reminders, but nothing is deleted: this is where an Admin finds them to
+    reactivate them. A VIEW_PHI audit log is written for the list access.
+    """
+    patients, total = await patient_service.list_inactive_patients(
+        db, q=q, page=page, page_size=page_size
+    )
+    names = await patient_service.user_names(db, (p.deactivated_by for p in patients))
+
+    await write_audit_log(
+        db=db,
+        user_id=current_user.id,
+        action="VIEW_PHI",
+        entity_type="patient_inactive_list",
+        metadata={"q": q, "page": page},
+        ip_address=_get_client_ip(request),
+    )
+    await db.commit()
+
+    items = [
+        InactivePatientSummary(
+            id=str(p.id),
+            patient_code=p.patient_code,
+            first_name=p.first_name,
+            middle_name=p.middle_name,
+            last_name=p.last_name,
+            birth_date=p.birth_date,
+            sex=p.sex,
+            mobile_number=p.mobile_number,
+            is_senior=p.is_senior,
+            is_pwd=p.is_pwd,
+            archived_at=p.archived_at,
+            deactivated_at=p.deactivated_at,
+            deactivated_by_name=names.get(p.deactivated_by) if p.deactivated_by else None,
+            deactivation_reason=p.deactivation_reason,
+        )
+        for p in patients
+    ]
+    return PaginatedInactivePatients(items=items, total=total, page=page, page_size=page_size)
+
+
 # ---------------------------------------------------------------------------
 # GET /patients/archived  — Admin / Physician only
 # IMPORTANT: This MUST be registered before /{patient_id} so FastAPI does not
@@ -636,7 +718,7 @@ async def get_patient(
     )
     await db.commit()
 
-    return _build_patient_response(patient)
+    return await _patient_response_with_names(db, patient)
 
 
 # ---------------------------------------------------------------------------
@@ -681,7 +763,7 @@ async def update_patient(
     "/{patient_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
-    summary="Soft-deactivate patient record (Admin only)",
+    summary="Deactivate patient (Admin only; older route, prefer POST /deactivate)",
     dependencies=[_ADMIN_ONLY],
 )
 async def deactivate_patient(
@@ -691,18 +773,93 @@ async def deactivate_patient(
     current_user: CurrentUser,
 ) -> Response:
     """
-    Soft-deactivate a patient by setting ``is_active=False``.
+    Deactivate a patient without a reason. Kept for older screens.
 
-    Data is never hard-deleted — the record remains for audit trail integrity.
-    Writes a DELETE audit log entry.
+    Despite the HTTP verb, nothing is deleted: this does exactly what
+    ``POST /patients/{id}/deactivate`` does (``is_active=False``, DEACTIVATE
+    audit row) and can be undone with ``POST /patients/{id}/reactivate``.
 
-    Auth: Admin only.
+    Auth: Admin only. 409 if the patient is already inactive.
     """
-    ip = _get_client_ip(request)
-    await patient_service.deactivate_patient(
-        db, patient_id=patient_id, by_id=current_user.id, ip_address=ip
-    )
+    try:
+        await patient_service.deactivate_patient(
+            db, patient_id=patient_id, by_id=current_user.id, ip_address=_get_client_ip(request)
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------------
+# POST /patients/{id}/deactivate  and  /reactivate  — Admin only
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/{patient_id}/deactivate",
+    response_model=PatientResponse,
+    summary="Deactivate a patient (Admin only, reversible)",
+    dependencies=[_ADMIN_ONLY],
+)
+async def deactivate_patient_with_reason(
+    patient_id: uuid.UUID,
+    request: Request,
+    db: DbDep,
+    current_user: CurrentUser,
+    body: PatientDeactivateRequest,
+) -> PatientResponse:
+    """
+    Switch a patient off for daily work. Nothing is deleted.
+
+    The patient leaves the patient list and search, gets no SMS reminders and
+    cannot be booked. All records stay. When, who and the reason are kept, a
+    DEACTIVATE audit row is written, and the patient appears on the Inactive
+    Patients page, where an Admin can reactivate them.
+
+    Raises 404 if the patient does not exist, 409 if already inactive.
+    """
+    try:
+        patient = await patient_service.deactivate_patient(
+            db,
+            patient_id=patient_id,
+            by_id=current_user.id,
+            reason=body.reason,
+            ip_address=_get_client_ip(request),
+        )
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return await _patient_response_with_names(db, patient)
+
+
+@router.post(
+    "/{patient_id}/reactivate",
+    response_model=PatientResponse,
+    summary="Reactivate a deactivated patient (Admin only)",
+    dependencies=[_ADMIN_ONLY],
+)
+async def reactivate_patient(
+    patient_id: uuid.UUID,
+    request: Request,
+    db: DbDep,
+    current_user: CurrentUser,
+) -> PatientResponse:
+    """
+    Switch a deactivated patient back on: back in the list, search and SMS.
+
+    Writes a REACTIVATE audit row (with the old reason). Raises 404 if the
+    patient does not exist, 409 if the patient is already active.
+    """
+    try:
+        patient = await patient_service.reactivate_patient(
+            db, patient_id=patient_id, by_id=current_user.id, ip_address=_get_client_ip(request)
+        )
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return _build_patient_response(patient)
 
 
 # ---------------------------------------------------------------------------

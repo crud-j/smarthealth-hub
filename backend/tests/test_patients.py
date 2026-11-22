@@ -949,13 +949,13 @@ async def test_deactivate_patient_admin_succeeds(
     assert sample_patient.is_active is False
 
 
-async def test_deactivate_patient_writes_delete_audit_log(
+async def test_deactivate_patient_writes_deactivate_audit_log(
     client: AsyncClient,
     db_session: AsyncSession,
     sample_patient: Patient,
     admin_user: tuple[User, str],
 ) -> None:
-    """Deactivating a patient must write a DELETE audit log entry."""
+    """Deactivating a patient writes a DEACTIVATE audit row (it never deletes)."""
     _, token = admin_user
     await client.delete(
         patient_url(sample_patient.id),
@@ -965,7 +965,7 @@ async def test_deactivate_patient_writes_delete_audit_log(
     result = await db_session.execute(
         select(AuditLog).where(
             AuditLog.entity_id == sample_patient.id,
-            AuditLog.action == "DELETE",
+            AuditLog.action == "DEACTIVATE",
         )
     )
     logs = result.scalars().all()

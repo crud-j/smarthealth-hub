@@ -17,7 +17,7 @@ describe("visibleNavGroups", () => {
   it("admin sees every group, with System Configuration under Administration", () => {
     expect(layout("admin")).toEqual({
       Overview: ["Dashboard"],
-      "Patient Care": [...PATIENT_CARE, "Patient Archive"],
+      "Patient Care": [...PATIENT_CARE, "Patient Archive", "Inactive Patients"],
       Registrations: ["Registration Inbox", "Registration QR"],
       Insights: ["Analytics", "SMS Logs"],
       Administration: ["Users", "Audit Log", "System Health", "System Configuration"],
@@ -38,7 +38,7 @@ describe("visibleNavGroups", () => {
   it("physician sees the archive but not the Registration QR or SMS Logs", () => {
     expect(layout("physician")).toEqual({
       Overview: ["Dashboard"],
-      "Patient Care": [...PATIENT_CARE, "Patient Archive"],
+      "Patient Care": [...PATIENT_CARE, "Patient Archive", "Inactive Patients"],
       Registrations: ["Registration Inbox"],
       Insights: ["Analytics"],
       Account: ACCOUNT,
@@ -87,6 +87,7 @@ describe("activeNavHref", () => {
     ["/patients", "/patients"],
     ["/patients/123/edit", "/patients"],
     ["/patients/archived", "/patients/archived"],
+    ["/patients/inactive", "/patients/inactive"],
     ["/settings", "/settings"],
     ["/settings/users", "/settings/users"],
     ["/settings/profile", "/settings/profile"],

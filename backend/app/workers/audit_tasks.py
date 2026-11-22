@@ -6,7 +6,8 @@ Task:
     monitoring task which also runs at :30 but is a different concern).
     Queries audit_logs for three anomaly patterns:
       - PHI_VIEW burst (>50 views in 60 min by same user)
-      - After-hours DELETE on patient records (outside 08:00-18:00 PHT)
+      - After-hours patient deactivation (DEACTIVATE / older DELETE rows,
+        outside 08:00-18:00 PHT)
       - Sign-in failure burst (>20 wrong passwords / OTP codes from same IP
         in the last hour)
     Logs every finding at WARNING level.

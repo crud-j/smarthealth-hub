@@ -84,6 +84,12 @@ export interface Patient {
   archivedBy?: string | null;
   /** Reason given for archiving, or null. */
   archiveReason?: string | null;
+  /** ISO datetime when the patient was deactivated (null while active, or for old records). */
+  deactivatedAt?: string | null;
+  /** Full name of the staff member who deactivated the patient, or null. */
+  deactivatedByName?: string | null;
+  /** Reason given for deactivating, or null. */
+  deactivationReason?: string | null;
 }
 
 // ---------------------------------------------------------------------------

@@ -159,6 +159,20 @@ class Patient(Base):
     )
     archive_reason: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
 
+    # Deactivation details (is_active = False): when, by whom and why. Cleared
+    # again on Reactivate; the audit log keeps the full history. NULL for
+    # patients deactivated before these columns existed (migration 0032 fills
+    # what it can from the audit log).
+    deactivated_at: Mapped[datetime | None] = mapped_column(
+        sa.TIMESTAMP(timezone=True), nullable=True
+    )
+    deactivated_by: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        sa.ForeignKey("users.id", name="fk_patients_deactivated_by_users", ondelete="SET NULL"),
+        nullable=True,
+    )
+    deactivation_reason: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+
     # SMS opt-out flag — set to True when the patient replies STOP to any
     # reminder SMS.  The reminder scheduler skips patients with this flag.
     sms_opt_out: Mapped[bool] = mapped_column(
