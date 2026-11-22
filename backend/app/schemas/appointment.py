@@ -16,6 +16,7 @@ from datetime import datetime
 from pydantic import field_validator
 
 from app.schemas._base import BaseSchema
+from app.utils.manila_time import assume_manila
 
 # Valid appointment status values matching the DB CHECK constraint.
 _VALID_STATUSES = frozenset({"pending", "confirmed", "completed", "missed", "cancelled"})
@@ -56,6 +57,12 @@ class AppointmentCreate(BaseSchema):
             raise ValueError("appointment_type must not be blank")
         return v.lower().strip()
 
+    @field_validator("scheduled_at")
+    @classmethod
+    def scheduled_at_in_manila(cls, v: datetime) -> datetime:
+        # No timezone = Manila time (the server itself may run on UTC).
+        return assume_manila(v)
+
 
 class AppointmentUpdate(BaseSchema):
     """
@@ -69,6 +76,12 @@ class AppointmentUpdate(BaseSchema):
     # Allowed status values mirror the DB CHECK constraint.
     status: str | None = None
     notes: str | None = None
+
+    @field_validator("scheduled_at")
+    @classmethod
+    def scheduled_at_in_manila(cls, v: datetime | None) -> datetime | None:
+        # No timezone = Manila time (the server itself may run on UTC).
+        return assume_manila(v) if v is not None else None
 
     @field_validator("status")
     @classmethod
