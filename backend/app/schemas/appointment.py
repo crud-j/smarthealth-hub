@@ -141,6 +141,9 @@ class AppointmentResponse(BaseSchema):
     # Intake tracking — set when the patient submits the pre-visit intake form
     intake_completed: bool = False
     intake_submitted_at: datetime | None = None
+    # Why the patient takes no new visits (deactivated / archived), or None.
+    # Same text as the 409 for new records; the UI hides "Start visit".
+    patient_not_in_use_reason: str | None = None
     # Intake summary — populated by get_appointment() when a linked token exists
     intake_summary: AppointmentIntakeSummary | None = None
 

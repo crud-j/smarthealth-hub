@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { useAppointment, useUpdateAppointment, useCancelAppointment } from "@/hooks/useAppointments";
 import { useCurrentUser } from "@/hooks/useAuth";
 import { apiFetch, ApiError } from "@/lib/api-client";
-import { canStartVisit, startVisitHref } from "@/lib/start-visit";
+import { canStartVisit, startVisitBlockedReason, startVisitHref } from "@/lib/start-visit";
 import { toast } from "@/lib/toast";
 import type { AppointmentStatus } from "@/types/appointment";
 import { IntakeDetailsPanel } from "@/components/intake/IntakeDetailsPanel";
@@ -187,7 +187,8 @@ export default function AppointmentDetailPage({ params }: { params: Promise<{ ap
   const showReminder = appt.status === "pending" || appt.status === "confirmed";
   const showIntake = !appt.intakeCompleted && isUpcoming(appt.scheduledAt);
   const showStartVisit = Boolean(appt.patientId) && canStartVisit(currentUser?.role, appt);
-  const hasSidebarActions = showStartVisit || showStatusActions || showReminder || showIntake;
+  const noNewVisitsReason = startVisitBlockedReason(currentUser?.role, appt);
+  const hasSidebarActions = showStartVisit || Boolean(noNewVisitsReason) || showStatusActions || showReminder || showIntake;
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -307,6 +308,17 @@ export default function AppointmentDetailPage({ params }: { params: Promise<{ ap
                     <p className="mt-2 text-xs text-[#9b6e6e]">
                       Opens Add Visit, filled in from this appointment. Saving the visit marks the appointment completed.
                     </p>
+                  </div>
+                )}
+
+                {/* Removed patient: say why there is no Start visit */}
+                {noNewVisitsReason && (
+                  <div
+                    role="note"
+                    className={`rounded-lg border border-stone-200 bg-stone-50 px-4 py-3 ${showStatusActions ? "mb-5" : ""}`}
+                  >
+                    <p className="text-sm font-semibold text-[#3d2222]">No new visits for this patient</p>
+                    <p className="mt-1 text-xs text-[#7a5252]">{noNewVisitsReason}</p>
                   </div>
                 )}
 

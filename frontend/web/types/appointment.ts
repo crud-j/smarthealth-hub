@@ -50,6 +50,11 @@ export interface Appointment {
   intakeSubmittedAt: string | null;
   /** Nested intake summary — populated when intake_completed is true and a token exists. */
   intakeSummary?: AppointmentIntakeSummary | null;
+  /**
+   * Why the patient takes no new visits (deactivated / archived), or null.
+   * Same text as the server's 409; hides "Start visit".
+   */
+  patientNotInUseReason?: string | null;
 }
 
 // ---------------------------------------------------------------------------

@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AppointmentsPage from "@/app/(dashboard)/appointments/page";
 import AppointmentDetailPage from "@/app/(dashboard)/appointments/[appointmentId]/page";
+import { ARCHIVED_PATIENT_MESSAGE, INACTIVE_PATIENT_MESSAGE } from "@/lib/patient-status";
 import type { Appointment, AppointmentListParams } from "@/types/appointment";
 
 // "Start visit" on the Appointments page and the appointment page opens Add
@@ -96,6 +97,21 @@ describe("Appointments page", () => {
     expect(within(rowFor("Tomorrow Morning")).queryByRole("link", { name: /Start visit/ })).not.toBeInTheDocument();
   });
 
+  it("says the patient is archived or inactive instead of offering Start visit", () => {
+    listItems = [
+      appointment({ id: "a1", patientId: "p1", patientName: "Stored Away", patientNotInUseReason: ARCHIVED_PATIENT_MESSAGE }),
+      appointment({ id: "a2", patientId: "p2", patientName: "Switched Off", patientNotInUseReason: INACTIVE_PATIENT_MESSAGE }),
+    ];
+    render(<AppointmentsPage />);
+
+    const stored = rowFor("Stored Away");
+    expect(within(stored).queryByRole("link", { name: /Start visit/ })).not.toBeInTheDocument();
+    expect(within(stored).getByText("Patient archived")).toHaveAttribute("title", ARCHIVED_PATIENT_MESSAGE);
+    const off = rowFor("Switched Off");
+    expect(within(off).queryByRole("link", { name: /Start visit/ })).not.toBeInTheDocument();
+    expect(within(off).getByText("Patient inactive")).toHaveAttribute("title", INACTIVE_PATIENT_MESSAGE);
+  });
+
   it("does not offer Start visit to roles that cannot log visits", () => {
     role = "admin_staff";
     listItems = [appointment({ patientName: "Today Confirmed" })];
@@ -135,6 +151,15 @@ describe("Appointment page", () => {
     await renderDetail();
     expect(await screen.findByRole("link", { name: "Start visit" })).toHaveAttribute("href", "/patients/p1/visits/new");
     expect(screen.getByText(/Saving the visit marks the appointment completed/)).toBeInTheDocument();
+  });
+
+  it("explains why an archived patient's appointment has no Start visit", async () => {
+    role = "physician";
+    detail = appointment({ patientNotInUseReason: ARCHIVED_PATIENT_MESSAGE });
+    await renderDetail();
+    expect(await screen.findByText("No new visits for this patient")).toBeInTheDocument();
+    expect(screen.getByText(ARCHIVED_PATIENT_MESSAGE)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Start visit" })).not.toBeInTheDocument();
   });
 
   it("has no Start visit for another day, a completed visit, or the front desk", async () => {

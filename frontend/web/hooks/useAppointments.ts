@@ -52,6 +52,8 @@ interface AppointmentApiResponse {
   created_at: string;
   intake_completed: boolean;
   intake_submitted_at: string | null;
+  /** Absent on a backend from before this field. */
+  patient_not_in_use_reason?: string | null;
   intake_summary?: IntakeSummaryApiResponse | null;
 }
 
@@ -94,6 +96,7 @@ function mapAppointment(r: AppointmentApiResponse): Appointment {
     createdAt: r.created_at,
     intakeCompleted: r.intake_completed ?? false,
     intakeSubmittedAt: r.intake_submitted_at ?? null,
+    patientNotInUseReason: r.patient_not_in_use_reason ?? null,
     intakeSummary: r.intake_summary ? mapIntakeSummary(r.intake_summary) : null,
   };
 }
