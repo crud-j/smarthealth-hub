@@ -13,6 +13,7 @@ const createVisit = vi.fn();
 vi.mock("@/hooks/usePatients", () => ({
   usePatient: () => ({ data: patient, loading: false, error: null, refetch: () => {} }),
   useCreateVisit: () => ({ createVisit, loading: false, error: null }),
+  fetchVisitPrefill: async () => null,
 }));
 
 vi.mock("@/hooks/useAuth", () => ({

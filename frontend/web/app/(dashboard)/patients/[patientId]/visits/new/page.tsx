@@ -1,15 +1,40 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCurrentUser } from "@/hooks/useAuth";
-import { useCreateVisit, usePatient } from "@/hooks/usePatients";
-import { canLogVisit } from "@/lib/permissions";
+import { fetchVisitPrefill, useCreateVisit, usePatient } from "@/hooks/usePatients";
+import { canAccessClinicalPhi, canLogVisit } from "@/lib/permissions";
 import { patientNotInUseReason } from "@/lib/patient-status";
 import { toast } from "@/lib/toast";
 import { AllergyAlert } from "@/components/ui/AllergyAlert";
-import type { VisitCreatePayload } from "@/types/patient";
+import type { VisitCreatePayload, VisitPrefill } from "@/types/patient";
+
+const APPOINTMENT_TYPE_LABELS: Record<string, string> = {
+  checkup: "General Check-up",
+  general_checkup: "General Check-up",
+  prenatal: "Prenatal",
+  follow_up: "Follow-up",
+  vaccination: "Vaccination",
+};
+
+function appointmentLabel(type: string | null): string {
+  if (!type) return "";
+  const known = APPOINTMENT_TYPE_LABELS[type];
+  if (known) return known;
+  const words = type.replace(/_/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+function manilaTime(iso: string | null): string {
+  if (!iso) return "";
+  return new Date(iso).toLocaleTimeString("en-PH", {
+    timeZone: "Asia/Manila",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
 
 const inputClass =
   "w-full rounded-lg border border-[#e5d4cc] bg-white px-3 py-2.5 text-sm text-[#1a0808] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e]";
@@ -46,6 +71,29 @@ export default function NewVisitPage({
   const [weightKg, setWeightKg] = useState("");
   const [heightCm, setHeightCm] = useState("");
 
+  // BHWs record the desk part (type, complaint, vital signs); diagnosis and
+  // treatment notes are the Physician's (the API refuses them from a BHW).
+  const mayLogVisit = canLogVisit(currentUser?.role);
+  const isPhysician = canAccessClinicalPhi(currentUser?.role);
+
+  // Start from today's appointment and its intake form; staff check and adjust.
+  const [prefill, setPrefill] = useState<VisitPrefill | null>(null);
+  const visitTypeTouched = useRef(false);
+  useEffect(() => {
+    if (!mayLogVisit) return;
+    let cancelled = false;
+    void fetchVisitPrefill(patientId).then((suggested) => {
+      if (cancelled || !suggested?.appointmentId) return;
+      setPrefill(suggested);
+      const { visitType: suggestedType, chiefComplaint: suggestedComplaint } = suggested;
+      if (suggestedType && !visitTypeTouched.current) setVisitType(suggestedType);
+      if (suggestedComplaint) setChiefComplaint((current) => (current.trim() ? current : suggestedComplaint));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [patientId, mayLogVisit]);
+
   useEffect(() => {
     if (patientError) toast.error(`Failed to load patient: ${patientError.message}`);
     if (saveError) toast.error(`Failed to save visit: ${saveError.message}`);
@@ -64,8 +112,8 @@ export default function NewVisitPage({
       chiefComplaint: chiefComplaint.trim() || undefined,
       pastMedicalHistory: pastMedicalHistory.trim() || undefined,
       presentMedicalHistory: presentMedicalHistory.trim() || undefined,
-      diagnosis: diagnosis.trim() || undefined,
-      treatmentNotes: treatmentNotes.trim() || undefined,
+      diagnosis: isPhysician ? diagnosis.trim() || undefined : undefined,
+      treatmentNotes: isPhysician ? treatmentNotes.trim() || undefined : undefined,
       vitalSigns: {
         bloodPressure: bloodPressure.trim() || undefined,
         temperature: toNumber(temperature),
@@ -134,6 +182,19 @@ export default function NewVisitPage({
     );
   }
 
+  const historyFields = (
+    <>
+      <div>
+        <label htmlFor="past-history" className={labelClass}>Past medical history</label>
+        <textarea id="past-history" value={pastMedicalHistory} onChange={(event) => setPastMedicalHistory(event.target.value)} rows={3} className={`${inputClass} resize-y`} />
+      </div>
+      <div>
+        <label htmlFor="present-history" className={labelClass}>Present medical history</label>
+        <textarea id="present-history" value={presentMedicalHistory} onChange={(event) => setPresentMedicalHistory(event.target.value)} rows={3} className={`${inputClass} resize-y`} />
+      </div>
+    </>
+  );
+
   return (
     <main className="mx-auto max-w-3xl">
       <div className="mb-5">
@@ -148,13 +209,30 @@ export default function NewVisitPage({
 
       <AllergyAlert status="ready" allergies={patient.allergies} editHref={`/patients/${patientId}/edit`} />
 
+      {prefill && (
+        <p role="status" className="mb-4 rounded-xl border border-[#e5d4cc] bg-[#fdf5f0] px-4 py-3 text-sm text-[#5a3a3a]">
+          Filled in from today&apos;s {appointmentLabel(prefill.appointmentType)} appointment
+          {prefill.scheduledAt && <> at {manilaTime(prefill.scheduledAt)}</>}
+          {prefill.chiefComplaint && <> and the patient&apos;s intake form</>}. Check the details before saving.
+        </p>
+      )}
+
       <form onSubmit={(event) => void handleSubmit(event)} className="space-y-4" noValidate>
         <section className="rounded-xl border border-[#e5d4cc] bg-white p-5 shadow-sm">
           <h2 className="mb-4 text-base font-bold text-[#1a0808]">Visit details</h2>
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label htmlFor="visit-type" className={labelClass}>Visit type <span className="text-[#dc2626]">*</span></label>
-              <select id="visit-type" value={visitType} onChange={(event) => setVisitType(event.target.value)} className={inputClass} required>
+              <select
+                id="visit-type"
+                value={visitType}
+                onChange={(event) => {
+                  visitTypeTouched.current = true;
+                  setVisitType(event.target.value);
+                }}
+                className={inputClass}
+                required
+              >
                 <option value="consultation">Consultation</option>
                 <option value="prenatal_checkup">Prenatal check-up</option>
                 <option value="immunization_admin">Immunization</option>
@@ -195,24 +273,32 @@ export default function NewVisitPage({
 
         <section className="rounded-xl border border-[#e5d4cc] bg-white p-5 shadow-sm">
           <h2 className="mb-4 text-base font-bold text-[#1a0808]">Clinical notes</h2>
-          <div className="space-y-4">
-            <div>
-              <label htmlFor="past-history" className={labelClass}>Past medical history</label>
-              <textarea id="past-history" value={pastMedicalHistory} onChange={(event) => setPastMedicalHistory(event.target.value)} rows={3} className={`${inputClass} resize-y`} />
+          {isPhysician ? (
+            <div className="space-y-4">
+              {historyFields}
+              <div>
+                <label htmlFor="diagnosis" className={labelClass}>Diagnosis</label>
+                <textarea id="diagnosis" value={diagnosis} onChange={(event) => setDiagnosis(event.target.value)} rows={3} className={`${inputClass} resize-y`} />
+              </div>
+              <div>
+                <label htmlFor="treatment-notes" className={labelClass}>Treatment notes</label>
+                <textarea id="treatment-notes" value={treatmentNotes} onChange={(event) => setTreatmentNotes(event.target.value)} rows={3} className={`${inputClass} resize-y`} />
+              </div>
             </div>
-            <div>
-              <label htmlFor="present-history" className={labelClass}>Present medical history</label>
-              <textarea id="present-history" value={presentMedicalHistory} onChange={(event) => setPresentMedicalHistory(event.target.value)} rows={3} className={`${inputClass} resize-y`} />
-            </div>
-            <div>
-              <label htmlFor="diagnosis" className={labelClass}>Diagnosis</label>
-              <textarea id="diagnosis" value={diagnosis} onChange={(event) => setDiagnosis(event.target.value)} rows={3} className={`${inputClass} resize-y`} />
-            </div>
-            <div>
-              <label htmlFor="treatment-notes" className={labelClass}>Treatment notes</label>
-              <textarea id="treatment-notes" value={treatmentNotes} onChange={(event) => setTreatmentNotes(event.target.value)} rows={3} className={`${inputClass} resize-y`} />
-            </div>
-          </div>
+          ) : (
+            <>
+              <p className="mb-3 text-sm text-[#7a5252]">
+                After you save, the visit goes on the Physician&apos;s waiting list and the Physician adds the
+                diagnosis and treatment.
+              </p>
+              <details className="rounded-lg border border-[#f0e4dd] px-4 py-3">
+                <summary className="cursor-pointer text-sm font-semibold text-[#b5343e]">
+                  Add past / present medical history (optional)
+                </summary>
+                <div className="mt-4 space-y-4">{historyFields}</div>
+              </details>
+            </>
+          )}
         </section>
 
         <div className="flex justify-end gap-3 pb-8">

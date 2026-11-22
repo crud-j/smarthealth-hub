@@ -278,6 +278,19 @@ export interface Visit extends VisitSummary {
   patientName?: string | null;
 }
 
+/**
+ * Add Visit suggestions from the patient's appointment today and its intake
+ * form (GET /patients/{id}/visits/prefill). All null when there is none.
+ */
+export interface VisitPrefill {
+  appointmentId: string | null;
+  appointmentType: string | null;
+  scheduledAt: string | null;
+  visitType: string | null;
+  chiefComplaint: string | null;
+  intakeVisitPurpose: string | null;
+}
+
 export interface VisitCreatePayload {
   visitType: string;
   visitDate?: string;
