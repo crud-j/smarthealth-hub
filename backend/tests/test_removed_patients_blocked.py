@@ -106,7 +106,10 @@ def _appointment_payload(patient_id: uuid.UUID) -> dict[str, Any]:
     return {
         "patient_id": str(patient_id),
         "appointment_type": "consultation",
-        "scheduled_at": (datetime.now(tz=UTC) + timedelta(days=2)).isoformat(),
+        # 10:00 AM Manila in two days (inside clinic hours, 7 AM - 5 PM).
+        "scheduled_at": (datetime.now(tz=UTC) + timedelta(days=2))
+        .replace(hour=2, minute=0, second=0, microsecond=0)
+        .isoformat(),
     }
 
 

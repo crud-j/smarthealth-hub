@@ -1,6 +1,6 @@
 """
-Admin-editable runtime settings (SDP §5.8): clinic name, reminder lead times
-and SMS reminder templates.
+Admin-editable runtime settings (SDP §5.8): clinic name, reminder lead times,
+clinic hours (when appointments can be booked) and SMS reminder templates.
 
 Each value is the admin's override from ``system_settings`` when one exists,
 otherwise the default (``.env`` via ``settings``, or the built-in template).
@@ -20,13 +20,14 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time
 from typing import Any
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.exceptions import ValidationError
 from app.models.system_setting import SystemSetting
 from app.models.user import User
 from app.schemas.system_config import (
@@ -53,6 +54,30 @@ from app.services.sms_templates import (
 BHC_NAME = "bhc_name"
 REMINDER_LEAD_HOURS = "sms_reminder_lead_hours"
 IMMUNIZATION_LEAD_DAYS = "sms_immunization_lead_days"
+# Clinic hours ("HH:MM", Manila time): appointments can only be booked in
+# [open, close). Default 7:00 AM to 5:00 PM.
+CLINIC_OPEN_TIME = "clinic_open_time"
+CLINIC_CLOSE_TIME = "clinic_close_time"
+DEFAULT_CLINIC_OPEN_TIME = "07:00"
+DEFAULT_CLINIC_CLOSE_TIME = "17:00"
+
+_SIMPLE_KEYS = (
+    BHC_NAME,
+    REMINDER_LEAD_HOURS,
+    IMMUNIZATION_LEAD_DAYS,
+    CLINIC_OPEN_TIME,
+    CLINIC_CLOSE_TIME,
+)
+
+
+def _hhmm(value: str) -> time:
+    hours, minutes = value.split(":")
+    return time(int(hours), int(minutes))
+
+
+def format_clock(value: time) -> str:
+    """time(17, 0) -> "5:00 PM" (no leading zero)."""
+    return value.strftime("%I:%M %p").lstrip("0")
 
 
 def setting_defaults() -> dict[str, Any]:
@@ -61,6 +86,8 @@ def setting_defaults() -> dict[str, Any]:
         BHC_NAME: settings.BHC_NAME,
         REMINDER_LEAD_HOURS: settings.SMS_REMINDER_LEAD_HOURS,
         IMMUNIZATION_LEAD_DAYS: settings.SMS_IMMUNIZATION_LEAD_DAYS,
+        CLINIC_OPEN_TIME: DEFAULT_CLINIC_OPEN_TIME,
+        CLINIC_CLOSE_TIME: DEFAULT_CLINIC_CLOSE_TIME,
     }
     for kind in TEMPLATE_KINDS:
         for lang in TEMPLATE_LANGUAGES:
@@ -86,6 +113,25 @@ class RuntimeSettings:
     @property
     def sms_immunization_lead_days(self) -> int:
         return int(self.values[IMMUNIZATION_LEAD_DAYS])
+
+    @property
+    def clinic_open_time(self) -> time:
+        return _hhmm(str(self.values[CLINIC_OPEN_TIME]))
+
+    @property
+    def clinic_close_time(self) -> time:
+        return _hhmm(str(self.values[CLINIC_CLOSE_TIME]))
+
+    def outside_clinic_hours(self, local_time: time) -> str | None:
+        """A plain refusal if ``local_time`` (Manila) is outside clinic hours."""
+        opens, closes = self.clinic_open_time, self.clinic_close_time
+        if opens <= local_time < closes:
+            return None
+        return (
+            f"Appointments can only be booked during clinic hours, "
+            f"{format_clock(opens)} to {format_clock(closes)}. "
+            "Pick a time in that range (check AM / PM)."
+        )
 
     def render_sms(self, kind: str, lang: str | None, **values: object) -> str:
         """
@@ -159,6 +205,8 @@ async def get_settings_view(db: AsyncSession) -> SystemSettingsResponse:
         bhc_name=SettingValue(**bhc),
         sms_reminder_lead_hours=SettingValue(**item(REMINDER_LEAD_HOURS)),
         sms_immunization_lead_days=SettingValue(**item(IMMUNIZATION_LEAD_DAYS)),
+        clinic_open_time=SettingValue(**item(CLINIC_OPEN_TIME)),
+        clinic_close_time=SettingValue(**item(CLINIC_CLOSE_TIME)),
         sms_templates=templates,
         sample_values={**SAMPLE_VALUES, "bhc_name": str(bhc["value"])},
     )
@@ -167,7 +215,7 @@ async def get_settings_view(db: AsyncSession) -> SystemSettingsResponse:
 def requested_changes(body: SystemSettingsUpdate) -> dict[str, Any]:
     """Map the request body to ``{key: new value or None (= reset)}``."""
     changes: dict[str, Any] = {}
-    for name in (BHC_NAME, REMINDER_LEAD_HOURS, IMMUNIZATION_LEAD_DAYS):
+    for name in _SIMPLE_KEYS:
         if name in body.model_fields_set:
             changes[name] = getattr(body, name)
     for dotted, text in (body.sms_templates or {}).items():
@@ -191,12 +239,27 @@ async def update_settings(
     defaults = setting_defaults()
     current = await load_runtime_settings(db)
     rows = {row.key: row for row, _ in await _overrides(db)}
+    changes = requested_changes(body)
+
+    # Clinic hours: closing must come after opening, using the values in
+    # effect after this save (one of them may be unchanged or reset).
+    def effective(key: str) -> str:
+        if key not in changes:
+            return str(current.values[key])
+        return str(defaults[key] if changes[key] is None else changes[key])
+
+    opens, closes = effective(CLINIC_OPEN_TIME), effective(CLINIC_CLOSE_TIME)
+    if _hhmm(closes) <= _hhmm(opens):
+        raise ValidationError(
+            "The closing time must be after the opening time.",
+            detail={"clinic_open_time": opens, "clinic_close_time": closes},
+        )
 
     # updated_at is set here, not by the DB default, so the ORM object always
     # holds a real value (no reload needed after commit).
     now = datetime.now(tz=UTC)
     audit_changes: dict[str, dict[str, Any]] = {}
-    for key, new in requested_changes(body).items():
+    for key, new in changes.items():
         before = current.values[key]
         if new is None or new == defaults[key]:
             after = defaults[key]

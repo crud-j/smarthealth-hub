@@ -152,3 +152,10 @@ class PaginatedAppointments(BaseSchema):
     total: int
     page: int
     page_size: int
+
+
+class ClinicHoursResponse(BaseSchema):
+    """When appointments can be booked (Manila time, "HH:MM", close exclusive)."""
+
+    open_time: str
+    close_time: str
