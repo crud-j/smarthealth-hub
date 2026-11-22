@@ -48,6 +48,7 @@ from app.schemas.appointment import (
     AppointmentResponse,
     AppointmentUpdate,
 )
+from app.services import patient_service
 from app.services.analytics_service import _invalidate_analytics_cache
 from app.services.audit_service import write_audit_log
 
@@ -89,17 +90,6 @@ def _appointment_to_response(appt: Appointment, patient: Patient) -> Appointment
         intake_completed=appt.intake_completed,
         intake_submitted_at=appt.intake_submitted_at,
     )
-
-
-async def _get_patient_or_404(db: AsyncSession, patient_id: uuid.UUID) -> Patient:
-    """Load patient by PK; raise NotFoundError if missing or inactive."""
-    result = await db.execute(
-        select(Patient).where(Patient.id == patient_id, Patient.is_active.is_(True))
-    )
-    patient: Patient | None = result.scalar_one_or_none()
-    if patient is None:
-        raise NotFoundError(f"Patient '{patient_id}' not found or is inactive.")
-    return patient
 
 
 async def _get_appointment_with_patient(
@@ -219,10 +209,11 @@ async def create_appointment(
         AppointmentResponse with denormalized patient fields.
 
     Raises:
-        NotFoundError:    Patient does not exist or is inactive.
+        NotFoundError:    Patient does not exist.
+        ConflictError:    Patient is deactivated or archived.
         ValidationError:  scheduled_at is in the past.
     """
-    patient = await _get_patient_or_404(db, data.patient_id)
+    patient = await patient_service.require_patient_in_use(db, data.patient_id)
 
     # Business rule: appointment must be in the future.
     now = datetime.now(tz=data.scheduled_at.tzinfo)

@@ -121,9 +121,7 @@ async def create_visit(
 
     Auth: BHW, Physician/Nurse/Midwife.
     """
-    # Validate patient exists
-    await patient_service.get_patient(db, patient_id)
-
+    # The service checks the patient exists (404) and is in use (409).
     ip = _get_client_ip(request)
     return await visit_service.create_visit(
         db,
@@ -284,9 +282,7 @@ async def add_medical_history(
     Auth: Physician/Nurse/Midwife only (SDP Section 10.3 RBAC matrix, admin
     role model B).
     """
-    # Validate patient exists — raises NotFoundError (HTTP 404) if not found
-    await patient_service.get_patient(db, patient_id)
-
+    # The service checks the patient exists (404) and is in use (409).
     ip = _get_client_ip(request)
     return await medical_history_service.add_medical_history(
         db,

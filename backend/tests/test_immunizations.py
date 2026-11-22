@@ -446,8 +446,10 @@ async def test_create_immunization_unknown_patient_returns_error(
     bhw_user: tuple[User, str],
 ) -> None:
     """
-    POST to a non-existent patient_id triggers a DB foreign-key violation.
-    The exception handler returns 409 Conflict (integrity error).
+    POST to a non-existent patient_id is refused with 404 Not Found.
+
+    The service looks the patient up first (it must exist and be in use), so
+    this no longer reaches the database foreign key (which used to give 409).
     """
     _, token = bhw_user
     fake_patient_id = uuid.uuid4()
@@ -456,8 +458,7 @@ async def test_create_immunization_unknown_patient_returns_error(
         json=_immunization_payload(),
         headers={"Authorization": f"Bearer {token}"},
     )
-    # FK violation → integrity error handler returns 409 Conflict
-    assert resp.status_code == 409
+    assert resp.status_code == 404, resp.text
 
 
 # ---------------------------------------------------------------------------

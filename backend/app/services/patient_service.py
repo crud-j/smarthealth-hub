@@ -35,7 +35,7 @@ from typing import Any
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import ConflictError, NotFoundError
 from app.core.logging import get_logger
 from app.models.patient import Patient
 from app.models.user import User
@@ -263,6 +263,43 @@ async def get_patient(db: AsyncSession, patient_id: uuid.UUID) -> Patient:
     patient: Patient | None = result.scalar_one_or_none()
     if patient is None:
         raise NotFoundError(f"Patient with ID {patient_id} was not found.")
+    return patient
+
+
+INACTIVE_PATIENT_MESSAGE = (
+    "The patient is inactive. Reactivate them on the Inactive Patients page first."
+)
+ARCHIVED_PATIENT_MESSAGE = "The patient is archived. Restore them from the Patient Archive first."
+
+
+def not_in_use_reason(patient: Patient) -> str | None:
+    """
+    Why a patient is out of daily work, or ``None`` if they are in it.
+
+    Deactivated (``is_active=False``) and archived patients take no new
+    visits, immunizations, bookings or SMS until an Admin switches them back
+    on. Inactive is reported first: it is the switch staff look for.
+    """
+    if not patient.is_active:
+        return INACTIVE_PATIENT_MESSAGE
+    if patient.archived_at is not None:
+        return ARCHIVED_PATIENT_MESSAGE
+    return None
+
+
+async def require_patient_in_use(db: AsyncSession, patient_id: uuid.UUID) -> Patient:
+    """
+    Load a patient that is about to get a new record (visit, dose, booking).
+
+    Raises:
+        NotFoundError: If the patient does not exist.
+        ConflictError: If the patient is deactivated or archived (HTTP 409);
+                       the message says how to switch them back on.
+    """
+    patient = await get_patient(db, patient_id)
+    reason = not_in_use_reason(patient)
+    if reason is not None:
+        raise ConflictError(reason, detail={"patient_id": str(patient_id)})
     return patient
 
 
