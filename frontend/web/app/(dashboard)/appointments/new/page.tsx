@@ -8,6 +8,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useCreateAppointment } from "@/hooks/useAppointments";
 import { usePatientList } from "@/hooks/usePatients";
 import { toast } from "@/lib/toast";
+import { manilaIso, manilaToday } from "@/lib/manila-time";
 import { appointmentCreateSchema, type AppointmentCreateFormValues } from "@/lib/schemas/appointment";
 import type { AppointmentType } from "@/types/appointment";
 
@@ -94,7 +95,8 @@ export default function NewAppointmentPage() {
   }, [setValue]);
 
   const onSubmit = async (data: AppointmentCreateFormValues) => {
-    const scheduledAt = `${data.scheduledDate}T${data.scheduledTime}:00`;
+    // Manila time, sent with +08:00 (the server runs on UTC).
+    const scheduledAt = manilaIso(data.scheduledDate, data.scheduledTime);
     const result = await createAppointment({
       patientId: data.patientId,
       appointmentType: data.appointmentType as AppointmentType,
@@ -107,9 +109,10 @@ export default function NewAppointmentPage() {
   // Human-readable summary of what's currently selected (presentation only)
   const schedulePreview = (() => {
     if (!scheduledDateValue || !scheduledTimeValue) return null;
-    const dt = new Date(`${scheduledDateValue}T${scheduledTimeValue}:00`);
+    const dt = new Date(manilaIso(scheduledDateValue, scheduledTimeValue));
     if (Number.isNaN(dt.getTime())) return null;
     return dt.toLocaleString("en-PH", {
+      timeZone: "Asia/Manila",
       weekday: "long", month: "long", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit",
     });
   })();
@@ -204,7 +207,7 @@ export default function NewAppointmentPage() {
                     <label htmlFor="appt-date" className={labelCls}>
                       Date <span className="text-[#dc2626]" aria-hidden="true">*</span>
                     </label>
-                    <input id="appt-date" type="date" {...register("scheduledDate")} min={new Date().toISOString().split("T")[0]}
+                    <input id="appt-date" type="date" {...register("scheduledDate")} min={manilaToday()}
                       className={`${inputCls} ${errors.scheduledDate ? "border-[#fca5a5]" : ""}`} />
                     {errors.scheduledDate && <p className="mt-1 text-xs text-[#dc2626]" role="alert">{errors.scheduledDate.message}</p>}
                   </div>

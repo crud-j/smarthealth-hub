@@ -11,6 +11,7 @@
  * This component is a controlled component — the parent provides onSubmit.
  */
 
+import { manilaIso } from "@/lib/manila-time";
 import type { AppointmentCreatePayload, AppointmentType } from "@/types/appointment";
 
 const APPT_TYPES: { value: AppointmentType; label: string }[] = [
@@ -58,7 +59,7 @@ export default function AppointmentForm({
     await onSubmit({
       patientId,
       appointmentType,
-      scheduledAt: `${scheduledDate}T${scheduledTime}:00`,
+      scheduledAt: manilaIso(scheduledDate, scheduledTime),
       notes: notes || undefined,
     });
   }
