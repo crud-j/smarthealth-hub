@@ -44,6 +44,7 @@ from sqlalchemy.engine import CursorResult
 from app.core.logging import get_logger
 from app.services.sms_templates import confirmation_suffix
 from app.services.system_settings_service import load_runtime_settings
+from app.utils.manila_time import to_manila
 from app.workers.celery_app import celery_app
 from app.workers.monitoring_tasks import record_reminder_run
 
@@ -139,8 +140,9 @@ async def _dispatch_appointment_reminders_async() -> int:
 
         for appt, patient in rows:
             full_name = _build_full_name(patient.first_name, patient.middle_name, patient.last_name)
-            scheduled_date = appt.scheduled_at.strftime("%m/%d/%Y")
-            scheduled_time = appt.scheduled_at.strftime("%I:%M %p")
+            local = to_manila(appt.scheduled_at)  # stored times are UTC
+            scheduled_date = local.strftime("%m/%d/%Y")
+            scheduled_time = local.strftime("%I:%M %p")
 
             base_message = runtime.render_sms(
                 "appointment_reminder",

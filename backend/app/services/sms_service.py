@@ -70,6 +70,7 @@ import httpx
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.utils.manila_time import to_manila
 
 logger = get_logger(__name__)
 
@@ -896,8 +897,9 @@ class SMSService:
             Formatted SMS string (plain text, may exceed 160 chars — the
             active provider handles segmentation automatically).
         """
-        scheduled_date = scheduled_at.strftime("%m/%d/%Y")
-        scheduled_time = scheduled_at.strftime("%I:%M %p")
+        local = to_manila(scheduled_at)  # stored times are UTC
+        scheduled_date = local.strftime("%m/%d/%Y")
+        scheduled_time = local.strftime("%I:%M %p")
 
         return (
             f"Hi {patient_name}, this is a reminder for your "

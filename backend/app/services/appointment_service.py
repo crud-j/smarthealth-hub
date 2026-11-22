@@ -30,7 +30,7 @@ Audit log actions used:
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from sqlalchemy import func, select
@@ -215,9 +215,10 @@ async def create_appointment(
     """
     patient = await patient_service.require_patient_in_use(db, data.patient_id)
 
-    # Business rule: appointment must be in the future.
-    now = datetime.now(tz=data.scheduled_at.tzinfo)
-    if data.scheduled_at <= now:
+    # Business rule: appointment must be in the future. scheduled_at always
+    # carries a timezone (the schema pins a missing one to Manila), so this
+    # compares real moments, not Manila wall time with the server's clock.
+    if data.scheduled_at <= datetime.now(tz=UTC):
         raise ValidationError(
             "scheduled_at must be a future datetime.",
             detail={"scheduled_at": str(data.scheduled_at)},
@@ -418,8 +419,7 @@ async def update_appointment(
         changed_fields["appointment_type"] = data.appointment_type
 
     if data.scheduled_at is not None:
-        now = datetime.now(tz=data.scheduled_at.tzinfo)
-        if data.scheduled_at <= now:
+        if data.scheduled_at <= datetime.now(tz=UTC):
             raise ValidationError(
                 "scheduled_at must be a future datetime.",
                 detail={"scheduled_at": str(data.scheduled_at)},

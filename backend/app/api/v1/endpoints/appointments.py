@@ -35,6 +35,7 @@ from app.schemas.appointment import (
     PaginatedAppointments,
 )
 from app.services import appointment_service, system_settings_service
+from app.utils.manila_time import to_manila
 
 router = APIRouter(prefix="/appointments", tags=["appointments"])
 
@@ -277,8 +278,8 @@ async def send_appointment_reminder(
     if not patient.mobile_number:
         return {"sent": False, "error": "Patient has no registered mobile number."}
 
-    # Format scheduled_at for the SMS body.
-    formatted_date = appt.scheduled_at.strftime("%B %d, %Y at %I:%M %p")
+    # Format scheduled_at for the SMS body, on the Manila clock (stored as UTC).
+    formatted_date = to_manila(appt.scheduled_at).strftime("%B %d, %Y at %I:%M %p")
 
     # Human-readable appointment type (replace underscores, title-case).
     appointment_type_label = appt.appointment_type.replace("_", " ").title()
