@@ -6,7 +6,7 @@
  * No external masking library is used.
  *
  * Exported hooks:
- *   usePhilHealthMask(register) — formats PhilHealth number as XX-XXXXXXXXXXX-X
+ *   usePhilHealthMask(register) — formats PhilHealth number as XX-XXXXXXXXX-X
  *   usePhMobileMask(register)   — normalizes Philippine mobile numbers
  *
  * Usage with React Hook Form:
@@ -20,12 +20,12 @@
 import type { UseFormRegisterReturn } from "react-hook-form";
 
 // ---------------------------------------------------------------------------
-// PhilHealth number mask: XX-XXXXXXXXXXX-X (12 digits, hyphens at pos 2 and 13)
+// PhilHealth number mask: XX-XXXXXXXXX-X (12 digits, hyphens at pos 2 and 12)
 // ---------------------------------------------------------------------------
 
 /**
  * Wraps a React Hook Form register() return value for a PhilHealth number field.
- * Automatically inserts hyphens at positions 2 and 13 as the user types.
+ * Automatically inserts hyphens at positions 2 and 12 as the user types.
  *
  * The raw stored value (in form state) is the masked string, e.g. "12-345678901-2".
  * The backend strips hyphens during Pydantic validation (philhealth_no is a free
@@ -34,7 +34,7 @@ import type { UseFormRegisterReturn } from "react-hook-form";
  * Rules:
  * - Strip all non-numeric characters.
  * - Insert hyphen after the 2nd digit.
- * - Insert hyphen after the 11th digit (13th character in the masked string).
+ * - Insert hyphen after the 11th digit (12th character in the masked string).
  * - Cap at 14 total characters (12 digits + 2 hyphens).
  */
 export function usePhilHealthMask(
@@ -50,14 +50,15 @@ export function usePhilHealthMask(
     // Cap at 12 digits
     const capped = digits.slice(0, 12);
 
-    // Insert hyphens: XX-XXXXXXXXXXX-X
+    // Insert hyphens: XX-XXXXXXXXX-X (2 + 9 + 1 digits)
     let masked = capped;
     if (capped.length > 2) {
       masked = capped.slice(0, 2) + "-" + capped.slice(2);
     }
     if (capped.length > 11) {
-      // After inserting the first hyphen, the 11th digit is at index 12
-      masked = masked.slice(0, 13) + "-" + masked.slice(13);
+      // "12-345678901" is 12 characters; the 12th digit goes after a hyphen.
+      // (This used to cut at 13 and gave "12-3456789012-".)
+      masked = masked.slice(0, 12) + "-" + masked.slice(12);
     }
 
     // Mutate the synthetic event value so RHF receives the formatted string

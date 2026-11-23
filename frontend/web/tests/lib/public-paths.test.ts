@@ -16,6 +16,7 @@ const PUBLIC = [
   "/register", // online self-registration (poster QR)
   "/intake", // public intake form (social media link)
   "/intake/abc123", // token pre-visit form
+  "/photo-capture/abc123", // phone page from the patient-photo QR (token is the permission)
   "/api/v1/auth/login",
   "/_next/static/chunks/app.js",
   "/favicon.ico",
@@ -37,6 +38,7 @@ const PROTECTED = [
   "/registerx",
   "/registrations", // admin review of online registrations
   "/intakex",
+  "/photo-capturex",
   "/apix",
 ]
 

@@ -55,6 +55,43 @@ function requiredPhMobileValidator(label: string) {
     );
 }
 
+/**
+ * An optional choice from a <select>. Its "— Select —" option gives "", which
+ * means "not chosen" (undefined), not an invalid value. Without this the empty
+ * Blood Type / PhilHealth Category dropdowns failed with
+ * "Invalid enum value ... received ''".
+ */
+function optionalChoice<const T extends readonly [string, ...string[]]>(values: T) {
+  return z.preprocess(
+    (v) => (v === "" ? undefined : v),
+    z.enum(values).optional().nullable(),
+  );
+}
+
+/**
+ * An optional number input. An empty <input type="number"> read with
+ * valueAsNumber gives NaN: that means "not filled in", not an error.
+ * (Without this, leaving Baseline Height / Weight empty blocked registration
+ * with "Expected number, received nan".)
+ */
+function optionalNumber(schema: z.ZodNumber) {
+  return z.preprocess(
+    (v) => (v === "" || (typeof v === "number" && Number.isNaN(v)) ? undefined : v),
+    schema.optional().nullable(),
+  );
+}
+
+export const PHILHEALTH_CATEGORIES = [
+  "indigent",
+  "sponsored",
+  "formal_economy",
+  "informal_economy",
+  "lifetime_member",
+] as const;
+
+/** PhilHealth No. (PIN): 12 digits, written 12-345678901-2. */
+export const PHILHEALTH_NO_RE = /^\d{2}-?\d{9}-?\d$/;
+
 export const patientCreateSchema = z.object({
   // Section 1 — Name
   firstName: z.string().min(1, "First name is required.").max(100),
@@ -78,24 +115,12 @@ export const patientCreateSchema = z.object({
   municipality: z.string().min(1, "Municipality is required.").max(150),
   province: z.string().min(1, "Province is required.").max(150),
   occupation: z.string().max(150).optional().nullable(),
-  bloodType: z
-    .enum(["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-", "Unknown"])
-    .optional()
-    .nullable(),
+  bloodType: optionalChoice(["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-", "Unknown"]),
 
-  // Section 3 — PhilHealth
+  // Section 3 — PhilHealth (the rules between these fields: philhealthIssues)
   philhealthNo: z.string().max(20).optional().nullable(),
-  philhealthMemberType: z.enum(["member", "dependent"]).optional().nullable(),
-  philhealthCategory: z
-    .enum([
-      "indigent",
-      "sponsored",
-      "formal_economy",
-      "informal_economy",
-      "lifetime_member",
-    ])
-    .optional()
-    .nullable(),
+  philhealthMemberType: optionalChoice(["member", "dependent"]),
+  philhealthCategory: optionalChoice(PHILHEALTH_CATEGORIES),
   is4psBeneficiary: z.boolean().default(false),
   householdId4ps: z.string().max(80).optional().nullable(),
   isIndigenous: z.boolean().default(false),
@@ -124,11 +149,15 @@ export const patientCreateSchema = z.object({
   seniorIdNumber: z.string().max(80).optional().nullable(),
   pwdIdNumber: z.string().max(80).optional().nullable(),
   lastMenstrualPeriod: z.string().optional().nullable(),
-  gravida: z.number().int().min(0).optional().nullable(),
-  para: z.number().int().min(0).optional().nullable(),
+  gravida: optionalNumber(z.number().int("Gravida is a whole number.").min(0, "Gravida cannot be negative.")),
+  para: optionalNumber(z.number().int("Para is a whole number.").min(0, "Para cannot be negative.")),
   estimatedDueDate: z.string().optional().nullable(),
-  heightCm: z.number().min(30).max(250).optional().nullable(),
-  weightKg: z.number().min(0.5).max(500).optional().nullable(),
+  heightCm: optionalNumber(
+    z.number().min(30, "Height must be 30 to 250 cm.").max(250, "Height must be 30 to 250 cm."),
+  ),
+  weightKg: optionalNumber(
+    z.number().min(0.5, "Weight must be 0.5 to 500 kg.").max(500, "Weight must be 0.5 to 500 kg."),
+  ),
   allergies: z.string().max(5000).optional().nullable(),
   knownConditions: z.string().max(5000).optional().nullable(),
   registrationSource: z
@@ -142,13 +171,53 @@ export const patientCreateSchema = z.object({
   confirmDuplicate: z.boolean().default(false),
 
   // Data-entry source — set by the frontend based on how registration was initiated.
-  // 'manual': staff typed all fields. 'ocr': ID scan autofill used. 'pre_visit': patient self-entry.
+  // 'manual': staff typed all fields. 'pre_visit': patient self-entry.
+  // 'ocr' was the government-ID scan (removed); older records may still have it.
   registrationDataSource: z
     .enum(["manual", "ocr", "pre_visit"])
     .default("manual"),
 });
 
 export type PatientCreateFormValues = z.infer<typeof patientCreateSchema>;
+
+/**
+ * PhilHealth rules between the fields (messages as shown on the form):
+ *   - None (no member type): nothing else needed; the form locks and clears
+ *     the PhilHealth No. and category.
+ *   - Member or Dependent: the PhilHealth No. is required.
+ *   - Member: the category is required (a dependent is covered under the
+ *     member's category, so it stays optional there).
+ *   - A PhilHealth No., when given, has 12 digits (12-345678901-2).
+ */
+export function philhealthIssues(data: {
+  philhealthNo?: string | null;
+  philhealthMemberType?: string | null;
+  philhealthCategory?: string | null;
+}): Array<{ path: "philhealthNo" | "philhealthCategory"; message: string }> {
+  const issues: Array<{ path: "philhealthNo" | "philhealthCategory"; message: string }> = [];
+  const number = data.philhealthNo?.trim() ?? "";
+  const type = data.philhealthMemberType;
+  if (number && !PHILHEALTH_NO_RE.test(number)) {
+    issues.push({ path: "philhealthNo", message: "PhilHealth No. must have 12 digits (e.g. 12-345678901-2)." });
+  } else if (!number && (type === "member" || type === "dependent")) {
+    issues.push({ path: "philhealthNo", message: "Enter the PhilHealth No. of this member or dependent." });
+  }
+  if (type === "member" && !data.philhealthCategory) {
+    issues.push({ path: "philhealthCategory", message: "Choose the PhilHealth category of this member." });
+  }
+  return issues;
+}
+
+/**
+ * The Register New Patient form: patientCreateSchema plus the PhilHealth
+ * rules. (patientCreateSchema itself stays a plain object: the edit and
+ * intake schemas are built from it with .pick / .extend.)
+ */
+export const patientRegistrationSchema = patientCreateSchema.superRefine((data, ctx) => {
+  for (const issue of philhealthIssues(data)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: [issue.path], message: issue.message });
+  }
+});
 
 /**
  * The address the backend will store and print, mirroring

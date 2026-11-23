@@ -219,16 +219,6 @@ class Settings(BaseSettings):
     # logic when this is unset.
     OPENAI_API_KEY: str = ""
 
-    # ── OCR / Document extraction ─────────────────────────────────────────────
-    # OCR provider: "tesseract" (default, offline) or "azure" (Document Intelligence).
-    # When "azure", AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT and _KEY must be set.
-    OCR_PROVIDER: str = "tesseract"
-    # Azure Document Intelligence — only used when OCR_PROVIDER="azure"
-    AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT: str = ""
-    AZURE_DOCUMENT_INTELLIGENCE_KEY: str = ""
-    # Maximum image upload size for OCR extraction (bytes). Default: 10 MiB.
-    OCR_MAX_IMAGE_BYTES: int = 10 * 1024 * 1024  # 10 MiB
-
     # ── CORS ──────────────────────────────────────────────────────────────────
     # Must be a JSON array in .env:
     #   CORS_ORIGINS=["http://localhost:3000","http://localhost:8000"]
@@ -239,19 +229,6 @@ class Settings(BaseSettings):
         "http://localhost:3000",  # Next.js dev server
         "http://localhost:8000",  # FastAPI itself (Swagger UI try-it-out)
     ]
-
-    @model_validator(mode="after")
-    def validate_azure_ocr_config(self) -> "Settings":
-        if self.OCR_PROVIDER == "azure":
-            if not self.AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT:
-                raise ValueError(
-                    "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT must be set when OCR_PROVIDER=azure"
-                )
-            if not self.AZURE_DOCUMENT_INTELLIGENCE_KEY:
-                raise ValueError(
-                    "AZURE_DOCUMENT_INTELLIGENCE_KEY must be set when OCR_PROVIDER=azure"
-                )
-        return self
 
     @model_validator(mode="after")
     def validate_encryption_key(self) -> "Settings":

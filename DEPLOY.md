@@ -14,8 +14,8 @@
 ```
 
 Why the backend is not on Vercel: it needs always-on Celery workers, a shared
-disk for photos/PDFs, and system libraries for PDF rendering (WeasyPrint) and
-OCR (Tesseract). Vercel functions provide none of these.
+disk for photos/PDFs, and system libraries for PDF rendering (WeasyPrint).
+Vercel functions provide none of these.
 
 ---
 

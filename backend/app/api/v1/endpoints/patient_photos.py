@@ -4,9 +4,20 @@ Patient profile photo endpoints.
   POST  /patients/{patient_id}/photo   — Upload or replace patient photo
   GET   /patients/{patient_id}/photo   — Stream back the photo file
 
-Both endpoints require JWT authentication.  Upload is restricted to BHW,
-physician, admin_staff, and admin roles (same as patient record writes).
-GET is available to any authenticated staff role.
+  POST  /patients/{patient_id}/photo-capture          — Phone photo link (QR code)
+  GET   /patients/{patient_id}/photo-capture/{token}  — Has the phone sent a photo?
+  GET   /photo-capture/{token}                        — PUBLIC: phone page (initials only)
+  POST  /photo-capture/{token}                        — PUBLIC: phone uploads the photo
+
+The /patients/... endpoints require JWT authentication.  Upload and phone
+links are restricted to BHW, physician, admin_staff, and admin roles (same as
+patient record writes).  GET photo is available to any authenticated staff role.
+
+The two /photo-capture/{token} endpoints are public on purpose: the phone that
+scans the QR code is not signed in.  The random token (15 minutes, one
+patient) is the permission; it can only upload a photo, never read the photo
+or the record, and every upload is audited as the staff member who made the
+link (see app.services.photo_capture_service).
 
 Swagger UI testability
 ----------------------
@@ -22,15 +33,23 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, File, Request, UploadFile
+from fastapi import APIRouter, File, Request, UploadFile, status
 from fastapi.responses import FileResponse
 
+from app.core.config import settings
 from app.core.exceptions import NotFoundError
 from app.core.logging import get_logger
+from app.core.rate_limit import limiter
 from app.core.security import CurrentUser, require_role
 from app.db.session import DbDep
-from app.schemas.patient_photo import PhotoUploadResponse
-from app.services import patient_photo_service
+from app.schemas.patient_photo import (
+    PhotoCaptureLinkResponse,
+    PhotoCapturePageResponse,
+    PhotoCaptureStatusResponse,
+    PhotoCaptureUploadResponse,
+    PhotoUploadResponse,
+)
+from app.services import patient_photo_service, photo_capture_service
 from app.services.patient_service import get_patient
 
 logger = get_logger(__name__)
@@ -184,4 +203,137 @@ async def get_patient_photo(
         # Browser cache only (never proxies/CDNs). photo_api_url adds ?v=<mtime>,
         # so a re-uploaded photo gets a new URL.
         headers={"Cache-Control": "private, max-age=86400"},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Phone photo link: POST /patients/{patient_id}/photo-capture
+# ---------------------------------------------------------------------------
+
+_LINK_NOT_FOUND = (
+    "This photo link has expired or does not exist. Make a new QR code on the computer."
+)
+
+
+@router.post(
+    "/patients/{patient_id}/photo-capture",
+    response_model=PhotoCaptureLinkResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Make a phone photo link (shown as a QR code)",
+    description=(
+        "A 15-minute link for one patient. The phone that opens it can upload the "
+        "patient's photo (and retake it) without signing in; it cannot read anything."
+    ),
+    dependencies=[_BHW_PLUS],
+)
+async def create_photo_capture_link(
+    patient_id: uuid.UUID,
+    db: DbDep,
+    current_user: CurrentUser,
+) -> PhotoCaptureLinkResponse:
+    await get_patient(db, patient_id)  # 404 for an unknown patient
+    await limiter.check_rate_limit(
+        key=f"photo_capture_link:{current_user.id}", max_attempts=30, window_seconds=600
+    )
+    link = await photo_capture_service.create_link(patient_id, current_user.id)
+    return PhotoCaptureLinkResponse(
+        token=link.token,
+        capture_url=f"{settings.QR_BASE_URL.rstrip('/')}/photo-capture/{link.token}",
+        expires_at=link.expires_at,
+    )
+
+
+@router.get(
+    "/patients/{patient_id}/photo-capture/{token}",
+    response_model=PhotoCaptureStatusResponse,
+    summary="Has the phone sent a photo yet? (polled by the staff screen)",
+    dependencies=[_BHW_PLUS],
+)
+async def get_photo_capture_status(
+    patient_id: uuid.UUID,
+    token: str,
+) -> PhotoCaptureStatusResponse:
+    link = await photo_capture_service.get_link(token)
+    if link is None or link.patient_id != patient_id:
+        raise NotFoundError(_LINK_NOT_FOUND)
+    return PhotoCaptureStatusResponse(
+        expires_at=link.expires_at,
+        uploaded_at=link.uploaded_at,
+        photo_url=link.photo_url,
+    )
+
+
+# ---------------------------------------------------------------------------
+# PUBLIC phone page: GET / POST /photo-capture/{token}
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/photo-capture/{token}",
+    response_model=PhotoCapturePageResponse,
+    summary="Phone photo page: check the link (public, initials only)",
+)
+async def get_photo_capture_page(
+    token: str,
+    request: Request,
+    db: DbDep,
+) -> PhotoCapturePageResponse:
+    await limiter.check_rate_limit(
+        key=f"photo_capture_view:{_get_client_ip(request) or 'unknown'}",
+        max_attempts=60,
+        window_seconds=60,
+    )
+    link = await photo_capture_service.get_link(token)
+    if link is None:
+        raise NotFoundError(_LINK_NOT_FOUND)
+    patient = await get_patient(db, link.patient_id)
+    return PhotoCapturePageResponse(
+        patient_initials=photo_capture_service.initials(patient.first_name, patient.last_name),
+        expires_at=link.expires_at,
+        uploaded_at=link.uploaded_at,
+    )
+
+
+@router.post(
+    "/photo-capture/{token}",
+    response_model=PhotoCaptureUploadResponse,
+    summary="Phone photo page: upload the patient's photo (public)",
+    description=(
+        "Multipart field ``photo`` (JPEG / PNG / WebP, max 5 MiB). Replaces the "
+        "patient's photo; audited as the staff member who made the link. At most "
+        "10 uploads per link."
+    ),
+)
+async def upload_photo_from_phone(
+    token: str,
+    request: Request,
+    db: DbDep,
+    photo: UploadFile = File(..., description="Patient photo taken on the phone."),
+) -> PhotoCaptureUploadResponse:
+    ip = _get_client_ip(request)
+    link = await photo_capture_service.get_link(token)
+    if link is None:
+        raise NotFoundError(_LINK_NOT_FOUND)
+    await limiter.check_rate_limit(
+        key=f"photo_capture_upload:{token}",
+        max_attempts=10,
+        window_seconds=int(photo_capture_service.LINK_LIFETIME.total_seconds()),
+    )
+
+    url_path = await patient_photo_service.validate_and_save_photo(
+        db=db,
+        patient_id=link.patient_id,
+        upload=photo,
+        updated_by_id=link.created_by_id,
+        ip_address=ip,
+        source="phone_capture",
+    )
+    uploaded_at = await photo_capture_service.mark_uploaded(link, url_path)
+    logger.info(
+        "Patient photo received from a phone link",
+        extra={"patient_id": str(link.patient_id), "link_by": str(link.created_by_id)},
+    )
+    return PhotoCaptureUploadResponse(
+        message="Photo sent. It is now on the computer.",
+        uploaded_at=uploaded_at,
     )

@@ -3,18 +3,34 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Controller, useForm, type SubmitHandler } from "react-hook-form";
+import { Controller, useForm, type Resolver, type SubmitHandler } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import {
+  CalendarPlus,
+  Camera,
+  Check,
+  CircleCheck,
+  CreditCard,
+  HeartPulse,
+  IdCard,
+  MapPinHouse,
+  ShieldCheck,
+  TriangleAlert,
+  UserPlus,
+  UserRound,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { useCreatePatient } from "@/hooks/usePatients";
 import { useCurrentUser } from "@/hooks/useAuth";
 import ProfilePhotoUploader from "@/app/(dashboard)/patients/_components/ProfilePhotoUploader";
 import { toast } from "@/lib/toast";
 import { AlertDialog } from "@/components/ui/alert-dialog";
-import { effectiveAddress, patientCreateSchema } from "@/lib/schemas/patient";
+import { IconBadge } from "@/components/dashboard/shared";
+import { effectiveAddress, patientRegistrationSchema, PHILHEALTH_CATEGORIES } from "@/lib/schemas/patient";
 import type { PatientCreatePayload } from "@/types/patient";
 import { usePhilHealthMask, usePhMobileMask } from "@/hooks/useInputMasks";
-import IdScanCard from "@/components/forms/IdScanCard";
-import type { OcrAutofillFields } from "@/components/forms/IdScanCard";
+
+type PhilhealthCategory = (typeof PHILHEALTH_CATEGORIES)[number];
 
 type PatientCreateFormValues = Omit<PatientCreatePayload, "confirmDuplicate"> & {
   middleName: string | undefined;
@@ -33,7 +49,7 @@ type PatientCreateFormValues = Omit<PatientCreatePayload, "confirmDuplicate"> & 
   emergencyContactNumber: string;
   philhealthNo: string | undefined;
   philhealthMemberType: "member" | "dependent" | undefined;
-  philhealthCategory: "indigent" | "sponsored" | "formal_economy" | "informal_economy" | "lifetime_member" | undefined;
+  philhealthCategory: PhilhealthCategory | undefined;
   is4psBeneficiary: boolean;
   householdId4ps: string | undefined;
   isIndigenous: boolean;
@@ -57,6 +73,46 @@ type PatientCreateFormValues = Omit<PatientCreatePayload, "confirmDuplicate"> & 
 
 const pilotDefaults = { barangay: "Patubig", municipality: "Marilao", province: "Bulacan" } as const;
 
+const STEPS: Array<{ label: string; hint: string; icon: LucideIcon }> = [
+  { label: "Identity", hint: "Name, birth, location", icon: IdCard },
+  { label: "Contact", hint: "Phone, address, emergency", icon: MapPinHouse },
+  { label: "PhilHealth & health", hint: "Coverage, programs, consent", icon: HeartPulse },
+  { label: "Photo", hint: "Photo and next steps", icon: Camera },
+];
+
+const CATEGORY_LABELS: Record<PhilhealthCategory, string> = {
+  indigent: "Indigent",
+  sponsored: "Sponsored",
+  formal_economy: "Formal Economy",
+  informal_economy: "Informal Economy",
+  lifetime_member: "Lifetime Member",
+};
+
+/** Names people read, for the "Please correct" list (never code names). */
+const FIELD_LABELS: Record<string, string> = {
+  firstName: "First Name", middleName: "Middle Name", lastName: "Last Name", birthDate: "Birthday",
+  sex: "Sex", civilStatus: "Civil Status", householdNumber: "Household / Family Number",
+  sitioPurok: "Sitio / Purok", barangay: "Barangay", municipality: "Municipality", province: "Province",
+  occupation: "Occupation", bloodType: "Blood Type", placeOfBirth: "Place of Birth",
+  mothersMaidenName: "Mother's Maiden Name", mobileNumber: "Patient Contact No.",
+  address: "Home Address / Landmark", guardianName: "Guardian Name", guardianContact: "Guardian Contact No.",
+  emergencyContactName: "Emergency Contact Name", emergencyContactNumber: "Emergency Contact No.",
+  philhealthNo: "PhilHealth No.", philhealthMemberType: "PhilHealth Member Type",
+  philhealthCategory: "PhilHealth Category", is4psBeneficiary: "4Ps Beneficiary", householdId4ps: "4Ps Household ID",
+  isIndigenous: "Indigenous Peoples", isPwd: "PWD", isPregnant: "Pregnant", seniorIdNumber: "Senior ID Number",
+  pwdIdNumber: "PWD ID Number", lastMenstrualPeriod: "Last Menstrual Period", gravida: "Gravida", para: "Para",
+  estimatedDueDate: "Estimated Due Date", heightCm: "Baseline Height", weightKg: "Baseline Weight",
+  allergies: "Allergies", knownConditions: "Known Conditions", registrationSource: "Registration Source",
+  dataPrivacyConsent: "Data Privacy Consent",
+};
+
+const FIELDS_BY_STEP: Record<number, (keyof PatientCreateFormValues)[]> = {
+  1: ["firstName", "middleName", "lastName", "birthDate", "sex", "civilStatus", "householdNumber", "sitioPurok", "barangay", "municipality", "province", "occupation", "bloodType", "placeOfBirth", "mothersMaidenName"],
+  2: ["mobileNumber", "address", "guardianName", "guardianContact", "emergencyContactName", "emergencyContactNumber"],
+  3: ["philhealthNo", "philhealthMemberType", "philhealthCategory", "is4psBeneficiary", "householdId4ps", "isIndigenous", "isPwd", "isPregnant", "seniorIdNumber", "pwdIdNumber", "lastMenstrualPeriod", "gravida", "para", "estimatedDueDate", "heightCm", "weightKg", "allergies", "knownConditions", "registrationSource", "dataPrivacyConsent"],
+  4: [],
+};
+
 function computeAge(birthDateStr: string): number {
   if (!birthDateStr) return 0;
   const bd = new Date(birthDateStr);
@@ -67,75 +123,153 @@ function computeAge(birthDateStr: string): number {
   return Math.max(0, age);
 }
 
-function getStepLabel(step: number): string {
-  switch (step) {
-    case 1: return "Identity";
-    case 2: return "Contact";
-    case 3: return "Clinical";
-    case 4: return "Photo";
-    default: return "";
-  }
-}
+// Shared classes
+const inputCls =
+  "w-full rounded-xl border border-[#e5d4cc] bg-white px-3 py-2.5 text-sm text-[#1a0808] transition placeholder:text-[#c4a8a0] focus-visible:border-[#b5343e] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e]/30 disabled:cursor-not-allowed disabled:bg-[#f7f0ed] disabled:text-[#a89490]";
+const errorInput = "border-[#f0a0a0] bg-[#fffafa]";
+const labelCls = "mb-1.5 block text-[0.7rem] font-semibold uppercase tracking-[0.08em] text-[#5a3a3a]";
+const hintCls = "mt-1 text-xs text-[#9b7e7e]";
+const primaryBtn =
+  "inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-gradient-to-br from-[#b5343e] to-[#c94060] px-6 py-2.5 text-sm font-bold text-white shadow-sm transition hover:brightness-105 disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#b5343e]";
+const secondaryBtn =
+  "inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-[#e5d4cc] bg-white px-5 py-2.5 text-sm font-semibold text-[#3d2222] transition hover:bg-[#fdf5f0] disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#b5343e]";
 
 function FieldError({ message }: { message?: string }) {
   if (!message) return null;
-  return <p className="mt-1 text-xs text-[#dc2626]">{message}</p>;
+  return (
+    <p className="mt-1 flex items-start gap-1 text-xs font-medium text-[#c0262d]">
+      <TriangleAlert size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
+      {message}
+    </p>
+  );
 }
 
-const FIELD_LABELS: Record<string, string> = {
-  firstName: "First Name", lastName: "Last Name", birthDate: "Birthday", sex: "Sex",
-  barangay: "Barangay", municipality: "Municipality", province: "Province",
-  address: "Complete Address", emergencyContactName: "Emergency Contact Name",
-  emergencyContactNumber: "Emergency Contact No.", mobileNumber: "Contact No.",
-  guardianContact: "Guardian Contact No.", dataPrivacyConsent: "Data Privacy Consent",
-  registrationSource: "Registration Source",
-};
+function Req() {
+  return <span className="text-[#b5343e]" aria-hidden="true"> *</span>;
+}
 
-function StepErrorSummary({ errors, attempted }: { errors: Record<string, { message?: string } | undefined>; attempted: boolean }) {
+function StepErrorSummary({
+  errors,
+  attempted,
+}: {
+  errors: Record<string, { message?: string } | undefined>;
+  attempted: boolean;
+}) {
   if (!attempted) return null;
-  const errorEntries = Object.entries(errors).filter(([, v]) => v?.message);
-  if (errorEntries.length === 0) return null;
+  const entries = Object.entries(errors).filter(([, v]) => v?.message);
+  if (entries.length === 0) return null;
   return (
-    <div role="alert" className="mb-4 rounded-xl border border-[#fcc] bg-[#fef2f2] px-4 py-3 text-sm font-medium text-[#b91c1c]">
-      <strong className="mb-2 block">Please correct the following before continuing:</strong>
-      <ul className="ml-5 list-disc space-y-0.5">
-        {errorEntries.map(([field, error]) => (
-          <li key={field}>{FIELD_LABELS[field] ?? field}: {error?.message ?? "Required"}</li>
+    <div role="alert" className="mb-5 rounded-2xl border border-[#f5c2c2] bg-[#fef4f4] px-4 py-3.5 text-sm text-[#9f1f26]">
+      <p className="mb-1.5 flex items-center gap-2 font-bold">
+        <TriangleAlert size={16} aria-hidden="true" />
+        Please correct the following before continuing:
+      </p>
+      <ul className="ml-6 list-disc space-y-0.5">
+        {entries.map(([name, error]) => (
+          <li key={name}>
+            <button
+              type="button"
+              onClick={() => document.getElementById(name)?.focus()}
+              className="text-left underline-offset-2 hover:underline"
+            >
+              {FIELD_LABELS[name] ?? "This field"}: {error?.message ?? "Required"}
+            </button>
+          </li>
         ))}
       </ul>
     </div>
   );
 }
 
-function ocrBorderClass(fieldName: string, ocrFilledFields: Set<string>): string {
-  return ocrFilledFields.has(fieldName) ? "border-l-[3px] border-l-amber-400" : "";
-}
-
-// Shared input class
-const inputCls = "w-full rounded-lg border border-[#e5d4cc] bg-white px-3 py-2 text-sm text-[#1a0808] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e]";
-const labelCls = "mb-1 block text-xs font-semibold uppercase tracking-wider text-[#3d2222]";
-
-// Section panel
-function SectionPanel({ children }: { children: React.ReactNode }) {
+function Card({ children }: { children: React.ReactNode }) {
   return (
-    <div
-      className="mb-4 overflow-hidden rounded-xl bg-white border border-[#e5d4cc]"
-      style={{ boxShadow: "0 2px 10px rgba(160,80,80,0.07)" }}
-    >
+    <div className="mb-4 overflow-hidden rounded-2xl border border-[#eadbd3] bg-white shadow-[0_1px_2px_rgba(60,20,20,0.04),0_8px_24px_-12px_rgba(120,40,40,0.12)]">
       {children}
     </div>
   );
 }
 
-function SectionHeader({ title, subtitle }: { title: string; subtitle?: string }) {
+function CardHeader({ icon, title, subtitle }: { icon: LucideIcon; title: string; subtitle?: string }) {
   return (
-    <div className="flex items-center gap-2.5 px-5 py-4 bg-gradient-to-br from-[#fdf0eb] to-white border-b border-[#edd9d0]">
-      <span className="inline-block h-4 w-1 rounded-full bg-gradient-to-b from-[#b5343e] to-[#e07070]" aria-hidden="true" />
+    <div className="flex items-center gap-3 border-b border-[#f0e4dd] bg-gradient-to-br from-[#fdf0eb] to-white px-5 py-4">
+      <IconBadge icon={icon} tone="rose" size="sm" />
       <div>
         <h2 className="text-sm font-bold text-[#1a0808]">{title}</h2>
-        {subtitle && <p className="mt-0.5 text-xs text-[#9b6e6e]">{subtitle}</p>}
+        {subtitle && <p className="text-xs text-[#8a6a6a]">{subtitle}</p>}
       </div>
     </div>
+  );
+}
+
+/** A labelled group inside a step card. */
+function Group({ title, children, aside }: { title: string; children: React.ReactNode; aside?: React.ReactNode }) {
+  return (
+    <fieldset className="mb-6 last:mb-0">
+      <legend className="mb-3 flex w-full items-center gap-3">
+        <span className="text-xs font-bold uppercase tracking-[0.14em] text-[#b5343e]">{title}</span>
+        <span className="h-px flex-1 bg-[#f0e4dd]" aria-hidden="true" />
+        {aside}
+      </legend>
+      {children}
+    </fieldset>
+  );
+}
+
+function Stepper({ current }: { current: number }) {
+  return (
+    <nav aria-label="Registration steps" className="mb-5">
+      <ol className="grid grid-cols-4 gap-2">
+        {STEPS.map(({ label, hint, icon: Icon }, i) => {
+          const step = i + 1;
+          const done = step < current;
+          const active = step === current;
+          return (
+            <li key={label} aria-current={active ? "step" : undefined} className="min-w-0">
+              <div
+                className={`h-1.5 rounded-full transition-colors ${done || active ? "bg-gradient-to-r from-[#b5343e] to-[#d9606a]" : "bg-[#f0e4dd]"}`}
+                aria-hidden="true"
+              />
+              <div className="mt-2.5 flex items-center gap-2">
+                <span
+                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold ring-1 ring-inset ${
+                    done
+                      ? "bg-[#b5343e] text-white ring-[#b5343e]"
+                      : active
+                        ? "bg-white text-[#b5343e] ring-[#b5343e]"
+                        : "bg-[#faf4f1] text-[#a88a84] ring-[#eadbd3]"
+                  }`}
+                >
+                  {done ? <Check size={15} aria-hidden="true" /> : <Icon size={15} aria-hidden="true" />}
+                </span>
+                <div className="hidden min-w-0 sm:block">
+                  <p className={`truncate text-sm font-bold ${active ? "text-[#1a0808]" : "text-[#7a5a5a]"}`}>
+                    <span className="sr-only">Step {step}: </span>
+                    {label}
+                  </p>
+                  <p className="truncate text-xs text-[#a88a84]">{hint}</p>
+                </div>
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+      <p className="mt-3 text-sm font-semibold text-[#3d2222] sm:hidden">
+        Step {current} of 4: {STEPS[current - 1]?.label}
+      </p>
+    </nav>
+  );
+}
+
+/** Checkbox drawn as a chip (programs and flags). */
+function ToggleChip({ id, label, inputProps }: { id: string; label: string; inputProps: React.InputHTMLAttributes<HTMLInputElement> }) {
+  return (
+    <label
+      htmlFor={id}
+      className="flex min-h-11 cursor-pointer items-center gap-2.5 rounded-xl border border-[#e5d4cc] bg-white px-3.5 py-2 text-sm font-medium text-[#3d2222] transition hover:border-[#d9a9a0] has-[:checked]:border-[#b5343e] has-[:checked]:bg-[#fdf0eb] has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-[#b5343e]"
+    >
+      <input id={id} type="checkbox" className="h-4 w-4 accent-[#b5343e]" {...inputProps} />
+      {label}
+    </label>
   );
 }
 
@@ -149,8 +283,7 @@ export default function NewPatientPage() {
   useEffect(() => { setMounted(true); }, []);
 
   const [currentStep, setCurrentStep] = useState(1);
-  const [createdPatientId, setCreatedPatientId] = useState<string | null>(null);
-  const [showPhotoPrompt, setShowPhotoPrompt] = useState(false);
+  const [created, setCreated] = useState<{ id: string; name: string; code?: string } | null>(null);
   const [clinicalNotesOpen, setClinicalNotesOpen] = useState(false);
   const [stepSubmitAttempted, setStepSubmitAttempted] = useState(false);
 
@@ -159,8 +292,10 @@ export default function NewPatientPage() {
   const [duplicatePayload, setDuplicatePayload] = useState<PatientCreatePayload | null>(null);
   const [duplicateConfirming, setDuplicateConfirming] = useState(false);
 
-  const { register, handleSubmit, control, watch, trigger, setValue, formState: { errors } } = useForm<PatientCreateFormValues>({
-    resolver: zodResolver(patientCreateSchema),
+  const { register, handleSubmit, control, watch, trigger, setValue, clearErrors, formState: { errors } } = useForm<PatientCreateFormValues>({
+    // The schema turns empty <select> / number values into undefined (z.preprocess),
+    // so zod types its input as unknown; the form values are PatientCreateFormValues.
+    resolver: zodResolver(patientRegistrationSchema) as Resolver<PatientCreateFormValues>,
     mode: "onBlur",
     defaultValues: {
       firstName: "", middleName: undefined, lastName: "", birthDate: "", sex: undefined,
@@ -183,30 +318,26 @@ export default function NewPatientPage() {
   const maskedEmergencyContactNumber = usePhMobileMask(register("emergencyContactNumber"));
   const maskedGuardianContact = usePhMobileMask(register("guardianContact"));
 
-  const [ocrSource, setOcrSource] = useState(false);
-  const [ocrFilledFields, setOcrFilledFields] = useState<Set<string>>(new Set());
-  const [ocrLowConfidenceFields, setOcrLowConfidenceFields] = useState<Set<string>>(new Set());
-  const [ocrFilledFieldNames, setOcrFilledFieldNames] = useState<Array<keyof PatientCreateFormValues>>([]);
-
   useEffect(() => { if (apiError) { toast.error(apiError.message); } }, [apiError]);
   useEffect(() => { setStepSubmitAttempted(false); }, [currentStep]);
 
   const birthDateValue = watch("birthDate") ?? "";
   const isPwdValue = watch("isPwd");
   const isPregnantValue = watch("isPregnant");
+  const is4psValue = watch("is4psBeneficiary");
+  const memberType = watch("philhealthMemberType");
+  const hasPhilhealth = memberType === "member" || memberType === "dependent";
   const barangayValue = watch("barangay") ?? pilotDefaults.barangay;
   const municipalityValue = watch("municipality") ?? pilotDefaults.municipality;
   const provinceValue = watch("province") ?? pilotDefaults.province;
   const sitioPurokValue = watch("sitioPurok") ?? "";
   // The "Home Address / Landmark" textarea keeps the form field name `address`
-  // (shared schema + ID-scan autofill), but its text is the house no. / street /
-  // landmark: it is sent as houseStreet and stored in patients.house_street.
+  // (shared schema), but its text is the house no. / street / landmark: it is
+  // sent as houseStreet and stored in patients.house_street.
   const addressValue = watch("address") ?? "";
   const currentAge = useMemo(() => computeAge(birthDateValue), [birthDateValue]);
   const showGuardian = currentAge > 0 && (currentAge < 18 || currentAge >= 60 || isPwdValue);
   const showSeniorId = currentAge >= 60;
-  const showPwdId = isPwdValue;
-  const showPregnancyFields = isPregnantValue;
 
   // Exactly what the backend will store (same rule as patient_service.compose_address).
   const composedAddress = useMemo(
@@ -221,56 +352,28 @@ export default function NewPatientPage() {
     [addressValue, sitioPurokValue, barangayValue, municipalityValue, provinceValue],
   );
 
-  function handleOcrAutofill(fields: OcrAutofillFields, lowConfidence: Set<string>) {
-    const filledNames: Array<keyof PatientCreateFormValues> = [];
-    const mappings: Array<[keyof OcrAutofillFields, keyof PatientCreateFormValues]> = [
-      ["firstName", "firstName"], ["middleName", "middleName"], ["lastName", "lastName"],
-      ["birthDate", "birthDate"], ["sex", "sex"], ["address", "address"],
-      ["philhealthNo", "philhealthNo"], ["bloodType", "bloodType"],
-    ];
-    for (const [ocrField, formField] of mappings) {
-      const value = fields[ocrField];
-      if (value !== undefined && value !== null && value !== "") {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        setValue(formField, value as any, { shouldValidate: true, shouldDirty: true });
-        filledNames.push(formField);
-      }
+  function chooseMemberType(value: "member" | "dependent" | undefined) {
+    setValue("philhealthMemberType", value, { shouldDirty: true });
+    if (value === undefined) {
+      // No PhilHealth: nothing else to fill in, and nothing left over to save.
+      setValue("philhealthNo", undefined, { shouldDirty: true });
+      setValue("philhealthCategory", undefined, { shouldDirty: true });
+      clearErrors(["philhealthNo", "philhealthCategory"]);
     }
-    setValue("registrationDataSource", "ocr", { shouldValidate: false });
-    setOcrFilledFieldNames(filledNames);
-    setOcrFilledFields(new Set(filledNames.map(String)));
-    setOcrLowConfidenceFields(lowConfidence);
-    setOcrSource(true);
+    if (stepSubmitAttempted) void trigger(["philhealthNo", "philhealthCategory"]);
   }
 
-  function handleOcrClear() {
-    for (const fieldName of ocrFilledFieldNames) {
-      const stringFields = ["firstName", "middleName", "lastName", "birthDate", "address", "philhealthNo", "bloodType"];
-      if (stringFields.includes(fieldName as string)) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        setValue(fieldName, "" as any, { shouldValidate: false });
-      }
-    }
-    if (ocrFilledFieldNames.includes("sex")) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      setValue("sex", undefined as any, { shouldValidate: false });
-    }
-    setValue("registrationDataSource", "manual", { shouldValidate: false });
-    setOcrSource(false);
-    setOcrFilledFields(new Set());
-    setOcrLowConfidenceFields(new Set());
-    setOcrFilledFieldNames([]);
-  }
+  const canSubmitStep = async (step: number) => trigger(FIELDS_BY_STEP[step]);
 
-  const canSubmitStep = async (step: number) => {
-    const fieldsByStep: Record<number, (keyof PatientCreateFormValues)[]> = {
-      1: ["firstName", "middleName", "lastName", "birthDate", "sex", "civilStatus", "householdNumber", "sitioPurok", "barangay", "municipality", "province", "occupation", "bloodType", "placeOfBirth", "mothersMaidenName"],
-      2: ["mobileNumber", "address", "guardianName", "guardianContact", "emergencyContactName", "emergencyContactNumber"],
-      3: ["philhealthNo", "philhealthMemberType", "philhealthCategory", "is4psBeneficiary", "householdId4ps", "isIndigenous", "isPwd", "isPregnant", "seniorIdNumber", "pwdIdNumber", "lastMenstrualPeriod", "gravida", "para", "estimatedDueDate", "heightCm", "weightKg", "allergies", "knownConditions", "registrationSource", "dataPrivacyConsent"],
-      4: [],
-    };
-    return trigger(fieldsByStep[step]);
-  };
+  function registered(patient: { id: string; firstName?: string; lastName?: string; patientCode?: string }) {
+    toast.success("Patient registered successfully.");
+    setCreated({
+      id: patient.id,
+      name: `${patient.firstName ?? ""} ${patient.lastName ?? ""}`.trim() || "The patient",
+      code: patient.patientCode,
+    });
+    setCurrentStep(4);
+  }
 
   const onSubmit: SubmitHandler<PatientCreateFormValues> = async (data) => {
     const payload = {
@@ -285,14 +388,17 @@ export default function NewPatientPage() {
       guardianName: data.guardianName?.trim() || undefined, guardianContact: data.guardianContact?.trim() || undefined,
       emergencyContactName: data.emergencyContactName?.trim() || "",
       emergencyContactNumber: data.emergencyContactNumber?.trim() || "",
-      philhealthNo: data.philhealthNo?.trim() || undefined,
-      philhealthMemberType: data.philhealthMemberType ?? undefined, philhealthCategory: data.philhealthCategory ?? undefined,
-      householdId4ps: data.householdId4ps?.trim() || undefined, placeOfBirth: data.placeOfBirth?.trim() || undefined,
+      philhealthMemberType: data.philhealthMemberType ?? undefined,
+      // Without a member type there is no PhilHealth number or category to keep.
+      philhealthNo: data.philhealthMemberType ? data.philhealthNo?.trim() || undefined : undefined,
+      philhealthCategory: data.philhealthMemberType ? data.philhealthCategory ?? undefined : undefined,
+      householdId4ps: data.is4psBeneficiary ? data.householdId4ps?.trim() || undefined : undefined,
+      placeOfBirth: data.placeOfBirth?.trim() || undefined,
       mothersMaidenName: data.mothersMaidenName?.trim() || undefined, seniorIdNumber: data.seniorIdNumber?.trim() || undefined,
       pwdIdNumber: data.pwdIdNumber?.trim() || undefined, allergies: data.allergies?.trim() || undefined,
       knownConditions: data.knownConditions?.trim() || undefined, registrationSource: data.registrationSource,
-      registrationDataSource: data.registrationDataSource ?? "manual", dataPrivacyConsent: data.dataPrivacyConsent,
-      bloodType: data.bloodType === "" ? null : (data.bloodType ?? null), confirmDuplicate: false,
+      registrationDataSource: "manual" as const, dataPrivacyConsent: data.dataPrivacyConsent,
+      bloodType: data.bloodType ?? null, confirmDuplicate: false,
     };
 
     const result = await createPatient(payload);
@@ -306,19 +412,12 @@ export default function NewPatientPage() {
         );
         return;
       }
-      // Store payload and open confirmation dialog — the imperative swConfirm
-      // is replaced with a state-driven AlertDialog rendered below.
       setDuplicatePayload({ ...payload, confirmDuplicate: false });
       setShowDuplicateDialog(true);
       return;
     }
 
-    if (result.patient) {
-      toast.success("Patient registered successfully.");
-      setCreatedPatientId(result.patient.id);
-      setShowPhotoPrompt(true);
-      setCurrentStep(4);
-    }
+    if (result.patient) registered(result.patient);
   };
 
   async function handleDuplicateConfirm() {
@@ -326,12 +425,7 @@ export default function NewPatientPage() {
     setDuplicateConfirming(true);
     try {
       const forced = await createPatient({ ...duplicatePayload, confirmDuplicate: true });
-      if (forced?.patient) {
-        toast.success("Patient registered successfully.");
-        setCreatedPatientId(forced.patient.id);
-        setShowPhotoPrompt(true);
-        setCurrentStep(4);
-      }
+      if (forced?.patient) registered(forced.patient);
     } finally {
       setShowDuplicateDialog(false);
       setDuplicatePayload(null);
@@ -344,218 +438,206 @@ export default function NewPatientPage() {
       <div className="mx-auto max-w-[980px] py-8">
         <div className="mb-2 h-10 w-64 animate-pulse rounded-lg bg-[#f4e8e3]" />
         <div className="mb-8 h-5 w-80 animate-pulse rounded bg-[#f4e8e3]" />
-        <div className="h-[420px] animate-pulse rounded-xl border border-[#f0e4dd] bg-[#fdf5f0]" />
+        <div className="h-[420px] animate-pulse rounded-2xl border border-[#f0e4dd] bg-[#fdf5f0]" />
       </div>
     );
   }
 
+  const errorMap = errors as Record<string, { message?: string } | undefined>;
+
   return (
     <div className="mx-auto max-w-[980px]">
-      {/* Page heading */}
-      <div className="mb-6">
-        <h1 className="text-3xl leading-tight text-[#1a0808] font-display">Register New Patient</h1>
-        <p className="mt-1 text-sm font-medium text-[#7a5252]">
-          RHU Patient Record — Sta. Rosa 1 BHS, Patubig, Marilao, Bulacan
-        </p>
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="font-display text-3xl leading-tight text-[#1a0808]">Register New Patient</h1>
+          <p className="mt-1 text-sm font-medium text-[#7a5252]">
+            RHU Patient Record — Sta. Rosa 1 BHS, Patubig, Marilao, Bulacan
+          </p>
+        </div>
+        {currentStep < 4 && (
+          <p className="text-xs text-[#9b7e7e]">
+            Fields marked <span className="font-bold text-[#b5343e]">*</span> are required.
+          </p>
+        )}
       </div>
 
-      {/* Step indicator */}
-      <SectionPanel>
-        <div className="flex items-center justify-between gap-4 flex-wrap px-5 py-4">
-          <p className="text-sm font-bold text-[#3d2222]">
-            Step {currentStep} of 4: {getStepLabel(currentStep)}
-          </p>
-          <div className="flex gap-2">
-            {[1, 2, 3, 4].map((step) => (
-              <span
-                key={step}
-                className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold ${step <= currentStep ? "bg-[#b5343e] text-white" : "bg-[#f4e8e3] text-[#7a5252]"}`}
-              >
-                {step}
-              </span>
-            ))}
-          </div>
-        </div>
-      </SectionPanel>
+      <Stepper current={currentStep} />
 
       <form onSubmit={(e) => void handleSubmit(onSubmit)(e)} noValidate>
-
-        {/* ─ Step 1 ─ */}
+        {/* ─ Step 1: Identity ─ */}
         {currentStep === 1 && (
-          <SectionPanel>
-            <SectionHeader title="Identity & Demographics" subtitle="Capture the patient's core identity, location, and demographic context." />
+          <Card>
+            <CardHeader icon={IdCard} title="Identity & Demographics" subtitle="Who the patient is and where they live." />
             <div className="p-5">
-              <StepErrorSummary errors={errors as Record<string, { message?: string } | undefined>} attempted={stepSubmitAttempted} />
+              <StepErrorSummary errors={errorMap} attempted={stepSubmitAttempted} />
 
-              {ocrSource && (
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                  <span>Fields pre-filled from scanned ID. Review highlighted fields before continuing.</span>
-                  <button
-                    type="button"
-                    onClick={handleOcrClear}
-                    className="rounded-lg border border-amber-400 bg-white px-3 py-1 text-xs font-semibold text-amber-800 hover:bg-amber-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-500"
-                  >
-                    Clear autofill
-                  </button>
-                </div>
-              )}
-
-              <IdScanCard onAutofill={handleOcrAutofill} onClear={handleOcrClear} />
-
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                <div>
-                  <label className={labelCls} htmlFor="firstName">First Name *</label>
-                  <input id="firstName" type="text" {...register("firstName")}
-                    className={`${inputCls} ${errors.firstName ? "border-[#fca5a5]" : ""} ${ocrBorderClass("firstName", ocrFilledFields)}`} />
-                  {ocrLowConfidenceFields.has("firstName") && <p className="mt-0.5 text-xs text-amber-600">Review this field</p>}
-                  <FieldError message={errors.firstName?.message} />
-                </div>
-                <div>
-                  <label className={labelCls} htmlFor="middleName">Middle Name</label>
-                  <input id="middleName" type="text" {...register("middleName")}
-                    className={`${inputCls} ${ocrBorderClass("middleName", ocrFilledFields)}`} />
-                  {ocrLowConfidenceFields.has("middleName") && <p className="mt-0.5 text-xs text-amber-600">Review this field</p>}
-                </div>
-                <div>
-                  <label className={labelCls} htmlFor="lastName">Last Name *</label>
-                  <input id="lastName" type="text" {...register("lastName")}
-                    className={`${inputCls} ${errors.lastName ? "border-[#fca5a5]" : ""} ${ocrBorderClass("lastName", ocrFilledFields)}`} />
-                  {ocrLowConfidenceFields.has("lastName") && <p className="mt-0.5 text-xs text-amber-600">Review this field</p>}
-                  <FieldError message={errors.lastName?.message} />
-                </div>
-                <div>
-                  <label className={labelCls} htmlFor="birthDate">Birthday *</label>
-                  <input id="birthDate" type="date" max={new Date().toISOString().split("T")[0]} {...register("birthDate")}
-                    className={`${inputCls} ${errors.birthDate ? "border-[#fca5a5]" : ""} ${ocrBorderClass("birthDate", ocrFilledFields)}`} />
-                  {ocrLowConfidenceFields.has("birthDate") && <p className="mt-0.5 text-xs text-amber-600">Review this field</p>}
-                  <FieldError message={errors.birthDate?.message} />
-                </div>
-                <div>
-                  <label className={labelCls}>Age</label>
-                  <div className={`${inputCls} flex min-h-[40px] items-center gap-2 bg-[#fdf5f0] text-[#7a5252]`}>
-                    {birthDateValue ? `${currentAge} years old` : "—"}
-                    {currentAge >= 60 && (
-                      <span className="rounded-full bg-violet-600 px-2 py-0.5 text-[0.625rem] font-bold text-white">SENIOR</span>
-                    )}
+              <Group title="Name & birth">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  <div>
+                    <label className={labelCls} htmlFor="firstName">First Name<Req /></label>
+                    <input id="firstName" type="text" autoComplete="off" {...register("firstName")} aria-invalid={!!errors.firstName}
+                      className={`${inputCls} ${errors.firstName ? errorInput : ""}`} />
+                    <FieldError message={errors.firstName?.message} />
+                  </div>
+                  <div>
+                    <label className={labelCls} htmlFor="middleName">Middle Name</label>
+                    <input id="middleName" type="text" autoComplete="off" {...register("middleName")} className={inputCls} />
+                  </div>
+                  <div>
+                    <label className={labelCls} htmlFor="lastName">Last Name<Req /></label>
+                    <input id="lastName" type="text" autoComplete="off" {...register("lastName")} aria-invalid={!!errors.lastName}
+                      className={`${inputCls} ${errors.lastName ? errorInput : ""}`} />
+                    <FieldError message={errors.lastName?.message} />
+                  </div>
+                  <div>
+                    <label className={labelCls} htmlFor="birthDate">Birthday<Req /></label>
+                    <input id="birthDate" type="date" max={new Date().toISOString().split("T")[0]} {...register("birthDate")}
+                      aria-invalid={!!errors.birthDate} className={`${inputCls} ${errors.birthDate ? errorInput : ""}`} />
+                    <FieldError message={errors.birthDate?.message} />
+                  </div>
+                  <div>
+                    <span className={labelCls}>Age</span>
+                    <div className={`${inputCls} flex min-h-[42px] items-center gap-2 bg-[#fdf7f4] text-[#7a5252]`} aria-live="polite">
+                      {birthDateValue ? `${currentAge} years old` : "—"}
+                      {currentAge >= 60 && (
+                        <span className="rounded-full bg-violet-600 px-2 py-0.5 text-[0.625rem] font-bold text-white">SENIOR</span>
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <span className={labelCls} id="sex-label">Sex<Req /></span>
+                    <Controller
+                      name="sex"
+                      control={control}
+                      render={({ field }) => (
+                        <div role="radiogroup" aria-labelledby="sex-label" className="grid grid-cols-2 gap-2">
+                          {(["male", "female"] as const).map((value) => (
+                            <label key={value}
+                              className="flex min-h-[42px] cursor-pointer items-center justify-center gap-2 rounded-xl border border-[#e5d4cc] bg-white text-sm font-medium text-[#3d2222] transition has-[:checked]:border-[#b5343e] has-[:checked]:bg-[#fdf0eb] has-[:checked]:text-[#b5343e] has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-[#b5343e]">
+                              <input id={value === "male" ? "sex" : undefined} type="radio" name="sex" checked={field.value === value}
+                                onChange={() => field.onChange(value)} className="sr-only" />
+                              {value === "male" ? "Male" : "Female"}
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    />
+                    <FieldError message={errors.sex?.message} />
+                  </div>
+                  <div>
+                    <label className={labelCls} htmlFor="civilStatus">Civil Status</label>
+                    <select id="civilStatus" {...register("civilStatus")} className={inputCls}>
+                      <option value="">— Select —</option>
+                      <option value="single">Single</option>
+                      <option value="married">Married</option>
+                      <option value="widowed">Widowed</option>
+                      <option value="separated">Separated</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelCls} htmlFor="placeOfBirth">Place of Birth</label>
+                    <input id="placeOfBirth" type="text" {...register("placeOfBirth")} className={inputCls} />
+                  </div>
+                  <div>
+                    <label className={labelCls} htmlFor="mothersMaidenName">Mother&apos;s Maiden Name</label>
+                    <input id="mothersMaidenName" type="text" {...register("mothersMaidenName")} className={inputCls} />
+                  </div>
+                  <div>
+                    <label className={labelCls} htmlFor="bloodType">Blood Type</label>
+                    <select id="bloodType" {...register("bloodType")} className={inputCls}>
+                      <option value="">— Not known —</option>
+                      {["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"].map((bt) => <option key={bt} value={bt}>{bt}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelCls} htmlFor="occupation">Occupation</label>
+                    <input id="occupation" type="text" {...register("occupation")} className={inputCls} placeholder="Farmer, driver, etc." />
+                  </div>
+                  <div>
+                    <label className={labelCls} htmlFor="householdNumber">Household / Family No.</label>
+                    <input id="householdNumber" type="text" {...register("householdNumber")} className={inputCls} placeholder="HH-001" />
                   </div>
                 </div>
-                <div>
-                  <label className={labelCls}>Sex *</label>
-                  <Controller
-                    name="sex"
-                    control={control}
-                    render={({ field }) => (
-                      <div className="flex gap-4 pt-2">
-                        {["male", "female"].map((value) => (
-                          <label key={value} className="flex cursor-pointer items-center gap-2 text-sm text-[#3d2222]">
-                            <input type="radio" checked={field.value === value} onChange={() => field.onChange(value)} className="accent-[#b5343e]" />
-                            {value.charAt(0).toUpperCase() + value.slice(1)}
-                          </label>
-                        ))}
-                      </div>
-                    )}
-                  />
-                  <FieldError message={errors.sex?.message} />
+              </Group>
+
+              <Group title="Location">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                  <div>
+                    <label className={labelCls} htmlFor="sitioPurok">Sitio / Purok</label>
+                    <input id="sitioPurok" type="text" {...register("sitioPurok")} className={inputCls} placeholder="Optional" />
+                  </div>
+                  <div>
+                    <label className={labelCls} htmlFor="barangay">Barangay<Req /></label>
+                    <input id="barangay" type="text" {...register("barangay")} aria-invalid={!!errors.barangay} className={`${inputCls} ${errors.barangay ? errorInput : ""}`} />
+                    <FieldError message={errors.barangay?.message} />
+                  </div>
+                  <div>
+                    <label className={labelCls} htmlFor="municipality">Municipality<Req /></label>
+                    <input id="municipality" type="text" {...register("municipality")} aria-invalid={!!errors.municipality} className={`${inputCls} ${errors.municipality ? errorInput : ""}`} />
+                    <FieldError message={errors.municipality?.message} />
+                  </div>
+                  <div>
+                    <label className={labelCls} htmlFor="province">Province<Req /></label>
+                    <input id="province" type="text" {...register("province")} aria-invalid={!!errors.province} className={`${inputCls} ${errors.province ? errorInput : ""}`} />
+                    <FieldError message={errors.province?.message} />
+                  </div>
                 </div>
-                <div>
-                  <label className={labelCls} htmlFor="civilStatus">Civil Status</label>
-                  <select id="civilStatus" {...register("civilStatus")} className={inputCls}>
-                    <option value="">— Select —</option>
-                    <option value="single">Single</option>
-                    <option value="married">Married</option>
-                    <option value="widowed">Widowed</option>
-                    <option value="separated">Separated</option>
-                  </select>
-                </div>
-                <div>
-                  <label className={labelCls} htmlFor="householdNumber">Household / Family Number</label>
-                  <input id="householdNumber" type="text" {...register("householdNumber")} className={inputCls} placeholder="HH-001" />
-                </div>
-                <div>
-                  <label className={labelCls} htmlFor="occupation">Occupation</label>
-                  <input id="occupation" type="text" {...register("occupation")} className={inputCls} placeholder="Farmer, driver, etc." />
-                </div>
-                <div>
-                  <label className={labelCls} htmlFor="placeOfBirth">Place of Birth</label>
-                  <input id="placeOfBirth" type="text" {...register("placeOfBirth")} className={inputCls} />
-                </div>
-                <div>
-                  <label className={labelCls} htmlFor="mothersMaidenName">Mother&apos;s Maiden Name</label>
-                  <input id="mothersMaidenName" type="text" {...register("mothersMaidenName")} className={inputCls} />
-                </div>
-                <div>
-                  <label className={labelCls} htmlFor="bloodType">Blood Type</label>
-                  <select id="bloodType" {...register("bloodType")}
-                    className={`${inputCls} ${ocrBorderClass("bloodType", ocrFilledFields)}`}>
-                    <option value="">— Unknown —</option>
-                    {["A+","A-","B+","B-","AB+","AB-","O+","O-","Unknown"].map((bt) => <option key={bt} value={bt}>{bt}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className={labelCls} htmlFor="sitioPurok">Sitio / Purok</label>
-                  <input id="sitioPurok" type="text" {...register("sitioPurok")} className={inputCls} placeholder="Optional" />
-                </div>
-                <div>
-                  <label className={labelCls} htmlFor="barangay">Barangay *</label>
-                  <input id="barangay" type="text" {...register("barangay")} className={`${inputCls} ${errors.barangay ? "border-[#fca5a5]" : ""}`} />
-                  <FieldError message={errors.barangay?.message} />
-                </div>
-                <div>
-                  <label className={labelCls} htmlFor="municipality">Municipality *</label>
-                  <input id="municipality" type="text" {...register("municipality")} className={`${inputCls} ${errors.municipality ? "border-[#fca5a5]" : ""}`} />
-                  <FieldError message={errors.municipality?.message} />
-                </div>
-                <div>
-                  <label className={labelCls} htmlFor="province">Province *</label>
-                  <input id="province" type="text" {...register("province")} className={`${inputCls} ${errors.province ? "border-[#fca5a5]" : ""}`} />
-                  <FieldError message={errors.province?.message} />
-                </div>
-              </div>
+              </Group>
             </div>
-          </SectionPanel>
+          </Card>
         )}
 
-        {/* ─ Step 2 ─ */}
+        {/* ─ Step 2: Contact ─ */}
         {currentStep === 2 && (
-          <SectionPanel>
-            <SectionHeader title="Contact, Address & Emergency Contact" subtitle="Keep the emergency contact separate from guardian details." />
+          <Card>
+            <CardHeader icon={MapPinHouse} title="Contact, Address & Emergency Contact" subtitle="Keep the emergency contact separate from guardian details." />
             <div className="p-5">
-              <StepErrorSummary errors={errors as Record<string, { message?: string } | undefined>} attempted={stepSubmitAttempted} />
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div>
-                  <label className={labelCls} htmlFor="mobileNumber">Patient Contact No.</label>
-                  <input id="mobileNumber" type="tel" {...maskedMobileNumber}
-                    className={`${inputCls} ${errors.mobileNumber ? "border-[#fca5a5]" : ""}`} placeholder="09171234567" />
-                  <p className="mt-1 text-xs text-[#9b6e6e]">Format: 09XXXXXXXXX or +639XXXXXXXXX</p>
-                  <FieldError message={errors.mobileNumber?.message} />
-                </div>
-                <div>
-                  <label className={labelCls} htmlFor="emergencyContactName">Emergency Contact Name *</label>
-                  <input id="emergencyContactName" type="text" {...register("emergencyContactName")}
-                    className={`${inputCls} ${errors.emergencyContactName ? "border-[#fca5a5]" : ""}`} />
-                  <FieldError message={errors.emergencyContactName?.message} />
-                </div>
-                <div>
-                  <label className={labelCls} htmlFor="emergencyContactNumber">Emergency Contact No. *</label>
-                  <input id="emergencyContactNumber" type="tel" {...maskedEmergencyContactNumber}
-                    className={`${inputCls} ${errors.emergencyContactNumber ? "border-[#fca5a5]" : ""}`} placeholder="09171234567" />
-                  <p className="mt-1 text-xs text-[#9b6e6e]">Format: 09XXXXXXXXX or +639XXXXXXXXX</p>
-                  <FieldError message={errors.emergencyContactNumber?.message} />
-                </div>
-                <div>
-                  <label className={labelCls} htmlFor="address">Home Address / Landmark *</label>
-                  <textarea id="address" rows={4} maxLength={255} {...register("address")}
-                    className={`${inputCls} resize-y ${errors.address ? "border-[#fca5a5]" : ""}`}
-                    placeholder="House no., street, landmark or nearby reference" />
-                  <FieldError message={errors.address?.message} />
-                  <p className="mt-1 text-xs text-[#9b6e6e]">Address saved and printed on the health card: {composedAddress || "—"}</p>
-                </div>
-              </div>
-              {showGuardian ? (
-                <div className="mt-4">
-                  <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
-                    Guardian details are required for patients under 18, senior citizens (60+), or PWD registrations.
+              <StepErrorSummary errors={errorMap} attempted={stepSubmitAttempted} />
+
+              <Group title="Patient">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className={labelCls} htmlFor="mobileNumber">Patient Contact No.</label>
+                    <input id="mobileNumber" type="tel" inputMode="tel" {...maskedMobileNumber} aria-invalid={!!errors.mobileNumber}
+                      className={`${inputCls} ${errors.mobileNumber ? errorInput : ""}`} placeholder="09171234567" />
+                    <p className={hintCls}>For SMS reminders. 09XXXXXXXXX or +639XXXXXXXXX</p>
+                    <FieldError message={errors.mobileNumber?.message} />
                   </div>
+                  <div>
+                    <label className={labelCls} htmlFor="address">Home Address / Landmark<Req /></label>
+                    <textarea id="address" rows={3} maxLength={255} {...register("address")} aria-invalid={!!errors.address}
+                      className={`${inputCls} resize-y ${errors.address ? errorInput : ""}`}
+                      placeholder="House no., street, landmark or nearby reference" />
+                    <FieldError message={errors.address?.message} />
+                  </div>
+                </div>
+                <p className="mt-3 rounded-xl bg-[#fdf7f4] px-3 py-2 text-xs text-[#7a5a5a]">
+                  <span className="font-semibold text-[#5a3a3a]">Saved and printed on the health card:</span> {composedAddress || "—"}
+                </p>
+              </Group>
+
+              <Group title="Emergency contact">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className={labelCls} htmlFor="emergencyContactName">Emergency Contact Name<Req /></label>
+                    <input id="emergencyContactName" type="text" {...register("emergencyContactName")} aria-invalid={!!errors.emergencyContactName}
+                      className={`${inputCls} ${errors.emergencyContactName ? errorInput : ""}`} />
+                    <FieldError message={errors.emergencyContactName?.message} />
+                  </div>
+                  <div>
+                    <label className={labelCls} htmlFor="emergencyContactNumber">Emergency Contact No.<Req /></label>
+                    <input id="emergencyContactNumber" type="tel" inputMode="tel" {...maskedEmergencyContactNumber} aria-invalid={!!errors.emergencyContactNumber}
+                      className={`${inputCls} ${errors.emergencyContactNumber ? errorInput : ""}`} placeholder="09171234567" />
+                    <FieldError message={errors.emergencyContactNumber?.message} />
+                  </div>
+                </div>
+              </Group>
+
+              {showGuardian ? (
+                <Group title="Guardian">
+                  <p className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    Add a guardian for patients under 18, senior citizens (60+) and PWD registrations.
+                  </p>
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div>
                       <label className={labelCls} htmlFor="guardianName">Guardian Name</label>
@@ -563,275 +645,287 @@ export default function NewPatientPage() {
                     </div>
                     <div>
                       <label className={labelCls} htmlFor="guardianContact">Guardian Contact No.</label>
-                      <input id="guardianContact" type="tel" {...maskedGuardianContact}
-                        className={`${inputCls} ${errors.guardianContact ? "border-[#fca5a5]" : ""}`} placeholder="09171234567" />
-                      <p className="mt-1 text-xs text-[#9b6e6e]">Format: 09XXXXXXXXX or +639XXXXXXXXX</p>
+                      <input id="guardianContact" type="tel" inputMode="tel" {...maskedGuardianContact} aria-invalid={!!errors.guardianContact}
+                        className={`${inputCls} ${errors.guardianContact ? errorInput : ""}`} placeholder="09171234567" />
                       <FieldError message={errors.guardianContact?.message} />
                     </div>
                   </div>
-                </div>
+                </Group>
               ) : (
-                <p className="mt-4 text-sm italic text-[#9b6e6e]">
+                <p className="text-xs italic text-[#9b7e7e]">
                   Guardian fields appear for patients under 18, senior citizens (60+), or PWD registrations.
                 </p>
               )}
             </div>
-          </SectionPanel>
+          </Card>
         )}
 
-        {/* ─ Step 3 ─ */}
+        {/* ─ Step 3: PhilHealth & health ─ */}
         {currentStep === 3 && (
-          <SectionPanel>
-            <SectionHeader title="PhilHealth, IDs, Clinical Notes & Consent" subtitle="Capture fields needed for enrollment, referrals, and risk tracking." />
+          <Card>
+            <CardHeader icon={HeartPulse} title="PhilHealth, Programs & Consent" subtitle="Coverage, benefit programs, baseline measurements and consent." />
             <div className="p-5">
-              <StepErrorSummary errors={errors as Record<string, { message?: string } | undefined>} attempted={stepSubmitAttempted} />
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div>
-                  <label className={labelCls}>PhilHealth Member Type</label>
-                  <Controller
-                    name="philhealthMemberType"
-                    control={control}
-                    render={({ field }) => (
-                      <div className="flex gap-4 pt-2">
-                        {[{ value: null, label: "None" }, { value: "member", label: "Member" }, { value: "dependent", label: "Dependent" }].map((item) => (
-                          <label key={item.label} className="flex cursor-pointer items-center gap-2 text-sm text-[#3d2222]">
-                            <input type="radio" checked={field.value === item.value} onChange={() => field.onChange(item.value)} className="accent-[#b5343e]" />
-                            {item.label}
-                          </label>
-                        ))}
+              <StepErrorSummary errors={errorMap} attempted={stepSubmitAttempted} />
+
+              <Group title="PhilHealth">
+                <div className="rounded-2xl border border-[#f0e4dd] bg-[#fffaf7] p-4">
+                  <span className={labelCls} id="memberType-label">Is the patient covered by PhilHealth?</span>
+                  <div role="radiogroup" aria-labelledby="memberType-label" className="grid grid-cols-3 gap-2 sm:max-w-md">
+                    {([
+                      { value: undefined, label: "None" },
+                      { value: "member", label: "Member" },
+                      { value: "dependent", label: "Dependent" },
+                    ] as const).map((item) => (
+                      <label key={item.label}
+                        className="flex min-h-11 cursor-pointer items-center justify-center rounded-xl border border-[#e5d4cc] bg-white text-sm font-semibold text-[#5a3a3a] transition has-[:checked]:border-[#b5343e] has-[:checked]:bg-[#b5343e] has-[:checked]:text-white has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-[#b5343e]">
+                        <input type="radio" name="philhealthMemberType" className="sr-only"
+                          checked={memberType === item.value} onChange={() => chooseMemberType(item.value)} />
+                        {item.label}
+                      </label>
+                    ))}
+                  </div>
+                  <p className={hintCls}>
+                    {memberType === "member"
+                      ? "The patient pays or is sponsored under their own PhilHealth membership."
+                      : memberType === "dependent"
+                        ? "Covered under a family member's PhilHealth membership."
+                        : "No PhilHealth number or category is saved."}
+                  </p>
+
+                  <div className={`mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 transition-opacity ${hasPhilhealth ? "" : "opacity-60"}`}>
+                    <div>
+                      <label className={labelCls} htmlFor="philhealthNo">PhilHealth No.{hasPhilhealth && <Req />}</label>
+                      <input id="philhealthNo" type="text" inputMode="numeric" disabled={!hasPhilhealth} {...maskedPhilhealthNo}
+                        aria-invalid={!!errors.philhealthNo}
+                        className={`${inputCls} ${errors.philhealthNo ? errorInput : ""}`} placeholder="12-345678901-2" />
+                      <p className={hintCls}>12 digits, as on the PhilHealth ID or MDR.</p>
+                      <FieldError message={errors.philhealthNo?.message} />
+                    </div>
+                    <div>
+                      <label className={labelCls} htmlFor="philhealthCategory">
+                        PhilHealth Category{memberType === "member" && <Req />}
+                      </label>
+                      <select id="philhealthCategory" disabled={!hasPhilhealth} {...register("philhealthCategory")}
+                        aria-invalid={!!errors.philhealthCategory}
+                        className={`${inputCls} ${errors.philhealthCategory ? errorInput : ""}`}>
+                        <option value="">{memberType === "dependent" ? "— Same as the member (optional) —" : "— Select —"}</option>
+                        {PHILHEALTH_CATEGORIES.map((c) => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}
+                      </select>
+                      <FieldError message={errors.philhealthCategory?.message} />
+                    </div>
+                  </div>
+                </div>
+              </Group>
+
+              <Group title="Programs & special groups">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                  <ToggleChip id="is4psBeneficiary" label="4Ps Beneficiary" inputProps={register("is4psBeneficiary")} />
+                  <ToggleChip id="isIndigenous" label="Indigenous Peoples (IP)" inputProps={register("isIndigenous")} />
+                  <ToggleChip id="isPwd" label="Person with Disability" inputProps={register("isPwd")} />
+                  <ToggleChip id="isPregnant" label="Currently Pregnant" inputProps={register("isPregnant")} />
+                </div>
+
+                {(is4psValue || showSeniorId || isPwdValue || isPregnantValue) && (
+                  <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    {is4psValue && (
+                      <div>
+                        <label className={labelCls} htmlFor="householdId4ps">4Ps Household ID</label>
+                        <input id="householdId4ps" type="text" {...register("householdId4ps")} className={inputCls} />
                       </div>
                     )}
-                  />
-                </div>
-                <div>
-                  <label className={labelCls} htmlFor="philhealthCategory">PhilHealth Category</label>
-                  <select id="philhealthCategory" {...register("philhealthCategory")} className={inputCls}>
-                    <option value="">— Select —</option>
-                    <option value="indigent">Indigent</option>
-                    <option value="sponsored">Sponsored</option>
-                    <option value="formal_economy">Formal Economy</option>
-                    <option value="informal_economy">Informal Economy</option>
-                    <option value="lifetime_member">Lifetime Member</option>
-                  </select>
-                </div>
-                <div>
-                  <label className={labelCls} htmlFor="philhealthNo">PhilHealth No.</label>
-                  <input id="philhealthNo" type="text" {...maskedPhilhealthNo}
-                    className={`${inputCls} ${ocrBorderClass("philhealthNo", ocrFilledFields)}`} placeholder="12-345678901-2" />
-                  {ocrLowConfidenceFields.has("philhealthNo") && <p className="mt-0.5 text-xs text-amber-600">Review this field</p>}
-                  <p className="mt-1 text-xs text-[#9b6e6e]">Format: 12-345678901-2 (12 digits)</p>
-                </div>
-                <div>
-                  <label className={labelCls} htmlFor="householdId4ps">4Ps Household ID</label>
-                  <input id="householdId4ps" type="text" {...register("householdId4ps")} className={inputCls} />
-                </div>
-                <div>
-                  <label className={labelCls} htmlFor="registrationSource">Registration Source</label>
-                  <select id="registrationSource" {...register("registrationSource")} className={inputCls}>
-                    <option value="walk_in">Walk-in</option>
-                    <option value="referral">Referral</option>
-                    <option value="outreach">Outreach</option>
-                    <option value="others">Others</option>
-                  </select>
-                </div>
-                <div>
-                  <label className={labelCls} htmlFor="heightCm">Baseline Height (cm)</label>
-                  <input id="heightCm" type="number" step="0.1" {...register("heightCm", { valueAsNumber: true })} className={inputCls} />
-                </div>
-                <div>
-                  <label className={labelCls} htmlFor="weightKg">Baseline Weight (kg)</label>
-                  <input id="weightKg" type="number" step="0.01" {...register("weightKg", { valueAsNumber: true })} className={inputCls} />
-                </div>
-              </div>
+                    {showSeniorId && (
+                      <div>
+                        <label className={labelCls} htmlFor="seniorIdNumber">Senior ID Number</label>
+                        <input id="seniorIdNumber" type="text" {...register("seniorIdNumber")} className={inputCls} />
+                      </div>
+                    )}
+                    {isPwdValue && (
+                      <div>
+                        <label className={labelCls} htmlFor="pwdIdNumber">PWD ID Number</label>
+                        <input id="pwdIdNumber" type="text" {...register("pwdIdNumber")} className={inputCls} />
+                      </div>
+                    )}
+                    {isPregnantValue && (
+                      <>
+                        <div>
+                          <label className={labelCls} htmlFor="lastMenstrualPeriod">Last Menstrual Period</label>
+                          <input id="lastMenstrualPeriod" type="date" {...register("lastMenstrualPeriod")} className={inputCls} />
+                        </div>
+                        <div>
+                          <label className={labelCls} htmlFor="estimatedDueDate">Estimated Due Date</label>
+                          <input id="estimatedDueDate" type="date" {...register("estimatedDueDate")} className={inputCls} />
+                        </div>
+                        <div>
+                          <label className={labelCls} htmlFor="gravida">Gravida</label>
+                          <input id="gravida" type="number" min="0" {...register("gravida", { valueAsNumber: true })} className={inputCls} />
+                        </div>
+                        <div>
+                          <label className={labelCls} htmlFor="para">Para</label>
+                          <input id="para" type="number" min="0" {...register("para", { valueAsNumber: true })} className={inputCls} />
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </Group>
 
-              <div className="mt-4 grid gap-3">
-                {[
-                  { field: "is4psBeneficiary" as const, label: "4Ps Beneficiary" },
-                  { field: "isIndigenous" as const, label: "Indigenous Peoples / IP" },
-                  { field: "isPwd" as const, label: "Person with Disability (PWD)" },
-                  { field: "isPregnant" as const, label: "Currently Pregnant" },
-                ].map(({ field, label }) => (
-                  <label key={field} className="flex cursor-pointer items-center gap-3 text-sm font-medium text-[#3d2222]">
-                    <input type="checkbox" {...register(field)} className="h-4 w-4 accent-[#b5343e]" />
-                    {label}
-                  </label>
-                ))}
-              </div>
+              <Group title="Visit details">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                  <div>
+                    <label className={labelCls} htmlFor="registrationSource">Registration Source</label>
+                    <select id="registrationSource" {...register("registrationSource")} className={inputCls}>
+                      <option value="walk_in">Walk-in</option>
+                      <option value="referral">Referral</option>
+                      <option value="outreach">Outreach</option>
+                      <option value="others">Others</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelCls} htmlFor="heightCm">Baseline Height (cm)</label>
+                    <input id="heightCm" type="number" step="0.1" inputMode="decimal" {...register("heightCm", { valueAsNumber: true })} className={inputCls} />
+                    <FieldError message={errors.heightCm?.message} />
+                  </div>
+                  <div>
+                    <label className={labelCls} htmlFor="weightKg">Baseline Weight (kg)</label>
+                    <input id="weightKg" type="number" step="0.01" inputMode="decimal" {...register("weightKg", { valueAsNumber: true })} className={inputCls} />
+                    <FieldError message={errors.weightKg?.message} />
+                  </div>
+                </div>
 
-              {(showSeniorId || showPwdId || showPregnancyFields) && (
-                <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  {showSeniorId && (
+                <details
+                  className="mt-4 rounded-xl border border-[#f0e4dd]"
+                  open={clinicalNotesOpen}
+                  onToggle={(e) => setClinicalNotesOpen((e.currentTarget as HTMLDetailsElement).open)}
+                >
+                  <summary className="flex min-h-11 cursor-pointer select-none list-none items-center gap-2 px-4 text-sm font-semibold text-[#3d2222]">
+                    <span aria-hidden="true" className="text-[#b5343e]">{clinicalNotesOpen ? "▾" : "▸"}</span>
+                    Allergies and known conditions (optional)
+                  </summary>
+                  <div className="grid gap-4 px-4 pb-4 sm:grid-cols-2">
                     <div>
-                      <label className={labelCls} htmlFor="seniorIdNumber">Senior ID Number</label>
-                      <input id="seniorIdNumber" type="text" {...register("seniorIdNumber")} className={inputCls} />
+                      <label className={labelCls} htmlFor="allergies">Allergies</label>
+                      <textarea id="allergies" rows={3} {...register("allergies")} className={`${inputCls} resize-y`} placeholder="Drug, food, or environmental allergies" />
                     </div>
-                  )}
-                  {showPwdId && (
                     <div>
-                      <label className={labelCls} htmlFor="pwdIdNumber">PWD ID Number</label>
-                      <input id="pwdIdNumber" type="text" {...register("pwdIdNumber")} className={inputCls} />
+                      <label className={labelCls} htmlFor="knownConditions">Known Conditions</label>
+                      <textarea id="knownConditions" rows={3} {...register("knownConditions")} className={`${inputCls} resize-y`} placeholder="Chronic conditions, special notes, or relevant history" />
                     </div>
-                  )}
-                  {showPregnancyFields && (
-                    <>
-                      <div>
-                        <label className={labelCls} htmlFor="lastMenstrualPeriod">Last Menstrual Period</label>
-                        <input id="lastMenstrualPeriod" type="date" {...register("lastMenstrualPeriod")} className={inputCls} />
-                      </div>
-                      <div>
-                        <label className={labelCls} htmlFor="estimatedDueDate">Estimated Due Date</label>
-                        <input id="estimatedDueDate" type="date" {...register("estimatedDueDate")} className={inputCls} />
-                      </div>
-                      <div>
-                        <label className={labelCls} htmlFor="gravida">Gravida</label>
-                        <input id="gravida" type="number" min="0" {...register("gravida", { valueAsNumber: true })} className={inputCls} />
-                      </div>
-                      <div>
-                        <label className={labelCls} htmlFor="para">Para</label>
-                        <input id="para" type="number" min="0" {...register("para", { valueAsNumber: true })} className={inputCls} />
-                      </div>
-                    </>
-                  )}
-                </div>
-              )}
+                  </div>
+                </details>
+              </Group>
 
-              <div className="mt-4">
-                <label className="flex cursor-pointer items-start gap-3 text-sm text-[#3d2222] leading-relaxed">
-                  <input type="checkbox" {...register("dataPrivacyConsent")} className="mt-0.5 h-4 w-4 accent-[#b5343e]" />
-                  I confirm that the patient or guardian has consented to the collection and processing of the information above for health center registration and care.
+              <div className={`rounded-2xl border p-4 ${errors.dataPrivacyConsent ? "border-[#f0a0a0] bg-[#fffafa]" : "border-teal-200 bg-teal-50/60"}`}>
+                <label htmlFor="dataPrivacyConsent" className="flex cursor-pointer items-start gap-3 text-sm leading-relaxed text-[#2a3a38]">
+                  <input id="dataPrivacyConsent" type="checkbox" {...register("dataPrivacyConsent")} className="mt-1 h-4 w-4 shrink-0 accent-[#b5343e]" />
+                  <span>
+                    <span className="mb-0.5 flex items-center gap-1.5 font-bold text-teal-900">
+                      <ShieldCheck size={15} aria-hidden="true" /> Data privacy consent<Req />
+                    </span>
+                    I confirm that the patient or guardian has consented to the collection and processing of the information above for health center registration and care.
+                  </span>
                 </label>
                 <FieldError message={errors.dataPrivacyConsent?.message} />
               </div>
-
-              <details
-                className="mt-4"
-                open={clinicalNotesOpen}
-                onToggle={(e) => setClinicalNotesOpen((e.currentTarget as HTMLDetailsElement).open)}
-              >
-                <summary className="flex cursor-pointer select-none items-center gap-2 py-2 text-sm font-semibold text-[#3d2222] list-none">
-                  <span aria-hidden="true">{clinicalNotesOpen ? "▾" : "▸"}</span>
-                  Add clinical notes (optional)
-                </summary>
-                <div className="mt-3 grid gap-4">
-                  <div>
-                    <label className={labelCls} htmlFor="allergies">Allergies</label>
-                    <textarea id="allergies" rows={3} {...register("allergies")} className={`${inputCls} resize-y`} placeholder="Drug, food, or environmental allergies" />
-                  </div>
-                  <div>
-                    <label className={labelCls} htmlFor="knownConditions">Known Conditions</label>
-                    <textarea id="knownConditions" rows={3} {...register("knownConditions")} className={`${inputCls} resize-y`} placeholder="Chronic conditions, special notes, or relevant history" />
-                  </div>
-                </div>
-              </details>
             </div>
-          </SectionPanel>
+          </Card>
         )}
 
-        {/* ─ Step 4 ─ */}
+        {/* ─ Step 4: Photo & next ─ */}
         {currentStep === 4 && (
-          <SectionPanel>
-            <SectionHeader title="Photo & Next Actions" subtitle="Capture or upload the patient's photo, then choose next steps." />
-            <div className="p-5">
-              {createdPatientId ? (
-                <ProfilePhotoUploader patientId={createdPatientId} />
-              ) : (
-                <p className="text-sm text-[#7a5252]">Complete registration first to enable photo upload.</p>
-              )}
-              <div className="mt-4 flex flex-wrap gap-3">
-                <button type="button" onClick={() => router.push("/patients")}
-                  className="rounded-lg border border-[#e5d4cc] bg-white px-4 py-2 text-sm font-semibold text-[#3d2222] hover:bg-[#fdf5f0] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e]">
-                  Back to Patients
-                </button>
-                {createdPatientId && (
-                  <>
-                    <button type="button" onClick={() => router.push(`/patients/${createdPatientId}`)}
-                      className="rounded-lg px-4 py-2 text-sm font-bold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e]"
-                      style={{ background: "linear-gradient(135deg, #b5343e, #c94060)" }}>
-                      Open Patient Profile
-                    </button>
-                    <button type="button" onClick={() => router.push(`/health-cards/${createdPatientId}/print`)}
-                      className="rounded-lg border border-[#fca5a5] bg-[#fef2f2] px-4 py-2 text-sm font-bold text-[#b91c1c] hover:bg-[#fee2e2] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b91c1c]">
-                      Generate Health Card
-                    </button>
-                    <button type="button" onClick={() => router.push(`/appointments/new?patientId=${createdPatientId}`)}
-                      className="rounded-lg border border-[#e5d4cc] bg-white px-4 py-2 text-sm font-semibold text-[#3d2222] hover:bg-[#fdf5f0] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e]">
-                      Book First Appointment
-                    </button>
-                  </>
-                )}
-              </div>
-
-              {createdPatientId && (
-                <div
-                  role="status"
-                  aria-live="polite"
-                  className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm text-emerald-800 leading-relaxed"
-                >
-                  <strong className="mb-2 block">Background tasks started</strong>
-                  <ul className="ml-5 list-disc space-y-1">
-                    <li>Welcome SMS will be sent if a mobile number was provided.</li>
-                    <li>Health card is queued for generation.</li>
-                    <li>Photo reminder is set for 24 hours if no photo is uploaded.</li>
-                  </ul>
+          <>
+            {created ? (
+              <div className="dash-rise mb-4 flex flex-wrap items-center gap-4 rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white px-5 py-4" role="status">
+                <span className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-600 text-white">
+                  <CircleCheck size={22} aria-hidden="true" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="font-display text-xl text-[#12312a]">{created.name} is registered</p>
+                  <p className="text-sm text-emerald-900/80">
+                    {created.code ? <>Patient code <strong>{created.code}</strong> · </> : null}
+                    A welcome SMS goes out if a mobile number was given.
+                  </p>
                 </div>
-              )}
-            </div>
-          </SectionPanel>
+              </div>
+            ) : (
+              <p className="mb-4 text-sm text-[#7a5252]">Complete registration first to add a photo.</p>
+            )}
+
+            {created && <ProfilePhotoUploader patientId={created.id} autoStartPhone />}
+
+            {created && (
+              <Card>
+                <CardHeader icon={UserRound} title="What next?" subtitle="The photo can also be added later from the patient profile." />
+                <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-4">
+                  {([
+                    { label: "Open patient profile", icon: UserRound, href: `/patients/${created.id}`, primary: true },
+                    { label: "Health card", icon: CreditCard, href: `/health-cards/${created.id}/print` },
+                    { label: "Book first appointment", icon: CalendarPlus, href: `/appointments/new?patientId=${created.id}` },
+                    { label: "Register another", icon: UserPlus, href: "/patients/new", reload: true },
+                  ] as const).map((action) => (
+                    <button
+                      key={action.label}
+                      type="button"
+                      onClick={() => ("reload" in action ? window.location.assign(action.href) : router.push(action.href))}
+                      className={`group flex min-h-14 items-center gap-3 rounded-xl border px-4 py-3 text-left text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#b5343e] ${
+                        "primary" in action
+                          ? "border-transparent bg-gradient-to-br from-[#b5343e] to-[#c94060] text-white shadow-sm hover:brightness-105"
+                          : "border-[#e5d4cc] bg-white text-[#3d2222] hover:border-[#d9a9a0] hover:bg-[#fdf5f0]"
+                      }`}
+                    >
+                      <action.icon size={18} aria-hidden="true" />
+                      {action.label}
+                    </button>
+                  ))}
+                </div>
+              </Card>
+            )}
+          </>
         )}
 
-        {/* Navigation controls */}
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-          <button
-            type="button"
-            disabled={currentStep === 1 || loading}
-            onClick={() => setCurrentStep((v) => Math.max(1, v - 1))}
-            className="rounded-lg border border-[#e5d4cc] bg-white px-5 py-2.5 text-sm font-semibold text-[#3d2222] disabled:opacity-40 hover:bg-[#fdf5f0] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e]"
-          >
-            Back
-          </button>
-          <div className="flex flex-wrap gap-3">
-            <Link
-              href="/patients"
-              className="inline-flex items-center rounded-lg border border-[#e5d4cc] bg-white px-5 py-2.5 text-sm font-medium text-[#3d2222] hover:bg-[#fdf5f0] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e]"
+        {/* Navigation */}
+        {currentStep < 4 && (
+          <div className="sticky bottom-0 z-10 -mx-1 flex flex-wrap items-center justify-between gap-3 border-t border-[#f0e4dd] bg-[#fbf6f2]/95 px-1 py-3 backdrop-blur">
+            <button
+              type="button"
+              disabled={currentStep === 1 || loading}
+              onClick={() => setCurrentStep((v) => Math.max(1, v - 1))}
+              className={secondaryBtn}
             >
-              Cancel
-            </Link>
-            {currentStep < 3 && (
-              <button
-                type="button"
-                disabled={loading}
-                onClick={async () => {
-                  setStepSubmitAttempted(true);
-                  const ok = await canSubmitStep(currentStep);
-                  if (ok) { setStepSubmitAttempted(false); setCurrentStep((v) => Math.min(4, v + 1)); }
-                }}
-                className="rounded-lg px-6 py-2.5 text-sm font-bold text-white disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e]"
-                style={{ background: loading ? "#d4a0a0" : "linear-gradient(135deg, #b5343e, #c94060)" }}
-              >
-                Next
-              </button>
-            )}
-            {currentStep === 3 && (
-              <button
-                type="button"
-                disabled={loading}
-                onClick={async () => {
-                  setStepSubmitAttempted(true);
-                  const ok = await canSubmitStep(3);
-                  if (ok) { setStepSubmitAttempted(false); await handleSubmit(onSubmit)(); }
-                }}
-                className="rounded-lg px-6 py-2.5 text-sm font-bold text-white disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#b5343e]"
-                style={{ background: loading ? "#d4a0a0" : "linear-gradient(135deg, #b5343e, #c94060)" }}
-              >
-                {loading ? "Registering..." : "Register Patient"}
-              </button>
-            )}
-          </div>
-        </div>
-
-        {showPhotoPrompt && createdPatientId && (
-          <div className="mt-4 rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-800">
-            Photo upload is available above. You can also return to the patient profile after saving to capture the photo later.
+              Back
+            </button>
+            <div className="flex flex-wrap gap-3">
+              <Link href="/patients" className={secondaryBtn}>
+                Cancel
+              </Link>
+              {currentStep < 3 && (
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={async () => {
+                    setStepSubmitAttempted(true);
+                    const ok = await canSubmitStep(currentStep);
+                    if (ok) { setStepSubmitAttempted(false); setCurrentStep((v) => Math.min(4, v + 1)); }
+                  }}
+                  className={primaryBtn}
+                >
+                  Next
+                </button>
+              )}
+              {currentStep === 3 && (
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={async () => {
+                    setStepSubmitAttempted(true);
+                    const ok = await canSubmitStep(3);
+                    if (ok) { setStepSubmitAttempted(false); await handleSubmit(onSubmit)(); }
+                  }}
+                  className={primaryBtn}
+                >
+                  {loading ? "Registering..." : "Register Patient"}
+                </button>
+              )}
+            </div>
           </div>
         )}
       </form>
