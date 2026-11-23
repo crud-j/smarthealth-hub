@@ -20,6 +20,7 @@ import { isPublicPath } from "./lib/public-paths";
  * Public paths (no redirect) are listed in lib/public-paths.ts:
  *   /login, /verify-otp, /forgot-password, /verify (QR scan target),
  *   /register and /intake (patient self-registration), /api/*, /_next/*,
+ *   /photo-capture (phone page from the patient-photo QR; the token is the permission),
  *   /, /favicon.ico and static files.
  */
 export function proxy(request: NextRequest): NextResponse {

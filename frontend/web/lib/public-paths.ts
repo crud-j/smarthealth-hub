@@ -17,6 +17,7 @@ const PUBLIC_PAGES = [
   "/verify", // card QR scan landing page (phone camera)
   "/register", // online self-registration (poster QR); POST /intake-applications is public
   "/intake", // public intake form (/intake) and token pre-visit form (/intake/<token>)
+  "/photo-capture", // phone page from the photo QR (/photo-capture/<token>); the token is the permission
 ] as const;
 
 /** Framework and API paths the proxy never gates. */

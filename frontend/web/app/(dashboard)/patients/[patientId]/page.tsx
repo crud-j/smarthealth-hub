@@ -258,10 +258,11 @@ export default function PatientProfilePage({ params }: { params: Promise<{ patie
     }
   }
 
-  const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.replace("/api/v1", "") ?? "http://localhost:8000";
-  const initialPhotoUrl = patient?.photoPath ? `${apiBase}${patient.photoPath}` : null;
+  // photoPath is the root-relative, authenticated photo URL
+  // ("/api/v1/patients/{id}/photo?v=<mtime>"): same origin through the
+  // Next.js rewrite, so the login cookie goes with the <img>.
   const [currentPhotoUrl, setCurrentPhotoUrl] = useState<string | null>(null);
-  const photoEndpointUrl = patientId ? `${apiBase}/api/v1/patients/${patientId}/photo` : null;
+  const photoUrl = currentPhotoUrl ?? patient?.photoPath ?? null;
 
   if (loading) {
     return (
@@ -420,14 +421,20 @@ export default function PatientProfilePage({ params }: { params: Promise<{ patie
         <div className="p-5">
           <div className="flex items-start gap-5">
             <div className="shrink-0">
-              <img
-                src={currentPhotoUrl ?? initialPhotoUrl ?? photoEndpointUrl ?? undefined}
-                alt="Patient profile photo"
-                width={80}
-                height={80}
-                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
-                className="h-20 w-20 rounded-xl border border-[#e5d4cc] bg-[#f0e4dd] object-cover"
-              />
+              {photoUrl ? (
+                <img
+                  src={photoUrl}
+                  alt="Patient profile photo"
+                  width={80}
+                  height={96}
+                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+                  className="h-24 w-20 rounded-xl border border-[#e5d4cc] bg-[#f0e4dd] object-cover"
+                />
+              ) : (
+                <div className="flex h-24 w-20 items-center justify-center rounded-xl border border-dashed border-[#e0c8be] bg-[#f7ece7] text-center text-[0.65rem] font-semibold text-[#b08a80]">
+                  No photo
+                </div>
+              )}
             </div>
             <div className="flex-1 grid grid-cols-1 gap-x-8 sm:grid-cols-2 lg:grid-cols-3">
               <DemoField label="Registration Date" value={formatDate(patient.createdAt)} />
@@ -454,11 +461,11 @@ export default function PatientProfilePage({ params }: { params: Promise<{ patie
       {/* Photo uploader */}
       <ProfilePhotoUploader
         patientId={patientId}
-        currentPhotoUrl={null}
+        currentPhotoUrl={photoUrl}
         onPhotoSaved={(url) => {
           // url is the authenticated photo endpoint with ?v=<mtime>, which
           // already changes on every upload (no extra cache-buster needed).
-          setCurrentPhotoUrl((process.env.NEXT_PUBLIC_API_BASE_URL?.replace("/api/v1", "") ?? "http://localhost:8000") + url);
+          setCurrentPhotoUrl(url);
         }}
       />
 
