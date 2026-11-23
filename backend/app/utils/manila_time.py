@@ -11,9 +11,22 @@ be converted back to Manila before they are shown in an SMS.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import func
+
 MANILA = ZoneInfo("Asia/Manila")
+
+
+def manila_day(column: Any) -> Any:
+    """SQL: the Manila calendar date of a timestamptz column.
+
+    ``func.date(column)`` alone gives the date in the database session's
+    timezone, which is UTC in production: a 7:30 AM Manila time (23:30 UTC)
+    would fall on the day before.
+    """
+    return func.date(func.timezone("Asia/Manila", column))
 
 
 def assume_manila(value: datetime) -> datetime:
