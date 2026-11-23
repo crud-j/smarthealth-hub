@@ -111,9 +111,10 @@ async def list_roles(db: AsyncSession, *, exclude_admin: bool = True) -> list[Ro
 
     Args:
         db:            Active async database session.
-        exclude_admin: When True (default), admin role is omitted so the UI
-                       cannot promote a user to Admin via the self-service form.
-                       Admin accounts are created only via the seed script.
+        exclude_admin: When True (default), admin role is omitted (Edit form
+                       and other dropdowns). The Add Staff Account form passes
+                       False (GET /users/roles?include_admin=true, admin only)
+                       so an admin can create another admin.
     """
     stmt = sa.select(Role).order_by(Role.name)
     if exclude_admin:
@@ -282,6 +283,19 @@ async def create_user(
     return user, temp_pw
 
 
+async def _is_last_active_admin(db: AsyncSession, user: User) -> bool:
+    """True when ``user`` is an active admin and no other active admin exists."""
+    if user.role.name != "admin" or not user.is_active:
+        return False
+    others = await db.execute(
+        sa.select(sa.func.count())
+        .select_from(User)
+        .join(Role, Role.id == User.role_id)
+        .where(Role.name == "admin", User.is_active.is_(True), User.id != user.id)
+    )
+    return others.scalar_one() == 0
+
+
 async def update_user(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -305,10 +319,27 @@ async def update_user(
     Raises:
         NotFoundError: If user_id does not exist.
         ConflictError: If the new email or mobile number is already in use by
-                       a different user.
+                       a different user; if an admin changes their own role or
+                       deactivates themselves; or if the change would leave no
+                       active System Administrator.
     """
     user = await get_user(db, user_id)
     fields_changed: list[str] = []
+
+    # Never leave the system without an administrator (checked before any
+    # change, so a refused request changes nothing). The Edit form once
+    # demoted admins on every save; these rules are the safety net.
+    role_changing = data.role_id is not None and data.role_id != user.role_id
+    deactivating = data.is_active is False and user.is_active
+    if user_id == updated_by and role_changing:
+        raise ConflictError("You cannot change your own role. Ask another System Administrator.")
+    if user_id == updated_by and deactivating:
+        raise ConflictError("You cannot deactivate your own account.")
+    if (role_changing or deactivating) and await _is_last_active_admin(db, user):
+        raise ConflictError(
+            "This is the last active System Administrator. Add or activate another "
+            "administrator first."
+        )
 
     if data.full_name is not None and data.full_name != user.full_name:
         user.full_name = data.full_name
