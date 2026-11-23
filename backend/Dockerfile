@@ -48,9 +48,7 @@ RUN uv venv /app/.venv && \
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
 FROM python:3.12-slim-bookworm AS runtime
 
-# Same WeasyPrint system libraries needed at *runtime* (not just build time),
-# plus Tesseract with English + Filipino language data for ID-card OCR
-# (app/services/ocr_service.py uses lang="eng+fil").
+# Same WeasyPrint system libraries needed at *runtime* (not just build time).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpango-1.0-0 \
     libpangoft2-1.0-0 \
@@ -59,9 +57,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgdk-pixbuf2.0-0 \
     fontconfig \
     fonts-liberation \
-    tesseract-ocr \
-    tesseract-ocr-eng \
-    tesseract-ocr-fil \
     && rm -rf /var/lib/apt/lists/*
 
 # Non-root user — all files owned by appuser for least-privilege operation.

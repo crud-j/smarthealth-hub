@@ -193,7 +193,7 @@ class PatientCreate(BaseSchema):
     # and new registrations that do not use OCR or pre-visit intake.
     registration_data_source: Literal["manual", "ocr", "pre_visit"] = Field(
         "manual",
-        description="Data-entry source: 'manual' (typed), 'ocr' (ID scan), 'pre_visit' (patient self-entry link).",
+        description="Data-entry source: 'manual' (typed), 'ocr' (ID scan, removed; kept for older records), 'pre_visit' (patient self-entry link).",
     )
 
     # Preferred language for SMS reminders ('en' = English, 'fil' = Filipino).
@@ -673,46 +673,6 @@ class PatientVerifySummary(BaseSchema):
         None,
         description="Status of the patient's health card: 'active', 'lost', 'reissued', or None if no card issued yet",
     )
-
-
-# ---------------------------------------------------------------------------
-# OCR extraction schemas — POST /patients/ocr-extract
-# ---------------------------------------------------------------------------
-
-
-class OcrFieldValue(BaseSchema):
-    """
-    A single extracted field value with a confidence score.
-
-    ``value`` is None if the field was not found in the image.
-    ``confidence`` ranges from 0.0 (not found / unreadable) to 1.0 (certain).
-    """
-
-    value: str | None = None
-    confidence: float = 0.0  # 0.0–1.0; fields not found have confidence 0.0
-
-
-class OcrExtractResponse(BaseSchema):
-    """
-    Response body for POST /patients/ocr-extract.
-
-    All field values are extracted from the submitted ID image.
-    Fields that could not be extracted have value=None and confidence=0.0.
-    ``raw_text`` is the full OCR output string — included for debugging and
-    for the audit log; not displayed to end users.
-    ``provider`` identifies which OCR engine processed the image.
-    """
-
-    first_name: OcrFieldValue
-    middle_name: OcrFieldValue
-    last_name: OcrFieldValue
-    birth_date: OcrFieldValue  # ISO 8601 (YYYY-MM-DD) if parseable; raw string otherwise
-    sex: OcrFieldValue  # normalized to "male" or "female", or None
-    address_line: OcrFieldValue
-    philhealth_no: OcrFieldValue
-    blood_type: OcrFieldValue
-    raw_text: str = ""  # full OCR output for debugging
-    provider: str = "tesseract"  # "tesseract" | "azure"
 
 
 # ---------------------------------------------------------------------------

@@ -190,6 +190,7 @@ async def validate_and_save_photo(
     upload: UploadFile,
     updated_by_id: uuid.UUID,
     ip_address: str | None = None,
+    source: str | None = None,
 ) -> str:
     """
     Validate, convert, and persist a patient profile photo.
@@ -210,6 +211,8 @@ async def validate_and_save_photo(
         upload:          FastAPI UploadFile from the multipart request.
         updated_by_id:   UUID of the staff member performing the upload.
         ip_address:      Client IP for the audit log.
+        source:          How the photo came in, kept in the audit row
+                         (e.g. "phone_capture" for the QR phone link).
 
     Returns:
         The authenticated photo URL (see ``photo_api_url``), e.g.
@@ -261,17 +264,20 @@ async def validate_and_save_photo(
     patient.updated_at = datetime.utcnow()  # type: ignore[assignment]
 
     # 7. Audit log
+    audit_metadata: dict[str, object] = {
+        "changed_fields": ["photo_path"],
+        "file_size_bytes": len(jpeg_bytes),
+        "original_content_type": content_type,
+    }
+    if source:
+        audit_metadata["source"] = source
     await write_audit_log(
         db=db,
         user_id=updated_by_id,
         action="UPDATE",
         entity_type="patient",
         entity_id=patient_id,
-        metadata={
-            "changed_fields": ["photo_path"],
-            "file_size_bytes": len(jpeg_bytes),
-            "original_content_type": content_type,
-        },
+        metadata=audit_metadata,
         ip_address=ip_address,
     )
 

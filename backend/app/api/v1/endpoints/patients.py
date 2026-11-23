@@ -21,7 +21,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 
-from fastapi import APIRouter, File, HTTPException, Query, Request, Response, UploadFile, status
+from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 
 from app.core.exceptions import NotFoundError
 from app.core.logging import get_logger
@@ -33,8 +33,6 @@ from app.schemas.intake import IntakeTokenResponse
 from app.schemas.patient import (
     ArchivedPatientSummary,
     InactivePatientSummary,
-    OcrExtractResponse,
-    OcrFieldValue,
     PaginatedArchivedPatients,
     PaginatedInactivePatients,
     PaginatedPatients,
@@ -348,145 +346,6 @@ async def create_patient(
         duplicate_warning=False,
         matches=[],
         patient=_build_patient_response(patient),
-    )
-
-
-# ---------------------------------------------------------------------------
-# POST /patients/ocr-extract
-# ---------------------------------------------------------------------------
-
-
-@router.post(
-    "/ocr-extract",
-    response_model=OcrExtractResponse,
-    summary="Extract patient demographics from a government ID image (OCR)",
-    dependencies=[_BHW_PLUS],
-)
-async def ocr_extract(
-    request: Request,
-    current_user: CurrentUser,
-    image: UploadFile = File(..., description="Government ID image (JPEG or PNG, max 10 MB)"),
-) -> OcrExtractResponse:
-    """
-    Extract patient demographics from a photograph of a government-issued ID
-    (PhilID, PhilHealth card, UMID, driver's license, or passport).
-
-    The image is processed in-memory by the configured OCR provider (Tesseract
-    by default). No image is persisted to disk or database.
-
-    Returns an ``OcrExtractResponse`` with per-field confidence scores.
-    Fields that could not be extracted have ``value=None`` and ``confidence=0.0``.
-
-    Auth: BHW, Physician/Nurse/Midwife, Admin Staff, Admin.
-    Rate limit: 10 requests / minute per user.
-
-    Security: Image bytes are held in memory only for the duration of this
-    request. No OCR image is written to disk or stored in the database.
-    """
-    from app.services.ocr_service import OcrResult, get_ocr_provider  # noqa: PLC0415
-
-    ip = _get_client_ip(request)
-
-    # Rate limit: 10 OCR requests per minute per user
-    await limiter.check_rate_limit(
-        key=f"ocr_extract:{current_user.id}",
-        max_attempts=10,
-        window_seconds=60,
-    )
-
-    # Validate file type
-    content_type = image.content_type or ""
-    if content_type not in ("image/jpeg", "image/png", "image/jpg"):
-        raise HTTPException(
-            status_code=400,
-            detail="Only JPEG and PNG images are accepted for OCR extraction.",
-        )
-
-    # Read image bytes (enforced size limit)
-    from app.core.config import settings as _settings  # noqa: PLC0415
-
-    image_bytes = await image.read()
-    if len(image_bytes) > _settings.OCR_MAX_IMAGE_BYTES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Image exceeds the maximum allowed size of {_settings.OCR_MAX_IMAGE_BYTES // (1024 * 1024)} MB.",
-        )
-    if len(image_bytes) == 0:
-        raise HTTPException(status_code=400, detail="Uploaded image file is empty.")
-
-    # Run OCR in a thread pool (pytesseract and Pillow are synchronous)
-    import asyncio as _asyncio  # noqa: PLC0415
-
-    provider = get_ocr_provider()
-
-    try:
-        ocr_result: OcrResult = await _asyncio.to_thread(provider.extract, image_bytes)
-    except Exception as exc:  # noqa: BLE001
-        logger.error(
-            "OCR extraction failed",
-            extra={"user_id": str(current_user.id), "error": str(exc)},
-        )
-        # Return an empty result rather than a 500 — the frontend degrades to manual entry
-        return OcrExtractResponse(
-            first_name=OcrFieldValue(value=None, confidence=0.0),
-            middle_name=OcrFieldValue(value=None, confidence=0.0),
-            last_name=OcrFieldValue(value=None, confidence=0.0),
-            birth_date=OcrFieldValue(value=None, confidence=0.0),
-            sex=OcrFieldValue(value=None, confidence=0.0),
-            address_line=OcrFieldValue(value=None, confidence=0.0),
-            philhealth_no=OcrFieldValue(value=None, confidence=0.0),
-            blood_type=OcrFieldValue(value=None, confidence=0.0),
-            raw_text="[extraction failed]",
-            provider=type(provider).__name__,
-        )
-
-    # Log extraction metadata (no PHI in the log — only field names and counts)
-    fields_extracted = [
-        name
-        for name, val in {
-            "given_names": ocr_result.given_names,
-            "family_name": ocr_result.family_name,
-            "date_of_birth": ocr_result.date_of_birth,
-            "sex": ocr_result.sex,
-            "address_line": ocr_result.address_line,
-            "philhealth_number": ocr_result.philhealth_number,
-            "blood_type": ocr_result.blood_type,
-        }.items()
-        if val is not None
-    ]
-    low_confidence_fields = [
-        name for name, conf in ocr_result.confidence.items() if 0.0 < conf < 0.75
-    ]
-
-    logger.info(
-        "OCR extraction completed",
-        extra={
-            "user_id": str(current_user.id),
-            "provider": type(provider).__name__,
-            "fields_extracted": fields_extracted,
-            "low_confidence_fields": low_confidence_fields,
-            "ip_address": ip,
-        },
-    )
-
-    # Map OcrResult to OcrExtractResponse
-    def _field(value: str | None, field_name: str) -> OcrFieldValue:
-        return OcrFieldValue(
-            value=value,
-            confidence=ocr_result.confidence.get(field_name, 0.0 if value is None else 0.5),
-        )
-
-    return OcrExtractResponse(
-        first_name=_field(ocr_result.given_names, "given_names"),
-        middle_name=_field(ocr_result.middle_name, "middle_name"),
-        last_name=_field(ocr_result.family_name, "family_name"),
-        birth_date=_field(ocr_result.date_of_birth, "date_of_birth"),
-        sex=_field(ocr_result.sex, "sex"),
-        address_line=_field(ocr_result.address_line, "address_line"),
-        philhealth_no=_field(ocr_result.philhealth_number, "philhealth_number"),
-        blood_type=_field(ocr_result.blood_type, "blood_type"),
-        raw_text=ocr_result.raw_text,
-        provider=type(provider).__name__,
     )
 
 
