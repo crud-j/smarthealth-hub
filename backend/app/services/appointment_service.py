@@ -51,7 +51,7 @@ from app.schemas.appointment import (
 from app.services import patient_service, system_settings_service
 from app.services.analytics_service import _invalidate_analytics_cache
 from app.services.audit_service import write_audit_log
-from app.utils.manila_time import to_manila
+from app.utils.manila_time import manila_day, to_manila
 
 logger = get_logger(__name__)
 
@@ -378,9 +378,9 @@ async def list_appointments(
     if status is not None:
         base_query = base_query.where(Appointment.status == status)
     if from_date is not None:
-        base_query = base_query.where(_manila_day(Appointment.scheduled_at) >= from_date)
+        base_query = base_query.where(manila_day(Appointment.scheduled_at) >= from_date)
     if to_date is not None:
-        base_query = base_query.where(_manila_day(Appointment.scheduled_at) <= to_date)
+        base_query = base_query.where(manila_day(Appointment.scheduled_at) <= to_date)
 
     # Count total matching rows.
     count_result = await db.execute(select(func.count()).select_from(base_query.subquery()))
@@ -484,11 +484,6 @@ async def update_appointment(
 VISIT_COMPLETES_STATUSES = ("pending", "confirmed", "missed")
 
 
-def _manila_day(column: Any) -> Any:
-    """SQL: the Manila calendar date of a timestamptz column."""
-    return func.date(func.timezone("Asia/Manila", column))
-
-
 async def complete_appointments_for_visit(
     db: AsyncSession,
     *,
@@ -514,14 +509,14 @@ async def complete_appointments_for_visit(
 
     Returns the ids of the appointments it completed.
     """
-    visit_day = select(_manila_day(Visit.visit_date)).where(Visit.id == visit_id).scalar_subquery()
+    visit_day = select(manila_day(Visit.visit_date)).where(Visit.id == visit_id).scalar_subquery()
     appointments = (
         (
             await db.execute(
                 select(Appointment).where(
                     Appointment.patient_id == patient_id,
                     Appointment.status.in_(VISIT_COMPLETES_STATUSES),
-                    _manila_day(Appointment.scheduled_at) == visit_day,
+                    manila_day(Appointment.scheduled_at) == visit_day,
                 )
             )
         )

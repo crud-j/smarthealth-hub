@@ -42,6 +42,7 @@ from app.models.medical_history import MedicalHistory
 from app.models.patient import Patient
 from app.models.sms_log import SmsLog
 from app.models.visit import Visit
+from app.utils.manila_time import manila_day
 
 logger = logging.getLogger(__name__)
 
@@ -792,11 +793,6 @@ _REMINDER_SENT_STATUSES = ("sent", "delivered", "replied")
 _POST_MISS_TRIGGER = "post_miss_followup"
 
 
-def _manila_day(column: Any) -> Any:
-    """SQL: the Manila calendar date of a timestamptz column."""
-    return func.date(func.timezone("Asia/Manila", column))
-
-
 def _group(total: int, came: int) -> dict[str, Any]:
     pct = round(came / total * 100, 1) if total >= REMINDER_MIN_GROUP else None
     return {"total": total, "came": came, "came_pct": pct}
@@ -838,7 +834,7 @@ async def get_reminder_effect(
         select(Visit.id)
         .where(
             Visit.patient_id == Appointment.patient_id,
-            _manila_day(Visit.visit_date) == _manila_day(Appointment.scheduled_at),
+            manila_day(Visit.visit_date) == manila_day(Appointment.scheduled_at),
         )
         .exists()
     )

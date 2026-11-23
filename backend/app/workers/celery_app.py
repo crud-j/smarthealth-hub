@@ -160,7 +160,8 @@ celery_app.conf.beat_schedule = {
     },
     # Daily 18:00 Manila (after clinic hours) — mark past-due appointments as
     # 'missed' and text those patients. Not later: the follow-up SMS should not
-    # arrive at night. Not more often: the SMS step has no "already sent" check.
+    # arrive at night. Running it again the same day is safe: an appointment
+    # that already has a follow-up SMS is skipped.
     # nowfun pins the crontab evaluation to Asia/Manila regardless of the
     # Celery worker's system timezone.
     "mark-missed-appointments-daily": {

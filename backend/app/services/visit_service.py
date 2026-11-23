@@ -50,6 +50,7 @@ from app.services import appointment_service, patient_service
 from app.services.analytics_service import _invalidate_analytics_cache
 from app.services.audit_service import write_audit_log
 from app.utils.encryption import decrypt_text, encrypt_text
+from app.utils.manila_time import manila_day
 
 logger = get_logger(__name__)
 
@@ -267,7 +268,7 @@ async def visit_prefill(
             .where(
                 Appointment.patient_id == patient_id,
                 Appointment.status.in_(appointment_service.VISIT_COMPLETES_STATUSES),
-                func.date(func.timezone("Asia/Manila", Appointment.scheduled_at)) == day,
+                manila_day(Appointment.scheduled_at) == day,
             )
             .order_by(Appointment.scheduled_at.asc())
             .limit(1)

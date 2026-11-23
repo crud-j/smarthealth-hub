@@ -44,7 +44,7 @@ from sqlalchemy.engine import CursorResult
 from app.core.logging import get_logger
 from app.services.sms_templates import confirmation_suffix
 from app.services.system_settings_service import load_runtime_settings
-from app.utils.manila_time import to_manila
+from app.utils.manila_time import manila_day, to_manila
 from app.workers.celery_app import celery_app
 from app.workers.monitoring_tasks import record_reminder_run
 
@@ -58,6 +58,8 @@ _MANILA_TZ = ZoneInfo("Asia/Manila")
 # An immunization reminder in one of these states counts as done (a "failed"
 # one is tried again at the next run).
 _REMINDED_STATUSES = ("queued", "sent", "delivered", "replied")
+# sms_logs.metadata "trigger" of the "you missed your appointment" text.
+_POST_MISS_TRIGGER = "post_miss_followup"
 
 
 def _build_full_name(first: str, middle: str | None, last: str) -> str:
@@ -372,13 +374,16 @@ async def _mark_missed_appointments_async() -> int:
     whose scheduled_at is strictly before now() to status='missed'.
 
     After committing the status updates, enqueues a follow-up SMS for each
-    appointment that was marked missed today and whose patient has a mobile
-    number on file.  SMS enqueueing failures are logged as warnings and do
-    NOT prevent the status update from being persisted.
+    missed appointment scheduled today (the Manila calendar day) whose
+    patient can be texted.  An appointment that already has a follow-up SMS
+    (any status) is skipped, so a second run on the same day texts nobody
+    twice; a failed one is resent by staff from the SMS page.  SMS
+    enqueueing failures are logged as warnings and do NOT prevent the status
+    update from being persisted.
 
     Returns the number of rows updated.
     """
-    from sqlalchemy import func, select, update
+    from sqlalchemy import exists, not_, select, update
 
     from app.models.appointment import Appointment
     from app.models.patient import Patient
@@ -404,7 +409,14 @@ async def _mark_missed_appointments_async() -> int:
     # update committed above.  Patients with sms_opt_out=True are skipped.
     try:
         async with CelerySessionLocal() as db:
-            today = datetime.now(tz=UTC).date()
+            # The Manila day: the database runs on UTC, so the UTC date of a
+            # 7:30 AM Manila booking (23:30 UTC) is the day before.
+            today = manila_today()
+
+            already_texted = select(SmsLog.id).where(
+                SmsLog.appointment_id == Appointment.id,
+                SmsLog.sms_metadata["trigger"].astext == _POST_MISS_TRIGGER,
+            )
 
             missed_stmt = (
                 select(
@@ -417,8 +429,9 @@ async def _mark_missed_appointments_async() -> int:
                 .join(Patient, Patient.id == Appointment.patient_id)
                 .where(
                     Appointment.status == "missed",
-                    func.date(Appointment.scheduled_at) == today,
+                    manila_day(Appointment.scheduled_at) == today,
                     *_patient_can_be_texted(),
+                    not_(exists(already_texted)),
                 )
             )
 
@@ -448,7 +461,7 @@ async def _mark_missed_appointments_async() -> int:
                     mobile_number=mobile_number,
                     message=message,
                     status="queued",
-                    sms_metadata={"trigger": "post_miss_followup"},
+                    sms_metadata={"trigger": _POST_MISS_TRIGGER},
                 )
                 db.add(sms_log)
                 await db.flush()  # populate sms_log.id before commit

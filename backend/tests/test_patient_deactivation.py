@@ -39,6 +39,7 @@ from app.models.sms_log import SmsLog
 from app.models.user import User
 from app.services import audit_anomaly_service
 from app.services.sms_resend_service import resend_problem
+from app.utils.manila_time import MANILA
 from app.workers.reminder_scheduler import (
     _dispatch_appointment_reminders_async,
     _dispatch_immunization_reminders_async,
@@ -170,9 +171,10 @@ class TestRemindersSkipRemovedPatients:
     async def test_no_missed_appointment_text_but_still_marked_missed(self, db_session, kind):
         patient = await _patient(db_session, **_removed(kind))
         now = datetime.now(tz=UTC)
-        start_of_utc_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        today = manila_today(now)
+        start_of_manila_day = datetime(today.year, today.month, today.day, tzinfo=MANILA)
         appt = await self._appointment(
-            db_session, patient, max(now - timedelta(minutes=1), start_of_utc_day)
+            db_session, patient, max(now - timedelta(minutes=1), start_of_manila_day)
         )
 
         with patch("app.workers.reminder_scheduler.send_reminder_task") as task:
