@@ -3,8 +3,10 @@
 /**
  * CreateUserModal — Admin-only modal for creating a new staff account.
  *
- * Fetches the list of non-admin roles from GET /users/roles on open,
- * then POSTs to /users on form submission.
+ * Fetches the roles from GET /users/roles?include_admin=true on open (the
+ * System Administrator role is listed last and never pre-selected), then POSTs
+ * to /users on form submission. Only admins open this modal; the backend
+ * refuses include_admin for anyone else.
  *
  * credential_mode toggle:
  *   "password" — Admin sets a password directly (shown with confirm field).
@@ -47,7 +49,13 @@ const ROLE_LABELS: Record<string, string> = {
   bhw: "BHW",
   physician: "Physician",
   admin_staff: "Admin Staff",
+  admin: "System Administrator (Admin)",
 };
+
+/** Staff roles first, System Administrator last. */
+function orderRoles(roles: RoleOption[]): RoleOption[] {
+  return [...roles.filter((r) => r.name !== "admin"), ...roles.filter((r) => r.name === "admin")];
+}
 
 // ---------------------------------------------------------------------------
 // Validation helpers
@@ -211,11 +219,12 @@ export default function CreateUserModal({
   async function fetchRoles() {
     setRolesLoading(true);
     try {
-      const data = await apiFetch<RoleOption[]>("/users/roles");
+      const data = orderRoles(await apiFetch<RoleOption[]>("/users/roles?include_admin=true"));
       setRoles(data);
-      // Pre-select the first non-admin role
-      if (data.length > 0 && !roleId) {
-        setRoleId(data[0].id);
+      // Pre-select the first staff role, never the System Administrator.
+      const firstStaff = data.find((r) => r.name !== "admin");
+      if (firstStaff && !roleId) {
+        setRoleId(firstStaff.id);
       }
     } catch {
       // Roles failed to load — user will see an empty select
@@ -454,9 +463,21 @@ export default function CreateUserModal({
                     {fieldErrors.role_id}
                   </p>
                 )}
-                <p className="mt-1 text-xs text-slate-400">
-                  Admin accounts can only be created via the seed script.
-                </p>
+                {roles.find((r) => r.id === roleId)?.name === "admin" ? (
+                  <p
+                    role="note"
+                    className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+                  >
+                    <strong>Full system access:</strong> staff accounts, audit log,
+                    settings, backups and System Health, plus patient records
+                    without clinical notes. Give this only to people who run the
+                    system.
+                  </p>
+                ) : (
+                  <p className="mt-1 text-xs text-slate-400">
+                    Choose System Administrator only for people who run the system.
+                  </p>
+                )}
               </div>
 
               {/* Authentication method toggle */}

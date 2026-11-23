@@ -31,6 +31,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 
+from app.core.exceptions import ForbiddenError
 from app.core.security import CurrentUser, require_role
 from app.db.session import DbDep
 from app.models.user import User
@@ -68,13 +69,25 @@ AdminOnly = require_role("admin")
 async def list_roles(
     current_user: CurrentUser,
     db: DbDep,
+    include_admin: bool = Query(
+        False,
+        description=(
+            "Also list the System Administrator role (Admin only). Used by the "
+            "Add Staff Account form, so an admin can create another admin."
+        ),
+    ),
 ) -> list[RoleItem]:
     """
-    Returns the list of non-admin roles for use in Create/Edit User dropdowns.
+    Roles for the Create/Edit User dropdowns.
 
-    Admin role is excluded — admin accounts are created only via the seed script.
+    By default the admin role is left out (the Edit form and other dropdowns).
+    ``?include_admin=true`` adds it for the Add Staff Account form; only an
+    admin may ask for it (403 otherwise). Promoting or demoting admins is
+    still guarded in ``user_service.update_user``.
     """
-    roles = await user_service.list_roles(db)
+    if include_admin and current_user.role.name != "admin":
+        raise ForbiddenError("Only a System Administrator can create administrator accounts.")
+    roles = await user_service.list_roles(db, exclude_admin=not include_admin)
     return [RoleItem(id=r.id, name=r.name) for r in roles]
 
 
