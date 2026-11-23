@@ -102,8 +102,8 @@ export const NAV_GROUPS: readonly NavGroup[] = [
   {
     label: "Account",
     items: [
-      { href: "/settings/profile", label: "Profile", icon: "profile", roles: [] },
-      { href: "/settings/security", label: "Security", icon: "security", roles: [] },
+      // One page: account, password and passkeys (/settings/security redirects here).
+      { href: "/settings/profile", label: "Profile & Security", icon: "profile", roles: [] },
     ],
   },
 ]

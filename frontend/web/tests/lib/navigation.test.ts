@@ -11,7 +11,8 @@ function layout(role: string | null | undefined): Record<string, string[]> {
 }
 
 const PATIENT_CARE = ["Patients", "Appointments", "Immunizations", "Health Cards"]
-const ACCOUNT = ["Profile", "Security"]
+// Profile and Security are one page (/settings/security redirects to it).
+const ACCOUNT = ["Profile & Security"]
 
 describe("visibleNavGroups", () => {
   it("admin sees every group, with System Configuration under Administration", () => {
