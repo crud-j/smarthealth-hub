@@ -28,6 +28,14 @@ export interface CurrentUser {
   email: string;
   role: string;
   is_active: boolean;
+  // Also returned by GET /users/me (UserResponse); optional so older
+  // callers and test doubles need not set them.
+  mobile_number?: string;
+  mfa_enabled?: boolean;
+  /** False for passkey-only accounts (no password to change). */
+  has_password?: boolean;
+  last_login_at?: string | null;
+  created_at?: string;
 }
 
 export interface LoginPayload {

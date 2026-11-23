@@ -514,7 +514,12 @@ async def reset_password(
     response_model=ChangePasswordResponse,
     summary="Change own password (requires current password)",
     responses={
-        401: {"description": "Current password is incorrect"},
+        401: {"description": "Not signed in"},
+        422: {
+            "description": "Current password is incorrect, the new password is the same or "
+            "breaks the rules, or the account is passkey-only (no password)"
+        },
+        429: {"description": "More than 5 attempts in 15 minutes"},
     },
 )
 async def change_password(
@@ -528,6 +533,11 @@ async def change_password(
     Requires the current password for verification before accepting the new one.
     """
     ip = request.client.host if request.client else None
+    # 5 tries per 15 minutes per account: guessing the current password from
+    # a signed-in session.
+    await limiter.check_rate_limit(
+        key=f"change_password:{current_user.id}", max_attempts=5, window_seconds=900
+    )
 
     await auth_service.change_password(
         db=db,
