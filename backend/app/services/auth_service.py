@@ -36,7 +36,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.exceptions import ForbiddenError, UnauthorizedError
+from app.core.exceptions import ForbiddenError, UnauthorizedError, ValidationError
 from app.core.logging import get_logger
 from app.core.security import (
     create_access_token,
@@ -644,14 +644,30 @@ async def change_password(
     Verify the current password and replace it with the new one.
 
     Raises:
-        UnauthorizedError: Current password is wrong or user not found.
+        UnauthorizedError: User not found.
+        ValidationError (422): the account has no password (passkey only),
+            the current password is wrong, or the new one is the same.
+            Not 401: the frontend answers 401 by refreshing the session and,
+            if that fails, signing the user out (over a typo).
     """
     user = await _get_user_by_id(db, user_id)
     if user is None:
         raise UnauthorizedError("User account not found.")
 
-    if user.password_hash is None or not verify_password(current_password, user.password_hash):
-        raise UnauthorizedError("Current password is incorrect.")
+    if user.password_hash is None:
+        raise ValidationError(
+            "This account signs in with a passkey and has no password to change.",
+            detail={"code": "NO_PASSWORD"},
+        )
+    if not verify_password(current_password, user.password_hash):
+        raise ValidationError(
+            "Current password is incorrect.", detail={"code": "WRONG_CURRENT_PASSWORD"}
+        )
+    if verify_password(new_password, user.password_hash):
+        raise ValidationError(
+            "Choose a new password that is different from the current one.",
+            detail={"code": "SAME_PASSWORD"},
+        )
 
     user.password_hash = hash_password(new_password)
     await db.flush()
