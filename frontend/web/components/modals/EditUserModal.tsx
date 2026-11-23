@@ -5,6 +5,10 @@
  *
  * Pre-fills fields from the passed `user` prop.
  * Fetches the list of non-admin roles from GET /users/roles on open.
+ * An administrator's role is shown read-only and never sent: the list has no
+ * Admin, and this form used to pre-select another role and demote the admin
+ * on every save. (The backend also refuses changing your own role and
+ * removing the last active admin.)
  * Submits only changed fields to PUT /users/{id}.
  *
  * Props:
@@ -124,9 +128,10 @@ export default function EditUserModal({
       setRoles(data);
       // Pre-select the current user's role by name match
       if (currentRoleName) {
+        // No match (an admin, or an unknown role): select nothing, so saving
+        // never changes the role by accident.
         const match = data.find((r) => r.name === currentRoleName);
-        if (match) setRoleId(match.id);
-        else if (data.length > 0) setRoleId(data[0].id);
+        setRoleId(match ? match.id : "");
       } else if (data.length > 0) {
         setRoleId(data[0].id);
       }
@@ -166,9 +171,9 @@ export default function EditUserModal({
     if (mobile.trim() !== user.mobile_number) body.mobile_number = mobile.trim();
     if (isActive !== user.is_active) body.is_active = isActive;
 
-    // Find selected role name to compare
+    // Find selected role name to compare (never for an administrator)
     const selectedRole = roles.find((r) => r.id === roleId);
-    if (selectedRole && selectedRole.name !== user.role) {
+    if (user.role !== "admin" && selectedRole && selectedRole.name !== user.role) {
       body.role_id = roleId;
     }
 
@@ -324,23 +329,40 @@ export default function EditUserModal({
               >
                 Role
               </label>
-              <select
-                id="eu-role"
-                value={roleId}
-                onChange={(e) => setRoleId(e.target.value)}
-                disabled={rolesLoading}
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:bg-slate-50 disabled:text-slate-400"
-              >
-                {rolesLoading && <option value="">Loading roles...</option>}
-                {!rolesLoading && roles.length === 0 && (
-                  <option value="">No roles available</option>
-                )}
-                {roles.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {ROLE_LABELS[r.name] ?? r.name}
-                  </option>
-                ))}
-              </select>
+              {user?.role === "admin" ? (
+                <>
+                  <p
+                    id="eu-role"
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700"
+                  >
+                    System Administrator (Admin)
+                  </p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    An administrator&apos;s role is not changed here.
+                  </p>
+                </>
+              ) : (
+                <select
+                  id="eu-role"
+                  value={roleId}
+                  onChange={(e) => setRoleId(e.target.value)}
+                  disabled={rolesLoading}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:bg-slate-50 disabled:text-slate-400"
+                >
+                  {rolesLoading && <option value="">Loading roles...</option>}
+                  {!rolesLoading && roles.length === 0 && (
+                    <option value="">No roles available</option>
+                  )}
+                  {!rolesLoading && roles.length > 0 && !roleId && (
+                    <option value="">Keep current role</option>
+                  )}
+                  {roles.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {ROLE_LABELS[r.name] ?? r.name}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
 
             {/* Active status toggle */}
